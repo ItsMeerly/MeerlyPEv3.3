@@ -33,14 +33,13 @@ local SPLASH_CHANGELOG = {
     "Upgraded keygate splash layout with update feed.",
     "Brand new UX shell.",
     "Added Read/Write error testing.", 
-    " - Thanks to HGaff on Rscripts."
+    " - Thanks to HGaff on Rscripts.",
 }
 
 local SPLASH_SOCIALS = {
-    { name = "Discord:", value = "meerly | old: #7571" },
-    { name = "Email:", value = "Meerly.GFX@gmail.com" },
-    "Find me through the 'Peak Evolution' Discord:",
-    "https://discord.gg/BdxHP9mT"
+    { name = "Discord", value = "meerly | old: #7571" },
+    { name = "Email", value = "Meerly.GFX@gmail.com" },
+    { name = "PE Discord", value = "https://discord.gg/BdxHP9mT" },
 }
 
 -----------------------
