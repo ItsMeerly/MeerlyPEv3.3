@@ -39,8 +39,8 @@ local SPLASH_CHANGELOG = {
 local SPLASH_SOCIALS = {
     { name = "Discord:", value = "meerly | old: #7571" },
     { name = "Email:", value = "Meerly.GFX@gmail.com" },
-    " Find me through the 'Peak Evolution' Discord "
-    { name = "PE Discord:", value = "https://discord.gg/BdxHP9mT" }
+    "Find me through the 'Peak Evolution' Discord:",
+    "https://discord.gg/BdxHP9mT"
 }
 
 -----------------------
