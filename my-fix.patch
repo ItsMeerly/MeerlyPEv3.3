@@ -1,0 +1,306 @@
+diff --git a/MeerlyPE_Feature_Testing b/MeerlyPE_Feature_Testing
+index c39f267184057539b2e9fb9c9b7dc124f2200b6c..bdc48b07331f7e5ca13d98db7484b1dd0e4f13f5 100644
+--- a/MeerlyPE_Feature_Testing
++++ b/MeerlyPE_Feature_Testing
+@@ -3,50 +3,63 @@
+ -- Automation + Calculators + Console + Performance + Misc + Macro
+ -- ============================================================
+ 
+ -----------------------
+ -- SERVICES
+ -----------------------
+ local Players             = game:GetService("Players")
+ local RunService          = game:GetService("RunService")
+ local Lighting            = game:GetService("Lighting")
+ local UserInputService    = game:GetService("UserInputService")
+ local TeleportService     = game:GetService("TeleportService")
+ local VirtualInputManager = game:GetService("VirtualInputManager")
+ local VirtualUser         = game:GetService("VirtualUser")
+ local Stats               = game:GetService("Stats")
+ local HttpService         = game:GetService("HttpService")
+ 
+ local player = Players.LocalPlayer
+ math.randomseed(os.clock())
+ 
+ -----------------------
+ -- ACCESS GATE CONFIG
+ -----------------------
+ local KEYGATE_LINK = "https://work.ink/2kaV/meerlype-key123"
+ local KEYGATE_KEY = "JoinOathGuildToday!"
+ 
++-- Editable splash content
++local SPLASH_CHANGELOG = {
++    "Build 6.2 stabilized and polished.",
++    "Improved XP calculation consistency.",
++    "Added theme customization controls.",
++    "Upgraded keygate splash layout with update feed.",
++}
++
++local SPLASH_SOCIALS = {
++    { name = "Discord", value = "discord.gg/your-server" },
++    { name = "Email", value = "support@yourmail.com" },
++}
++
+ -----------------------
+ -- CONNECTION TRACKING / SAFE TEARDOWN
+ -----------------------
+ local __destroyed = false
+ local __connections = {}
+ 
+ local function track(conn)
+     if conn then
+         __connections[#__connections + 1] = conn
+     end
+     return conn
+ end
+ 
+ -----------------------
+ -- THEME SYSTEM
+ -----------------------
+ local Theme = {
+     Accent     = Color3.fromRGB(120, 180, 255),
+     Background = Color3.fromRGB(16, 16, 20),
+     Panel      = Color3.fromRGB(22, 22, 28),
+     PanelDark  = Color3.fromRGB(18, 18, 22),
+     Border     = Color3.fromRGB(40, 40, 48),
+     Text       = Color3.fromRGB(235, 235, 240),
+     SubText    = Color3.fromRGB(150, 150, 155),
+ }
+@@ -508,144 +521,223 @@ local function positionKill()
+ end
+ positionKill()
+ track(window:GetPropertyChangedSignal("AbsolutePosition"):Connect(positionKill))
+ track(window:GetPropertyChangedSignal("AbsoluteSize"):Connect(positionKill))
+ track(killBtn.MouseButton1Click:Connect(function()
+     killSwitch("KILL button")
+ end))
+ 
+ -----------------------
+ -- SPLASH / KEYGATE
+ -----------------------
+ local function showSplashGate(onUnlock)
+     setBlur(18)
+ 
+     window.Visible = false
+     killBtn.Visible = false
+ 
+     local splash = Instance.new("Frame")
+     splash.Name = "SplashGate"
+     splash.Parent = gui
+     splash.Size = UDim2.fromScale(1, 1)
+     splash.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+     splash.BackgroundTransparency = 0.2
+     splash.ZIndex = 10000
+ 
++    local function formatBulletedList(lines)
++        local out = {}
++        for _, line in ipairs(lines) do
++            out[#out + 1] = "• " .. tostring(line)
++        end
++        return table.concat(out, "\n")
++    end
++
++    local function formatSocials(lines)
++        local out = {}
++        for _, entry in ipairs(lines) do
++            out[#out + 1] = string.format("%s: %s", tostring(entry.name or ""), tostring(entry.value or ""))
++        end
++        return table.concat(out, "\n")
++    end
++
+     local card = Instance.new("Frame")
+     card.Parent = splash
+     card.AnchorPoint = Vector2.new(0.5, 0.5)
+     card.Position = UDim2.fromScale(0.5, 0.5)
+-    card.Size = UDim2.fromOffset(460, 300)
++    card.Size = UDim2.fromOffset(920, 320)
+     card.BackgroundColor3 = Theme.PanelDark
+     card.BorderSizePixel = 0
+     card.ZIndex = 10001
+     makeRound(card, 8)
+ 
++    local columns = Instance.new("Frame")
++    columns.Parent = card
++    columns.BackgroundTransparency = 1
++    columns.Position = UDim2.fromOffset(16, 14)
++    columns.Size = UDim2.fromOffset(888, 292)
++    columns.ZIndex = 10002
++
++    local rowLayout = Instance.new("UIListLayout")
++    rowLayout.Parent = columns
++    rowLayout.FillDirection = Enum.FillDirection.Horizontal
++    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
++    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Top
++    rowLayout.Padding = UDim.new(0, 12)
++
++    local function makeSidePanel(titleText, bodyText)
++        local panel = Instance.new("Frame")
++        panel.Size = UDim2.fromOffset(228, 292)
++        panel.BackgroundColor3 = Theme.Panel
++        panel.BorderSizePixel = 0
++        panel.ZIndex = 10002
++        makeRound(panel, 8)
++
++        local title = Instance.new("TextLabel")
++        title.Parent = panel
++        title.BackgroundTransparency = 1
++        title.Size = UDim2.fromOffset(196, 28)
++        title.Position = UDim2.fromOffset(16, 14)
++        title.Font = Enum.Font.GothamBold
++        title.TextSize = 18
++        title.TextXAlignment = Enum.TextXAlignment.Left
++        title.TextColor3 = Theme.Text
++        title.Text = titleText
++        title.ZIndex = 10003
++
++        local body = Instance.new("TextLabel")
++        body.Parent = panel
++        body.BackgroundTransparency = 1
++        body.Size = UDim2.fromOffset(196, 236)
++        body.Position = UDim2.fromOffset(16, 46)
++        body.Font = Enum.Font.Gotham
++        body.TextSize = 14
++        body.TextWrapped = true
++        body.TextYAlignment = Enum.TextYAlignment.Top
++        body.TextXAlignment = Enum.TextXAlignment.Left
++        body.TextColor3 = Theme.SubText
++        body.Text = bodyText
++        body.ZIndex = 10003
++
++        return panel
++    end
++
++    local leftPanel = makeSidePanel("Changelog", formatBulletedList(SPLASH_CHANGELOG))
++    leftPanel.Parent = columns
++
++    local gatePanel = Instance.new("Frame")
++    gatePanel.Parent = columns
++    gatePanel.Size = UDim2.fromOffset(420, 292)
++    gatePanel.BackgroundTransparency = 1
++    gatePanel.ZIndex = 10002
++
+     local titleLbl = Instance.new("TextLabel")
+-    titleLbl.Parent = card
++    titleLbl.Parent = gatePanel
+     titleLbl.BackgroundTransparency = 1
+     titleLbl.Size = UDim2.fromOffset(420, 38)
+-    titleLbl.Position = UDim2.fromOffset(20, 18)
++    titleLbl.Position = UDim2.fromOffset(0, 4)
+     titleLbl.Font = Enum.Font.GothamBold
+     titleLbl.TextSize = 24
+     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+     titleLbl.TextColor3 = Theme.Text
+     titleLbl.Text = "Meerly PE v4 Build 6.2"
+     titleLbl.ZIndex = 10002
+ 
+     local subtitleLbl = Instance.new("TextLabel")
+-    subtitleLbl.Parent = card
++    subtitleLbl.Parent = gatePanel
+     subtitleLbl.BackgroundTransparency = 1
+     subtitleLbl.Size = UDim2.fromOffset(420, 24)
+-    subtitleLbl.Position = UDim2.fromOffset(20, 56)
++    subtitleLbl.Position = UDim2.fromOffset(0, 42)
+     subtitleLbl.Font = Enum.Font.Gotham
+     subtitleLbl.TextSize = 14
+     subtitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+     subtitleLbl.TextColor3 = Theme.SubText
+     subtitleLbl.Text = "Open Work.Ink to get your key, then unlock the client."
+     subtitleLbl.ZIndex = 10002
+ 
+     local linkBox = Instance.new("TextBox")
+-    linkBox.Parent = card
++    linkBox.Parent = gatePanel
+     linkBox.Size = UDim2.fromOffset(420, 34)
+-    linkBox.Position = UDim2.fromOffset(20, 95)
++    linkBox.Position = UDim2.fromOffset(0, 83)
+     linkBox.BackgroundColor3 = Theme.Panel
+     linkBox.BorderSizePixel = 0
+     linkBox.Font = Enum.Font.Code
+     linkBox.TextSize = 15
+     linkBox.TextXAlignment = Enum.TextXAlignment.Left
+     linkBox.TextColor3 = Theme.Text
+     linkBox.PlaceholderText = "Work.Ink link"
+     linkBox.Text = KEYGATE_LINK
+     linkBox.ClearTextOnFocus = false
+     linkBox.ZIndex = 10002
+     makeRound(linkBox, 8)
+ 
+     local keyInput = Instance.new("TextBox")
+-    keyInput.Parent = card
++    keyInput.Parent = gatePanel
+     keyInput.Size = UDim2.fromOffset(420, 42)
+-    keyInput.Position = UDim2.fromOffset(20, 144)
++    keyInput.Position = UDim2.fromOffset(0, 132)
+     keyInput.BackgroundColor3 = Theme.Panel
+     keyInput.BorderSizePixel = 0
+     keyInput.Font = Enum.Font.Gotham
+     keyInput.TextSize = 16
+     keyInput.TextColor3 = Theme.Text
+     keyInput.PlaceholderText = "Enter key"
+     keyInput.Text = ""
+     keyInput.ClearTextOnFocus = false
+     keyInput.ZIndex = 10002
+     makeRound(keyInput, 8)
+ 
+     local statusLbl = Instance.new("TextLabel")
+-    statusLbl.Parent = card
++    statusLbl.Parent = gatePanel
+     statusLbl.BackgroundTransparency = 1
+     statusLbl.Size = UDim2.fromOffset(420, 24)
+-    statusLbl.Position = UDim2.fromOffset(20, 194)
++    statusLbl.Position = UDim2.fromOffset(0, 182)
+     statusLbl.Font = Enum.Font.Gotham
+     statusLbl.TextSize = 13
+     statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+     statusLbl.TextColor3 = Theme.SubText
+     statusLbl.Text = ""
+     statusLbl.ZIndex = 10002
+ 
+     local unlockBtn = Instance.new("TextButton")
+-    unlockBtn.Parent = card
++    unlockBtn.Parent = gatePanel
+     unlockBtn.Size = UDim2.fromOffset(420, 40)
+-    unlockBtn.Position = UDim2.fromOffset(20, 230)
++    unlockBtn.Position = UDim2.fromOffset(0, 218)
+     unlockBtn.BackgroundColor3 = Theme.Accent
+     unlockBtn.BorderSizePixel = 0
+     unlockBtn.Font = Enum.Font.GothamBold
+     unlockBtn.TextSize = 15
+     unlockBtn.TextColor3 = Color3.new(1, 1, 1)
+     unlockBtn.Text = "Unlock"
+     unlockBtn.ZIndex = 10002
+     makeRound(unlockBtn, 8)
+ 
++    local rightPanel = makeSidePanel("Socials", formatSocials(SPLASH_SOCIALS))
++    rightPanel.Parent = columns
++
+     local closeBtn = Instance.new("TextButton")
+     closeBtn.Parent = card
+     closeBtn.Size = UDim2.fromOffset(28, 28)
+-    closeBtn.Position = UDim2.fromOffset(424, 8)
++    closeBtn.Position = UDim2.fromOffset(884, 8)
+     closeBtn.BackgroundColor3 = Color3.fromRGB(120, 45, 45)
+     closeBtn.BorderSizePixel = 0
+     closeBtn.Font = Enum.Font.GothamBold
+     closeBtn.TextSize = 16
+     closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+     closeBtn.Text = "X"
+     closeBtn.ZIndex = 10003
+     makeRound(closeBtn, 8)
+ 
+     local function normalizedKey(text)
+         local t = tostring(text or "")
+         t = t:gsub('^%s*"', ""):gsub('"%s*$', "")
+         t = t:gsub("^%s+", ""):gsub("%s+$", "")
+         return t
+     end
+ 
+     local function attemptUnlock()
+         local entered = normalizedKey(keyInput.Text)
+         local required = normalizedKey(KEYGATE_KEY)
+ 
+         if entered == required or string.lower(entered) == string.lower(required) then
+             statusLbl.TextColor3 = Color3.fromRGB(120, 220, 130)
+             statusLbl.Text = "Access granted. Loading client..."
+             task.wait(0.15)
+             splash:Destroy()
