@@ -27,15 +27,20 @@ local KEYGATE_KEY = "JoinOathGuildToday!"
 
 -- Editable splash content
 local SPLASH_CHANGELOG = {
-    "Build 6.2 stabilized and polished.",
-    "Improved XP calculation consistency.",
+    "Build 6.2.2:",
+    "Improved XP calculation logic.",
     "Added theme customization controls.",
     "Upgraded keygate splash layout with update feed.",
+    "Brand new UX shell.",
+    "Added Read/Write error testing.", 
+    " - Thanks to HGaff on Rscripts.",
 }
 
 local SPLASH_SOCIALS = {
-    { name = "Discord", value = "discord.gg/your-server" },
-    { name = "Email", value = "support@yourmail.com" },
+    { name = "Discord:", value = "meerly | old: #7571" },
+    { name = "Email:", value = "Meerly.GFX@gmail.com" },
+    " Find me through the 'Peak Evolution' Discord "
+    { name = "PE Discord:", value = "https://discord.gg/BdxHP9mT" },
 }
 
 -----------------------
