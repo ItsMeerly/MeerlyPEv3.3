@@ -1,11 +1,11 @@
 -- ============================================================
--- PE v4 Build 6.2 — Stable (NEW UX + THEME CONFIGURATION + IMPROVED XP CALC LOGIC)
+-- PE v4 Build 6.2.3 — Stable (XP CALC LOGIC IMPROVED)
 -- Automation + Calculators + Console + Performance + Misc + Macro
 -- ============================================================
 
------------------------
+
 -- SERVICES
------------------------
+
 local Players             = game:GetService("Players")
 local RunService          = game:GetService("RunService")
 local Lighting            = game:GetService("Lighting")
@@ -19,15 +19,15 @@ local HttpService         = game:GetService("HttpService")
 local player = Players.LocalPlayer
 math.randomseed(os.clock())
 
------------------------
+
 -- ACCESS GATE CONFIG
------------------------
+
 local KEYGATE_LINK = "https://work.ink/2kaV/meerlype-key123"
 local KEYGATE_KEY = "JoinOathGuildToday!"
 
--- Editable splash content
+
 local SPLASH_CHANGELOG = {
-    "Build 6.2.2:",
+    "Build 6.2.3:",
     "Improved XP calculation logic.",
     "Added theme customization controls.",
     "Upgraded keygate splash layout with update feed.",
@@ -42,9 +42,9 @@ local SPLASH_SOCIALS = {
     { name = "PE Discord", value = "https://discord.gg/BdxHP9mT" },
 }
 
------------------------
+
 -- CONNECTION TRACKING / SAFE TEARDOWN
------------------------
+
 local __destroyed = false
 local __connections = {}
 
@@ -55,9 +55,9 @@ local function track(conn)
     return conn
 end
 
------------------------
+
 -- THEME SYSTEM
------------------------
+
 local Theme = {
     Accent     = Color3.fromRGB(120, 180, 255),
     Background = Color3.fromRGB(16, 16, 20),
@@ -116,9 +116,9 @@ local function applyTheme(newTheme)
     end
 end
 
------------------------
+
 -- VISUAL FX
------------------------
+
 local Blur = Instance.new("BlurEffect")
 Blur.Size = 0
 Blur.Parent = Lighting
@@ -129,9 +129,9 @@ end
 
 local setTransparency
 
------------------------
+
 -- GLOBAL SINGLETONS & STATE
------------------------
+
 _G.__MeerlyState = _G.__MeerlyState or {
     antiAfkEnabled  = false,
     watchdogEnabled = false,
@@ -141,9 +141,9 @@ _G.__MeerlyState = _G.__MeerlyState or {
 local antiAfkEnabled  = _G.__MeerlyState.antiAfkEnabled
 local watchdogEnabled = _G.__MeerlyState.watchdogEnabled
 
------------------------
+
 -- CORE STATE
------------------------
+
 local running   = true
 
 -- AUTOMATION STATE
@@ -212,9 +212,9 @@ local memoryGuardCapGB = 10
 local lastMemoryGuardAction = 0
 local memoryGuardCooldown = 30
 
------------------------
+
 -- LOGGING SYSTEM
------------------------
+
 local LogLevels = {
     Automation = true,
     Skills     = false,
@@ -246,9 +246,9 @@ function log(level, message)
     if updateConsole then updateConsole() end
 end
 
------------------------
+
 -- UTIL
------------------------
+
 local function randf(a, b)
     return a + math.random() * (b - a)
 end
@@ -386,9 +386,9 @@ local function runFileIOSelfTest(prefix)
     return true, name
 end
 
------------------------
+
 -- ROOT GUI
------------------------
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "MeerlyNW_UI_v4_Build6_2"
 gui.ResetOnSpawn = false
@@ -427,9 +427,9 @@ local function addGloss(target)
     return g
 end
 
------------------------
+
 -- MAIN WINDOW
------------------------
+
 local window = Instance.new("Frame", gui)
 window.Size = UDim2.fromScale(0.46, 0.6)
 window.Position = UDim2.fromScale(0.03, 0.2)
@@ -442,9 +442,9 @@ makeRound(window, 8)
 addStroke(window, Theme.Border, 1.2, 0.35)
 addGloss(window)
 
------------------------
+
 -- FORWARD DECL: KILL SWITCH
------------------------
+
 local memoryGui 
 local function killSwitch(reason)
     if __destroyed then return end
@@ -498,9 +498,9 @@ local function killSwitch(reason)
     end)
 end
 
------------------------
+
 -- KILL SWITCH BUTTON (TOP LAYER)
------------------------
+
 local killBtn = Instance.new("TextButton")
 killBtn.Name = "KillButton"
 killBtn.Parent = gui
@@ -530,9 +530,9 @@ track(killBtn.MouseButton1Click:Connect(function()
     killSwitch("KILL button")
 end))
 
------------------------
+
 -- SPLASH / KEYGATE
------------------------
+
 local function showSplashGate(onUnlock)
     setBlur(18)
 
@@ -642,7 +642,7 @@ local function showSplashGate(onUnlock)
     titleLbl.TextSize = 24
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.TextColor3 = Theme.Text
-    titleLbl.Text = "Meerly PE v4 Build 6.2"
+    titleLbl.Text = "Meerly PE v4 Build 6.2.3"
     titleLbl.ZIndex = 10002
 
     local subtitleLbl = Instance.new("TextLabel")
@@ -843,9 +843,9 @@ content.Size = UDim2.fromScale(0.82, 1)
 content.BackgroundTransparency = 1
 content.ZIndex = 2
 
------------------------
+
 -- PAGES
------------------------
+
 local function createPage(name)
     local page = Instance.new("ScrollingFrame", content)
     page.Name = name
@@ -919,9 +919,9 @@ end
 
 switchPage("Automation")
 
------------------------
--- LAYOUT-FRAME TAGGING (hasty awful bug fix, come back to me later)
------------------------
+
+-- LAYOUT-FRAME TAGGING (come back to me later)
+
 local function markLayoutFrame(frame)
     frame:SetAttribute("__layout", true)
     frame.BackgroundTransparency = 1
@@ -929,9 +929,9 @@ local function markLayoutFrame(frame)
     return frame
 end
 
------------------------
--- WIRE TRANSPARENCY
------------------------
+
+-- WIRE TRANSPARENCY (needs changing)
+
 setTransparency = function(alpha)
     alpha = tonumber(alpha) or 0
     window.BackgroundTransparency = math.clamp(alpha, 0, 0.45)
@@ -958,9 +958,9 @@ setTransparency = function(alpha)
     end
 end
 
------------------------
+
 -- UI HELPERS
------------------------
+
 local function nextOrder(parent)
     local n = (parent:GetAttribute("__lo") or 0) + 1
     parent:SetAttribute("__lo", n)
@@ -1160,9 +1160,9 @@ local function uiFieldRow(parent, labelText, defaultText, labelWidthScale)
     return tb, row
 end
 
--- ============================================================
--- FLOATING MEMORY STATS UI (SEPARATE SCREEN GUI)
--- ============================================================
+
+-- FLOATING MEMORY STATS UI - SEPARATE SCREEN GUI
+
 memoryGui = Instance.new("ScreenGui")
 memoryGui.Name = "MeerlyNW_MemoryStats"
 memoryGui.ResetOnSpawn = false
@@ -1259,9 +1259,9 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
 -- AUTOMATION PAGE
--- ============================================================
+
 do
     local page = Pages.Automation
 
@@ -1368,9 +1368,9 @@ do
     register(note, "TextColor3", "SubText")
 end
 
--- ============================================================
+
 -- AUTO SKILLS LOOP
--- ============================================================
+
 task.spawn(function()
     local staggerIndex = 1
     local lastStaggerFire = 0
@@ -1440,9 +1440,9 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
 -- AUTO CLICKER LOOP
--- ============================================================
+
 local function performClick()
     local pos = UserInputService:GetMouseLocation()
     local x, y = math.floor(pos.X), math.floor(pos.Y)
@@ -1465,9 +1465,9 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
 -- ANTI-AFK LOOP
--- ============================================================
+
 task.spawn(function()
     local interval = 600
     local nextFire = os.clock() + interval
@@ -1486,9 +1486,9 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
 -- MACRO PAGE (record/play/save/load + loop + walkspeed)
--- ============================================================
+
 do
     local page = Pages.Macro
     uiSection(page, "Macro Executor")
@@ -1816,9 +1816,9 @@ do
         "• Save/Load uses writefile/readfile when available."
 end
 
--- ============================================================
+
 -- XP PAGE (v2.4)
--- ============================================================
+
 do
     local page = Pages.XP
     uiSection(page, "XP Calculator (v2.4)")
@@ -1830,13 +1830,13 @@ do
         return tb
     end
 
-    addInput("Auto Damage", "5.45")
-    addInput("Enemy HP", "200,150")
-    addInput("Enemy XP %", "0.05,0.03")
+    addInput("Auto Damage", "0")
+    addInput("Enemy HP", "0,0")
+    addInput("Enemy XP %", "0,0")
     addInput("XP Multiplier", "1")
     addInput("2x Potions (10m)", "0")
     addInput("3x Potions (10m)", "0")
-    addInput("Current XP %", "20")
+    addInput("Current XP %", "0")
 
     uiSection(page, "Skill Modifiers")
 
@@ -1993,9 +1993,9 @@ do
     task.defer(recalcXP)
 end
 
--- ============================================================
+
 -- BOSS PAGE (v2.4)
--- ============================================================
+
 do
     local page = Pages.Boss
     uiSection(page, "Boss Calculator (v2.4)")
@@ -2110,9 +2110,9 @@ do
     task.defer(recalcBoss)
 end
 
--- ============================================================
+
 -- MISC PAGE
--- ============================================================
+
 do
     local page = Pages.Misc
     uiSection(page, "AFK & Safety")
@@ -2257,9 +2257,9 @@ do
         "• Kill Switch destroys everything."
 end
 
--- ============================================================
+
 -- WATCHDOG LOOP
--- ============================================================
+
 local watchdogThreshold = 4
 _G.__MeerlyState.lastHeartbeat = _G.__MeerlyState.lastHeartbeat or os.clock()
 
@@ -2277,9 +2277,9 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
+
 -- PERFORMANCE PAGE
--- ============================================================
+
 do
     local page = Pages.Performance
     uiSection(page, "Performance")
@@ -2435,9 +2435,9 @@ do
     end)
 end
 
--- ============================================================
+
 -- CONFIG PAGE
--- ============================================================
+
 do
     local page = Pages.Config
     uiSection(page, "Config Slots")
@@ -2551,9 +2551,9 @@ do
     end
 end
 
--- ============================================================
+
 -- CONSOLE PAGE
--- ============================================================
+
 do
     local page = Pages.Console
     uiSection(page, "Live System Console")
@@ -2641,9 +2641,9 @@ do
     updateConsole()
 end
 
--- ============================================================
+
 -- THEMES PAGE
--- ============================================================
+
 do
     local page = Pages.Themes
 
@@ -2701,9 +2701,9 @@ do
     uiButton(page, "Ultra Light", function() setTransparency(0.3) end)
 end
 
--- ============================================================
+
 -- HELP PAGE
--- ============================================================
+
 do
     local page = Pages.Help
     uiSection(page, "MeerlyNW — Peak Evolution")
@@ -2719,25 +2719,24 @@ do
     info.TextColor3 = Theme.SubText
     register(info, "TextColor3", "SubText")
     info.Text = [[
-Peak Evolution v4 Build 6.2 — Stable
+Peak Evolution v4 Build 6.2.3 — Stable
 
 Hotkeys:
 • ;  Toggle main UI
 • F6 Toggle Auto Clicker
 • F7 Toggle Macro Record/Stop
-• Macro now records G key too
 • END Kill switch (destroy all UI + stop loops)
 
 Notes:
 • Memory Stats UI is separate and does NOT hide with the main UI.
-• Macro Save/Load uses writefile/readfile (available in some environments).
-• Themes includes Accent RGB color picker (saved in Config).
+• Macro and Config Save/Load uses writefile/readfile (available in some environments).
+• Themes Accent RGB color picker is now saved in Config.
 ]]
 end
 
--- ============================================================
+
 -- UI TOGGLE (;) + HOTKEYS + KILL SWITCH
--- ============================================================
+
 local UI_TOGGLE_KEY = Enum.KeyCode.Semicolon
 
 track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -2778,7 +2777,7 @@ pcall(function()
         dumpLogsToFile("game close")
     end)
 end)
--- ============================================================
+
 -- INITIAL LOG
--- ============================================================
-log("System", "v4 Build 6.2 loaded")
+
+log("System", "v4 Build 6.2.3 loaded")
