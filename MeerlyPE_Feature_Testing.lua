@@ -1,5 +1,5 @@
 -- ============================================================
--- PE v4 Build 6.2.3 — Stable (XP CALC LOGIC IMPROVED)
+-- PE v4 Build 6.2.3 — Dev Build (XP CALC LOGIC IMPROVED)
 -- Automation + Calculators + Console + Performance + Misc + Macro
 -- ============================================================
 
@@ -23,7 +23,7 @@ math.randomseed(os.clock())
 -- ACCESS GATE CONFIG
 
 local KEYGATE_LINK = "https://work.ink/2kaV/meerlype-key123"
-local KEYGATE_KEY = "JoinOathGuildToday!"
+local KEYGATE_KEY = "1234"
 
 
 local SPLASH_CHANGELOG = {
