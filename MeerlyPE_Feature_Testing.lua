@@ -1,6 +1,6 @@
 -- ============================================================
--- PE v4 Build 6.2.3 — Dev Build (XP CALC LOGIC IMPROVED)
--- Automation + Calculators + Console + Misc + Macro
+-- PE v4 Build 7 — Dev Build (UX REWORK + CLICKER GAME + STATISTICS)
+-- Automation + Calculators + Minigame + Console + Misc + Macro
 -- ============================================================
 
 
@@ -27,13 +27,13 @@ local KEYGATE_KEY = "1234"
 
 
 local SPLASH_CHANGELOG = {
-    "Build 6.2.3:",
-    "Improved XP calculation logic.",
-    "Added theme customization controls.",
-    "Upgraded keygate splash layout with update feed.",
-    "Brand new UX shell.",
-    "Added Read/Write error testing.", 
-    " - Thanks to HGaff on Rscripts.",
+    "Build 7:",
+    "Sidebar / Page Rework.",
+    "Added minigame 'Clicker'.",
+    "Added Statistics.",
+    "Merged Calculators.",
+    "Merged Misc / Performance", 
+    "Added some level of persistence (read/write required).",
 }
 
 local SPLASH_SOCIALS = {
@@ -123,18 +123,11 @@ local Blur = Instance.new("BlurEffect")
 Blur.Size = 0
 Blur.Parent = Lighting
 
-local setTransparency
-local uiTransparencyAlpha = 0
-local blurAmount = 0
-
 local function setBlur(amount)
-    blurAmount = math.max(0, tonumber(amount) or 0)
-    if not Blur or not Blur.Parent then
-        Blur = Instance.new("BlurEffect")
-        Blur.Parent = Lighting
-    end
-    Blur.Size = blurAmount
+    Blur.Size = amount
 end
+
+local setTransparency
 
 
 -- GLOBAL SINGLETONS & STATE
@@ -929,7 +922,7 @@ local function showSplashGate(onUnlock)
     titleLbl.TextSize = 24
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.TextColor3 = Theme.Text
-    titleLbl.Text = "Meerly PE v4 Build 6.2.3"
+    titleLbl.Text = "Meerly PE v4 Build 7"
     titleLbl.ZIndex = 10002
 
     local subtitleLbl = Instance.new("TextLabel")
@@ -1198,7 +1191,7 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "Calculators", "Config", "Themes", "Clicker", "Statistics", "Help" }
+local pageNames = { "Automation", "Macro", "Calculators", "Misc", "Clicker", "Statistics", "Config", "Themes", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
@@ -1223,25 +1216,17 @@ end
 
 -- WIRE TRANSPARENCY (needs changing)
 
-local function lockTransparency(obj)
-    if obj and obj.SetAttribute then
-        obj:SetAttribute("__lockTransparency", true)
-    end
-    return obj
-end
-
 setTransparency = function(alpha)
     alpha = tonumber(alpha) or 0
-    uiTransparencyAlpha = math.clamp(alpha, 0, 0.45)
-    window.BackgroundTransparency = uiTransparencyAlpha
-    topBar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
-    sidebar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
-    body.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.35)
+    window.BackgroundTransparency = math.clamp(alpha, 0, 0.45)
+    topBar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
+    sidebar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
+    body.BackgroundTransparency = math.clamp(alpha, 0, 0.35)
 
     for _, obj in ipairs(window:GetDescendants()) do
         if obj:IsA("Frame") and obj ~= body and obj ~= content then
-            if not obj:GetAttribute("__layout") and not obj:GetAttribute("__lockTransparency") then
-                obj.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
+            if not obj:GetAttribute("__layout") then
+                obj.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
             end
         end
     end
@@ -1249,8 +1234,8 @@ setTransparency = function(alpha)
     for _, page in pairs(Pages) do
         for _, child in ipairs(page:GetDescendants()) do
             if child:IsA("Frame") then
-                if not child:GetAttribute("__layout") and not child:GetAttribute("__lockTransparency") then
-                    child.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
+                if not child:GetAttribute("__layout") then
+                    child.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
                 end
             end
         end
@@ -2839,7 +2824,6 @@ do
     shapeCanvas.Size = UDim2.fromOffset(94, 94)
     shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
     shapeCanvas.BackgroundTransparency = 1
-    lockTransparency(shapeCanvas)
 
     local shapeEdges = table.create(9)
     for i = 1, 9 do
@@ -3270,8 +3254,6 @@ do
             memoryGuardMode = memoryGuardMode,
             memoryGuardCapGB = memoryGuardCapGB,
             theme = serializeTheme(Theme),
-            transparencyAlpha = uiTransparencyAlpha,
-            blurAmount = blurAmount,
         }
     end
 
@@ -3302,12 +3284,6 @@ do
         if setfpscap and fpsCapEnabled then pcall(function() setfpscap(targetFPS) end) end
         if cfg.theme then
             pcall(function() applyTheme(deserializeTheme(cfg.theme)) end)
-        end
-        if cfg.transparencyAlpha ~= nil and setTransparency then
-            pcall(function() setTransparency(cfg.transparencyAlpha) end)
-        end
-        if cfg.blurAmount ~= nil then
-            pcall(function() setBlur(cfg.blurAmount) end)
         end
         log("System", "Config applied")
     end
@@ -3534,20 +3510,18 @@ do
     info.TextColor3 = Theme.SubText
     register(info, "TextColor3", "SubText")
     info.Text = [[
-Peak Evolution v4 Build 6.2.3 — Stable
+Peak Evolution v4 Build 7 — Stable
 
 Hotkeys:
 • ;  Toggle main UI
 • F6 Toggle Auto Clicker
 • F7 Toggle Macro Record/Stop
-• END Kill switch (destroy all UI + stop loops)
+• END Kill switch
 
 Notes:
 • Memory Stats UI is separate and does NOT hide with the main UI.
 • Macro and Config Save/Load uses writefile/readfile (available in some environments).
-• Themes Accent RGB color picker is now saved in Config.
-• Clicker has top-level ON/OFF, upgrade grid, and scaling shape milestones.
-• Clicker highscore autosaves every 10 minutes and on close.
+• Clicker highscore & Progression autosave every 10 minutes and on close.
 ]]
 end
 
@@ -3599,4 +3573,4 @@ end)
 
 -- INITIAL LOG
 
-log("System", "v4 Build 6.2.3 loaded")
+log("System", "v4 Build 7 loaded")
