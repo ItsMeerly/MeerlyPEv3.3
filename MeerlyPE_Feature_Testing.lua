@@ -212,6 +212,19 @@ local memoryGuardCapGB = 10
 local lastMemoryGuardAction = 0
 local memoryGuardCooldown = 30
 
+-- MINI CLICKER GAME STATE (LOW MEMORY)
+local clickerScore = 0
+local clickerHighScore = 0
+local clickerUpgradeLevel = 0
+local clickerRunning = false
+local clickPower = 1
+local passiveIncomePerSec = 0
+local clickerLastSave = 0
+local clickerHighScoreFile = "clicker_highscore.txt"
+local clickerStateFile = "clicker_state.txt"
+local CLICKER_AUTOSAVE_SEC = 600
+local CLICKER_STATE_CULL_SEC = 30
+
 
 -- LOGGING SYSTEM
 
@@ -386,6 +399,61 @@ local function runFileIOSelfTest(prefix)
     return true, name
 end
 
+local function loadClickerHighScore()
+    local okRead, raw = safeReadFile(clickerHighScoreFile)
+    if okRead then
+        local val = tonumber(raw)
+        if val then
+            clickerHighScore = math.max(0, math.floor(val))
+        end
+    end
+
+    local okState, rawState = safeReadFile(clickerStateFile)
+    if okState and type(rawState) == "string" then
+        local score, level = rawState:match("^(%-?%d+)|(%-?%d+)$")
+        local parsedScore = tonumber(score)
+        local parsedLevel = tonumber(level)
+        if parsedScore and parsedLevel then
+            clickerScore = math.max(0, math.floor(parsedScore))
+            clickerUpgradeLevel = math.max(0, math.floor(parsedLevel))
+            clickPower = 1 + clickerUpgradeLevel
+            passiveIncomePerSec = clickerUpgradeLevel
+            if clickerScore > clickerHighScore then
+                clickerHighScore = clickerScore
+            end
+        end
+    end
+end
+
+local function saveClickerState(force)
+    if not force and os.clock() - clickerLastSave < CLICKER_AUTOSAVE_SEC then
+        return
+    end
+    clickerLastSave = os.clock()
+
+    local okState, errState = safeWriteFile(clickerStateFile, string.format("%d|%d", math.floor(clickerScore), math.floor(clickerUpgradeLevel)))
+    if not okState then
+        log("Error", "Clicker state save failed: " .. tostring(errState))
+    end
+
+    local okHigh, errHigh = safeWriteFile(clickerHighScoreFile, tostring(math.floor(clickerHighScore)))
+    if not okHigh then
+        log("Error", "Clicker highscore save failed: " .. tostring(errHigh))
+    end
+end
+
+local function saveClickerHighScore(force)
+    saveClickerState(force)
+end
+
+local function clickerUpgradeCost(level)
+    return 15 + (level * 10)
+end
+
+
+
+
+loadClickerHighScore()
 
 -- ROOT GUI
 
@@ -455,6 +523,10 @@ local function killSwitch(reason)
 
     pcall(function()
         log("System", "Kill switch triggered" .. (reason and (": " .. tostring(reason)) or ""))
+    end)
+
+    pcall(function()
+        saveClickerHighScore(true)
     end)
 
     pcall(function()
@@ -911,7 +983,7 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Config", "Console", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Clicker", "Config", "Console", "Themes", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
@@ -2441,6 +2513,128 @@ do
 end
 
 
+-- CLICKER PAGE
+
+do
+    local page = Pages.Clicker
+
+    uiSection(page, "AFK Mini Clicker (Lightweight)")
+
+    local statusLabel = Instance.new("TextLabel", page)
+    statusLabel.LayoutOrder = nextOrder(page)
+    statusLabel.Size = UDim2.new(1, 0, 0, 52)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.TextYAlignment = Enum.TextYAlignment.Top
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 13
+    statusLabel.TextWrapped = true
+    statusLabel.TextColor3 = Theme.SubText
+    register(statusLabel, "TextColor3", "SubText")
+
+    local function refreshClickerView()
+        local nextCost = clickerUpgradeCost(clickerUpgradeLevel)
+        statusLabel.Text = string.format(
+            "State: %s\nScore: %d | High: %d | Power: %d | Passive: %d/s | Upgrade Cost: %d",
+            clickerRunning and "RUNNING" or "PAUSED",
+            clickerScore,
+            clickerHighScore,
+            clickPower,
+            passiveIncomePerSec,
+            nextCost
+        )
+    end
+    ThemeRefreshers[#ThemeRefreshers + 1] = refreshClickerView
+
+    uiButton(page, "Click (+Power)", function()
+        if not clickerRunning then
+            return
+        end
+        clickerScore += clickPower
+        if clickerScore > clickerHighScore then
+            clickerHighScore = clickerScore
+        end
+        refreshClickerView()
+    end)
+
+    uiButton(page, "Buy Upgrade (+1 Power, +1/s Passive)", function()
+        if not clickerRunning then
+            return
+        end
+        local cost = clickerUpgradeCost(clickerUpgradeLevel)
+        if clickerScore < cost then
+            log("Clicker", string.format("Need %d score for next upgrade", cost))
+            return
+        end
+        clickerScore -= cost
+        clickerUpgradeLevel += 1
+        clickPower = 1 + clickerUpgradeLevel
+        passiveIncomePerSec = clickerUpgradeLevel
+        if clickerScore > clickerHighScore then
+            clickerHighScore = clickerScore
+        end
+        refreshClickerView()
+    end)
+
+    local _, setRunBtnState = uiToggle(page, "Mini Game", clickerRunning, function(v)
+        clickerRunning = v
+        refreshClickerView()
+    end)
+    setRunBtnState(clickerRunning, true)
+
+    uiButton(page, "Reset Current Run", function()
+        clickerScore = 0
+        clickerUpgradeLevel = 0
+        clickPower = 1
+        passiveIncomePerSec = 0
+        refreshClickerView()
+    end)
+
+    uiButton(page, "Force Save Highscore", function()
+        saveClickerHighScore(true)
+        log("Clicker", "Highscore saved to " .. clickerHighScoreFile)
+    end)
+
+    uiButton(page, "Show Save Path", function()
+        log("Clicker", "Highscore file: " .. clickerHighScoreFile)
+        log("Clicker", "State file: " .. clickerStateFile)
+    end)
+
+    refreshClickerView()
+
+    task.spawn(function()
+        local lastTick = os.clock()
+        local lastCull = os.clock()
+        while running and not __destroyed do
+            task.wait(1)
+            local now = os.clock()
+
+            if clickerRunning and passiveIncomePerSec > 0 then
+                local dt = now - lastTick
+                if dt > 0 then
+                    clickerScore += math.floor(passiveIncomePerSec * dt)
+                    if clickerScore > clickerHighScore then
+                        clickerHighScore = clickerScore
+                    end
+                end
+            end
+            lastTick = now
+
+            if now - clickerLastSave >= CLICKER_AUTOSAVE_SEC then
+                saveClickerHighScore(true)
+            end
+
+            if now - lastCull >= CLICKER_STATE_CULL_SEC then
+                lastCull = now
+                collectgarbage("step", 64)
+            end
+
+            refreshClickerView()
+        end
+    end)
+end
+
+
 -- CONFIG PAGE
 
 do
@@ -2736,6 +2930,7 @@ Notes:
 • Memory Stats UI is separate and does NOT hide with the main UI.
 • Macro and Config Save/Load uses writefile/readfile (available in some environments).
 • Themes Accent RGB color picker is now saved in Config.
+• Clicker highscore autosaves every 10 minutes and on close.
 ]]
 end
 
@@ -2779,6 +2974,7 @@ end))
 
 pcall(function()
     game:BindToClose(function()
+        saveClickerHighScore(true)
         dumpLogsToFile("game close")
     end)
 end)
