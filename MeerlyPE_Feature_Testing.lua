@@ -1339,7 +1339,7 @@ local function uiCollapsible(parent, title, defaultOpen)
 
     local open = defaultOpen ~= false
     local function refresh()
-        head.Text = string.format("%s %s", open and "▼" or "▶", title)
+        head.Text = string.format("%s %s", open and "v" or ">", title)
         local bodyH = open and (bodyLayout.AbsoluteContentSize.Y + 6) or 0
         body.Size = UDim2.new(1, 0, 0, bodyH)
         holder.Size = UDim2.new(1, 0, 0, 34 + bodyH)
