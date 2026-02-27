@@ -801,7 +801,7 @@ local function positionKill()
     local p = window.AbsolutePosition
     local s = window.AbsoluteSize
     killBtn.AnchorPoint = Vector2.new(0, 1)
-    killBtn.Position = UDim2.fromOffset(p.X + 12, p.Y + s.Y - 12)
+    killBtn.Position = UDim2.fromOffset(p.X + 12, p.Y + s.Y + 12)
 end
 positionKill()
 track(window:GetPropertyChangedSignal("AbsolutePosition"):Connect(positionKill))
@@ -1191,11 +1191,15 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Clicker", "Statistics", "Config", "Console", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "Calculators", "Config", "Themes", "Clicker", "Statistics", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
 end
+
+-- hidden utility pages kept for existing tools
+createPage("Misc")
+createPage("Console")
 
 switchPage("Automation")
 
@@ -1283,6 +1287,61 @@ local function uiSection(parent, text)
     lbl.TextColor3 = Theme.Text
     register(lbl, "TextColor3", "Text")
     return lbl
+end
+
+local function uiCollapsible(parent, title, defaultOpen)
+    local holder = Instance.new("Frame", parent)
+    holder.LayoutOrder = nextOrder(parent)
+    holder.Size = UDim2.new(1, 0, 0, 34)
+    markLayoutFrame(holder)
+
+    local head = Instance.new("TextButton", holder)
+    head.Size = UDim2.new(1, 0, 0, 32)
+    head.BackgroundColor3 = Theme.Panel
+    head.BorderSizePixel = 0
+    head.Font = Enum.Font.GothamBold
+    head.TextSize = 13
+    head.TextXAlignment = Enum.TextXAlignment.Left
+    head.TextColor3 = Theme.Text
+    head.AutoButtonColor = false
+    makeRound(head, 6)
+    addStroke(head, Theme.Border, 1, 0.5)
+    register(head, "BackgroundColor3", "Panel")
+    register(head, "TextColor3", "Text")
+
+    local body = Instance.new("Frame", holder)
+    body.Position = UDim2.fromOffset(0, 36)
+    body.Size = UDim2.new(1, 0, 0, 0)
+    markLayoutFrame(body)
+
+    local bodyLayout = Instance.new("UIListLayout", body)
+    bodyLayout.Padding = UDim.new(0, 10)
+    bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local bodyPadding = Instance.new("UIPadding", body)
+    bodyPadding.PaddingLeft = UDim.new(0, 6)
+    bodyPadding.PaddingRight = UDim.new(0, 6)
+
+    local open = defaultOpen ~= false
+    local function refresh()
+        head.Text = string.format("%s %s", open and "▼" or "▶", title)
+        local bodyH = open and (bodyLayout.AbsoluteContentSize.Y + 6) or 0
+        body.Size = UDim2.new(1, 0, 0, bodyH)
+        holder.Size = UDim2.new(1, 0, 0, 34 + bodyH)
+        body.Visible = open
+    end
+
+    track(head.MouseButton1Click:Connect(function()
+        open = not open
+        refresh()
+    end))
+    track(bodyLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        if open then refresh() end
+    end))
+
+    ThemeRefreshers[#ThemeRefreshers + 1] = refresh
+    refresh()
+    return body
 end
 
 local function uiToggle(parent, text, initial, callback)
@@ -2099,37 +2158,39 @@ do
 end
 
 
--- XP PAGE (v3)
+-- CALCULATORS PAGE
 
 do
-    local page = Pages.XP
-    uiSection(page, "XP Calculator (v3)")
+    local page = Pages.Calculators
+    uiSection(page, "Calculators")
+
+    local xpBody = uiCollapsible(page, "XP Calculator (v3)", true)
 
     local inputs = {}
-    local function addInput(labelText, defaultText)
-        local tb = uiFieldRow(page, labelText, defaultText, 0.42)
+    local function addXPInput(labelText, defaultText)
+        local tb = uiFieldRow(xpBody, labelText, defaultText, 0.42)
         inputs[labelText] = tb
         return tb
     end
 
-    addInput("Auto Damage", "0")
-    addInput("Enemy HP", "0,0")
-    addInput("Enemy XP %", "0,0")
-    addInput("XP Multiplier", "1")
-    addInput("2x Potions (10m)", "0")
-    addInput("3x Potions (10m)", "0")
-    addInput("Current XP %", "0")
+    addXPInput("Auto Damage", "0")
+    addXPInput("Enemy HP", "0,0")
+    addXPInput("Enemy XP %", "0,0")
+    addXPInput("XP Multiplier", "1")
+    addXPInput("2x Potions (10m)", "0")
+    addXPInput("3x Potions (10m)", "0")
+    addXPInput("Current XP %", "0")
 
-    uiSection(page, "Skill Modifiers")
+    uiSection(xpBody, "Skill Modifiers")
 
     local calcSkills = { Q = false, E = false, R = false }
     local skillMultiplier = { Q = 200, E = 200, R = 200 }
 
-    local rowSkill = uiRow3(page)
-    local rowMult  = uiRow3(page)
+    local rowSkill = uiRow3(xpBody)
+    local rowMult  = uiRow3(xpBody)
 
-    local r1 = Instance.new("TextLabel", page)
-    r1.LayoutOrder = nextOrder(page)
+    local r1 = Instance.new("TextLabel", xpBody)
+    r1.LayoutOrder = nextOrder(xpBody)
     r1.Size = UDim2.new(1, 0, 0, 24)
     r1.BackgroundTransparency = 1
     r1.Font = Enum.Font.Gotham
@@ -2139,8 +2200,8 @@ do
     register(r1, "TextColor3", "SubText")
     r1.Text = "XP/hr: --"
 
-    local r2 = Instance.new("TextLabel", page)
-    r2.LayoutOrder = nextOrder(page)
+    local r2 = Instance.new("TextLabel", xpBody)
+    r2.LayoutOrder = nextOrder(xpBody)
     r2.Size = UDim2.new(1, 0, 0, 24)
     r2.BackgroundTransparency = 1
     r2.Font = Enum.Font.Gotham
@@ -2150,9 +2211,9 @@ do
     register(r2, "TextColor3", "SubText")
     r2.Text = "Time to 100%: --"
 
-    local function splitCsvNums(s)
+    local function splitCsvNums(sv)
         local out = {}
-        for token in string.gmatch((s or ""), "([^,]+)") do
+        for token in string.gmatch((sv or ""), "([^,]+)") do
             local cleaned = token:gsub("%%", ""):gsub("%s+", "")
             local n = tonumber(cleaned)
             if n then out[#out+1] = n end
@@ -2173,7 +2234,6 @@ do
         if not dmg or not curXP then return end
 
         local totalDPS = effectiveDPS(dmg, calcSkills, skillMultiplier)
-
         local hps = splitCsvNums(inputs["Enemy HP"].Text)
         local xps = splitCsvNums(inputs["Enemy XP %"].Text)
 
@@ -2198,9 +2258,9 @@ do
         local secondsTo100 = 0
 
         local segments = {
-            { name = "3x", seconds = pot3x * 600, mult = 3 },
-            { name = "2x", seconds = pot2x * 600, mult = 2 },
-            { name = "1x", seconds = math.huge, mult = 1 },
+            { seconds = pot3x * 600, mult = 3 },
+            { seconds = pot2x * 600, mult = 2 },
+            { seconds = math.huge, mult = 1 },
         }
 
         if baseXPps <= 0 then
@@ -2208,7 +2268,6 @@ do
         else
             for _, seg in ipairs(segments) do
                 if remainingXP <= 0 then break end
-
                 local rate = baseXPps * seg.mult
                 if rate <= 0 then
                     secondsTo100 = math.huge
@@ -2279,47 +2338,42 @@ do
         track(tb.FocusLost:Connect(recalcXP))
     end
 
-    uiButton(page, "Recalculate", recalcXP)
+    uiButton(xpBody, "Recalculate", recalcXP)
     task.defer(recalcXP)
-end
 
--- BOSS PAGE (v2.4)
-
-do
-    local page = Pages.Boss
-    uiSection(page, "Boss Calculator (v2.4)")
+    local bossBody = uiCollapsible(page, "Boss Calculator (v2.4)", false)
 
     local bossInputs = {}
-    local function addInput(labelText, defaultText)
-        local tb = uiFieldRow(page, labelText, defaultText, 0.42)
+    local function addBossInput(labelText, defaultText)
+        local tb = uiFieldRow(bossBody, labelText, defaultText, 0.42)
         bossInputs[labelText] = tb
         return tb
     end
 
-    addInput("Self HP", "1000")
-    addInput("Self DPS", "50")
-    addInput("Enemy HP", "2000")
-    addInput("Enemy DMG", "100")
+    addBossInput("Self HP", "1000")
+    addBossInput("Self DPS", "50")
+    addBossInput("Enemy HP", "2000")
+    addBossInput("Enemy DMG", "100")
 
-    uiSection(page, "Skill Modifiers")
+    uiSection(bossBody, "Skill Modifiers")
 
     local bossCalcSkills = { Q = false, E = false, R = false }
     local bossSkillMultiplier = { Q = 200, E = 200, R = 200 }
 
-    local rowSkill = uiRow3(page)
-    local rowMult  = uiRow3(page)
+    local rowSkillB = uiRow3(bossBody)
+    local rowMultB  = uiRow3(bossBody)
 
-    uiSection(page, "Boss Mode")
+    uiSection(bossBody, "Boss Mode")
     local bossModeEnabled = false
     local bossModeBtn
-    bossModeBtn = uiButton(page, "Boss Mode: OFF", function()
+    bossModeBtn = uiButton(bossBody, "Boss Mode: OFF", function()
         bossModeEnabled = not bossModeEnabled
         bossModeBtn.Text = "Boss Mode: " .. (bossModeEnabled and "ON" or "OFF")
     end)
 
-    uiSection(page, "Result")
-    local br = Instance.new("TextLabel", page)
-    br.LayoutOrder = nextOrder(page)
+    uiSection(bossBody, "Result")
+    local br = Instance.new("TextLabel", bossBody)
+    br.LayoutOrder = nextOrder(bossBody)
     br.Size = UDim2.new(1, 0, 0, 32)
     br.BackgroundTransparency = 1
     br.Font = Enum.Font.Gotham
@@ -2360,8 +2414,8 @@ do
     track(bossModeBtn.MouseButton1Click:Connect(recalcBoss))
 
     for _, k in ipairs({ "Q", "E", "R" }) do
-        local sbtn = uiSmallBtn(rowSkill, k .. ": OFF")
-        local mbtn = uiSmallBtn(rowMult, bossSkillMultiplier[k] .. "%")
+        local sbtn = uiSmallBtn(rowSkillB, k .. ": OFF")
+        local mbtn = uiSmallBtn(rowMultB, bossSkillMultiplier[k] .. "%")
 
         local function refreshBossSkillBtn()
             sbtn.Text = k .. ": " .. (bossCalcSkills[k] and "ON" or "OFF")
@@ -2395,7 +2449,7 @@ do
         track(tb.FocusLost:Connect(recalcBoss))
     end
 
-    uiButton(page, "Recalculate", recalcBoss)
+    uiButton(bossBody, "Recalculate", recalcBoss)
     task.defer(recalcBoss)
 end
 
@@ -3029,7 +3083,7 @@ do
 
     local progressionPreview = Instance.new("Frame", progressionCard)
     progressionPreview.Size = UDim2.fromOffset(86, 62)
-    progressionPreview.Position = UDim2.new(1, -94, 0.5, -12)
+    progressionPreview.Position = UDim2.new(1, -94, 0, 18)
     progressionPreview.BackgroundTransparency = 1
 
     local previewEdges = table.create(9)
@@ -3063,6 +3117,15 @@ do
         local n = math.clamp(clickerShapeVertices, 3, 9)
         local radius = 18
         local cx, cy = 43, 24
+        local palette = {
+            Color3.fromRGB(120, 180, 255),
+            Color3.fromRGB(140, 230, 160),
+            Color3.fromRGB(255, 175, 95),
+            Color3.fromRGB(220, 135, 255),
+            Color3.fromRGB(255, 110, 145),
+            Color3.fromRGB(255, 230, 120),
+        }
+        local cycleColor = palette[(clickerShapeCycle % #palette) + 1]
 
         for i = 1, 9 do
             local edge = previewEdges[i]
@@ -3077,6 +3140,7 @@ do
                 local len = math.sqrt((dx * dx) + (dy * dy))
 
                 edge.Visible = true
+                edge.BackgroundColor3 = cycleColor
                 edge.Size = UDim2.fromOffset(math.max(2, len), 2)
                 edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
                 edge.Rotation = angleDeg(dy, dx)
@@ -3086,6 +3150,7 @@ do
         end
 
         previewCycle.Text = string.format("C%d", clickerShapeCycle)
+        previewCycle.TextColor3 = cycleColor
     end
 
     local function refreshStatisticsView()
