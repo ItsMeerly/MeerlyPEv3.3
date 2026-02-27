@@ -1191,7 +1191,7 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "Calculators", "Misc", "Clicker", "Statistics", "Config", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "Calculators", "Misc", "Clicker", "Statistics", "Config", "Themes", "Console", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
