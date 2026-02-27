@@ -123,11 +123,18 @@ local Blur = Instance.new("BlurEffect")
 Blur.Size = 0
 Blur.Parent = Lighting
 
-local function setBlur(amount)
-    Blur.Size = amount
-end
-
 local setTransparency
+local uiTransparencyAlpha = 0
+local blurAmount = 0
+
+local function setBlur(amount)
+    blurAmount = math.max(0, tonumber(amount) or 0)
+    if not Blur or not Blur.Parent then
+        Blur = Instance.new("BlurEffect")
+        Blur.Parent = Lighting
+    end
+    Blur.Size = blurAmount
+end
 
 
 -- GLOBAL SINGLETONS & STATE
@@ -239,6 +246,25 @@ local clickerShapeProgress = 0
 local clickerShapeMilestone = 25
 local clickerPassiveCarry = 0
 
+-- STATISTICS / ACHIEVEMENTS
+local statisticsFile = "statistics_data.json"
+local statisticsSessionStartClock = os.clock()
+local statisticsData = {
+    longestSessionSeconds = 0,
+    totalSkillActivations = 0,
+    clickerHighScore = 0,
+    sessionActive = false,
+    sessionStartTime = 0,
+    lastSessionReason = "",
+}
+
+local STAT_TIERS = {
+    None = { label = "Grey", color = Color3.fromRGB(96, 96, 108) },
+    Bronze = { label = "Bronze", color = Color3.fromRGB(184, 115, 51) },
+    Silver = { label = "Silver", color = Color3.fromRGB(170, 170, 178) },
+    Gold = { label = "Gold", color = Color3.fromRGB(235, 198, 64) },
+}
+
 
 -- LOGGING SYSTEM
 
@@ -342,6 +368,78 @@ local function safeReadFile(path)
         return ok, data
     end
     return false, "readfile not available"
+end
+
+
+local function formatDurationHM(totalSeconds)
+    totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+    local h = math.floor(totalSeconds / 3600)
+    local m = math.floor((totalSeconds % 3600) / 60)
+    return string.format("%dh %02dm", h, m)
+end
+
+local function getTierByThreshold(value, bronze, silver, gold)
+    value = tonumber(value) or 0
+    if value >= gold then return "Gold" end
+    if value >= silver then return "Silver" end
+    if value >= bronze then return "Bronze" end
+    return "None"
+end
+
+local function saveStatistics()
+    local payload = HttpService:JSONEncode(statisticsData)
+    local ok, err = safeWriteFile(statisticsFile, payload)
+    if not ok then
+        log("Error", "Statistics save failed: " .. tostring(err))
+    end
+    return ok
+end
+
+local function loadStatistics()
+    local okRead, raw = safeReadFile(statisticsFile)
+    if okRead and type(raw) == "string" and #raw > 0 then
+        local okDecode, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
+        if okDecode and type(parsed) == "table" then
+            statisticsData.longestSessionSeconds = math.max(0, math.floor(tonumber(parsed.longestSessionSeconds) or 0))
+            statisticsData.totalSkillActivations = math.max(0, math.floor(tonumber(parsed.totalSkillActivations) or 0))
+            statisticsData.clickerHighScore = math.max(0, math.floor(tonumber(parsed.clickerHighScore) or 0))
+            statisticsData.sessionActive = parsed.sessionActive == true
+            statisticsData.sessionStartTime = math.max(0, math.floor(tonumber(parsed.sessionStartTime) or 0))
+            statisticsData.lastSessionReason = tostring(parsed.lastSessionReason or "")
+        end
+    end
+
+    if statisticsData.sessionActive and statisticsData.sessionStartTime > 0 then
+        local recoveredSeconds = math.max(0, os.time() - statisticsData.sessionStartTime)
+        if recoveredSeconds > statisticsData.longestSessionSeconds then
+            statisticsData.longestSessionSeconds = recoveredSeconds
+            log("System", "Recovered session length from previous run: " .. formatDurationHM(recoveredSeconds))
+        end
+    end
+
+    statisticsData.sessionActive = true
+    statisticsData.sessionStartTime = os.time()
+    statisticsData.lastSessionReason = "running"
+end
+
+local function finalizeSessionStatistics(reason)
+    local elapsed = math.max(0, math.floor(os.clock() - statisticsSessionStartClock))
+    if elapsed > statisticsData.longestSessionSeconds then
+        statisticsData.longestSessionSeconds = elapsed
+    end
+
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+    end
+
+    statisticsData.sessionActive = false
+    statisticsData.lastSessionReason = tostring(reason or "session_end")
+    saveStatistics()
+end
+
+local function incrementSkillActivation(count)
+    count = math.max(1, math.floor(tonumber(count) or 1))
+    statisticsData.totalSkillActivations += count
 end
 
 
@@ -485,7 +583,11 @@ local function loadClickerHighScore()
 
     local okState, rawState = safeReadFile(clickerStateFile)
     if okState and type(rawState) == "string" then
-        local scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        local scorePart, upgradesPart, vPart, cPart, pPart, mPart = rawState:match("^(%-?%d+)|([^|]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)|(%-?%d+)$")
+        if not scorePart then
+            scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        end
+
         local parsedScore = tonumber(scorePart)
         if parsedScore then
             clickerScore = math.max(0, math.floor(parsedScore))
@@ -500,6 +602,16 @@ local function loadClickerHighScore()
             end
         end
 
+        if vPart and cPart and pPart and mPart then
+            clickerShapeVertices = math.clamp(math.floor(tonumber(vPart) or 3), 3, 9)
+            clickerShapeCycle = math.max(0, math.floor(tonumber(cPart) or 0))
+            clickerShapeProgress = math.max(0, math.floor(tonumber(pPart) or 0))
+            clickerShapeMilestone = math.max(25, math.floor(tonumber(mPart) or 25))
+            if clickerShapeProgress >= clickerShapeMilestone then
+                clickerShapeProgress = clickerShapeProgress % clickerShapeMilestone
+            end
+        end
+
         if clickerScore > clickerHighScore then
             clickerHighScore = clickerScore
         end
@@ -507,6 +619,10 @@ local function loadClickerHighScore()
 
     clickerPassiveCarry = 0
     recalcClickerStats()
+
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+    end
 end
 
 local function encodeClickerUpgrades()
@@ -523,13 +639,17 @@ local function saveClickerState(force)
     end
     clickerLastSave = os.clock()
 
-    local payload = string.format("%d|%s", math.floor(clickerScore), encodeClickerUpgrades())
+    local payload = string.format("%d|%s|%d|%d|%d|%d", math.floor(clickerScore), encodeClickerUpgrades(), math.floor(clickerShapeVertices), math.floor(clickerShapeCycle), math.floor(clickerShapeProgress), math.floor(clickerShapeMilestone))
     local okState, errState = safeWriteFile(clickerStateFile, payload)
     if not okState then
         log("Error", "Clicker state save failed: " .. tostring(errState))
     end
 
     local okHigh, errHigh = safeWriteFile(clickerHighScoreFile, tostring(math.floor(clickerHighScore)))
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+        saveStatistics()
+    end
     if not okHigh then
         log("Error", "Clicker highscore save failed: " .. tostring(errHigh))
     end
@@ -540,6 +660,11 @@ local function saveClickerHighScore(force)
 end
 
 loadClickerHighScore()
+loadStatistics()
+if clickerHighScore > statisticsData.clickerHighScore then
+    statisticsData.clickerHighScore = clickerHighScore
+end
+saveStatistics()
 
 -- ROOT GUI
 
@@ -616,6 +741,10 @@ local function killSwitch(reason)
     end)
 
     pcall(function()
+        finalizeSessionStatistics(reason or "kill switch")
+    end)
+
+    pcall(function()
         dumpLogsToFile(reason or "kill switch")
     end)
 
@@ -679,7 +808,7 @@ local function positionKill()
     local p = window.AbsolutePosition
     local s = window.AbsoluteSize
     killBtn.AnchorPoint = Vector2.new(0, 1)
-    killBtn.Position = UDim2.fromOffset(p.X + 12, p.Y + s.Y - 12)
+    killBtn.Position = UDim2.fromOffset(p.X + 12, p.Y + s.Y + 12)
 end
 positionKill()
 track(window:GetPropertyChangedSignal("AbsolutePosition"):Connect(positionKill))
@@ -1069,11 +1198,15 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Clicker", "Config", "Console", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "Calculators", "Config", "Themes", "Clicker", "Statistics", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
 end
+
+-- hidden utility pages kept for existing tools
+createPage("Misc")
+createPage("Console")
 
 switchPage("Automation")
 
@@ -1090,17 +1223,25 @@ end
 
 -- WIRE TRANSPARENCY (needs changing)
 
+local function lockTransparency(obj)
+    if obj and obj.SetAttribute then
+        obj:SetAttribute("__lockTransparency", true)
+    end
+    return obj
+end
+
 setTransparency = function(alpha)
     alpha = tonumber(alpha) or 0
-    window.BackgroundTransparency = math.clamp(alpha, 0, 0.45)
-    topBar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
-    sidebar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
-    body.BackgroundTransparency = math.clamp(alpha, 0, 0.35)
+    uiTransparencyAlpha = math.clamp(alpha, 0, 0.45)
+    window.BackgroundTransparency = uiTransparencyAlpha
+    topBar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
+    sidebar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
+    body.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.35)
 
     for _, obj in ipairs(window:GetDescendants()) do
         if obj:IsA("Frame") and obj ~= body and obj ~= content then
-            if not obj:GetAttribute("__layout") then
-                obj.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
+            if not obj:GetAttribute("__layout") and not obj:GetAttribute("__lockTransparency") then
+                obj.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
             end
         end
     end
@@ -1108,8 +1249,8 @@ setTransparency = function(alpha)
     for _, page in pairs(Pages) do
         for _, child in ipairs(page:GetDescendants()) do
             if child:IsA("Frame") then
-                if not child:GetAttribute("__layout") then
-                    child.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
+                if not child:GetAttribute("__layout") and not child:GetAttribute("__lockTransparency") then
+                    child.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
                 end
             end
         end
@@ -1161,6 +1302,61 @@ local function uiSection(parent, text)
     lbl.TextColor3 = Theme.Text
     register(lbl, "TextColor3", "Text")
     return lbl
+end
+
+local function uiCollapsible(parent, title, defaultOpen)
+    local holder = Instance.new("Frame", parent)
+    holder.LayoutOrder = nextOrder(parent)
+    holder.Size = UDim2.new(1, 0, 0, 34)
+    markLayoutFrame(holder)
+
+    local head = Instance.new("TextButton", holder)
+    head.Size = UDim2.new(1, 0, 0, 32)
+    head.BackgroundColor3 = Theme.Panel
+    head.BorderSizePixel = 0
+    head.Font = Enum.Font.GothamBold
+    head.TextSize = 13
+    head.TextXAlignment = Enum.TextXAlignment.Left
+    head.TextColor3 = Theme.Text
+    head.AutoButtonColor = false
+    makeRound(head, 6)
+    addStroke(head, Theme.Border, 1, 0.5)
+    register(head, "BackgroundColor3", "Panel")
+    register(head, "TextColor3", "Text")
+
+    local body = Instance.new("Frame", holder)
+    body.Position = UDim2.fromOffset(0, 36)
+    body.Size = UDim2.new(1, 0, 0, 0)
+    markLayoutFrame(body)
+
+    local bodyLayout = Instance.new("UIListLayout", body)
+    bodyLayout.Padding = UDim.new(0, 10)
+    bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local bodyPadding = Instance.new("UIPadding", body)
+    bodyPadding.PaddingLeft = UDim.new(0, 6)
+    bodyPadding.PaddingRight = UDim.new(0, 6)
+
+    local open = defaultOpen ~= false
+    local function refresh()
+        head.Text = string.format("%s %s", open and "v" or ">", title)
+        local bodyH = open and (bodyLayout.AbsoluteContentSize.Y + 6) or 0
+        body.Size = UDim2.new(1, 0, 0, bodyH)
+        holder.Size = UDim2.new(1, 0, 0, 34 + bodyH)
+        body.Visible = open
+    end
+
+    track(head.MouseButton1Click:Connect(function()
+        open = not open
+        refresh()
+    end))
+    track(bodyLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        if open then refresh() end
+    end))
+
+    ThemeRefreshers[#ThemeRefreshers + 1] = refresh
+    refresh()
+    return body
 end
 
 local function uiToggle(parent, text, initial, callback)
@@ -1555,6 +1751,7 @@ task.spawn(function()
             for _, skill in ipairs(enabled) do
                 if canUseSkill(skill) then
                     pressKey(SKILL_KEYS[skill])
+                    incrementSkillActivation(1)
 
                     local now = os.clock()
                     skillState[skill].lastUse = now
@@ -1582,6 +1779,7 @@ task.spawn(function()
             local skill = enabled[staggerIndex]
             if skill and canUseSkill(skill) then
                 pressKey(SKILL_KEYS[skill])
+                incrementSkillActivation(1)
 
                 skillState[skill].lastUse = now
                 skillState[skill].nextCooldownMs =
@@ -1975,37 +2173,39 @@ do
 end
 
 
--- XP PAGE (v3)
+-- CALCULATORS PAGE
 
 do
-    local page = Pages.XP
-    uiSection(page, "XP Calculator (v3)")
+    local page = Pages.Calculators
+    uiSection(page, "Calculators")
+
+    local xpBody = uiCollapsible(page, "XP Calculator (v3)", true)
 
     local inputs = {}
-    local function addInput(labelText, defaultText)
-        local tb = uiFieldRow(page, labelText, defaultText, 0.42)
+    local function addXPInput(labelText, defaultText)
+        local tb = uiFieldRow(xpBody, labelText, defaultText, 0.42)
         inputs[labelText] = tb
         return tb
     end
 
-    addInput("Auto Damage", "0")
-    addInput("Enemy HP", "0,0")
-    addInput("Enemy XP %", "0,0")
-    addInput("XP Multiplier", "1")
-    addInput("2x Potions (10m)", "0")
-    addInput("3x Potions (10m)", "0")
-    addInput("Current XP %", "0")
+    addXPInput("Auto Damage", "0")
+    addXPInput("Enemy HP", "0,0")
+    addXPInput("Enemy XP %", "0,0")
+    addXPInput("XP Multiplier", "1")
+    addXPInput("2x Potions (10m)", "0")
+    addXPInput("3x Potions (10m)", "0")
+    addXPInput("Current XP %", "0")
 
-    uiSection(page, "Skill Modifiers")
+    uiSection(xpBody, "Skill Modifiers")
 
     local calcSkills = { Q = false, E = false, R = false }
     local skillMultiplier = { Q = 200, E = 200, R = 200 }
 
-    local rowSkill = uiRow3(page)
-    local rowMult  = uiRow3(page)
+    local rowSkill = uiRow3(xpBody)
+    local rowMult  = uiRow3(xpBody)
 
-    local r1 = Instance.new("TextLabel", page)
-    r1.LayoutOrder = nextOrder(page)
+    local r1 = Instance.new("TextLabel", xpBody)
+    r1.LayoutOrder = nextOrder(xpBody)
     r1.Size = UDim2.new(1, 0, 0, 24)
     r1.BackgroundTransparency = 1
     r1.Font = Enum.Font.Gotham
@@ -2015,8 +2215,8 @@ do
     register(r1, "TextColor3", "SubText")
     r1.Text = "XP/hr: --"
 
-    local r2 = Instance.new("TextLabel", page)
-    r2.LayoutOrder = nextOrder(page)
+    local r2 = Instance.new("TextLabel", xpBody)
+    r2.LayoutOrder = nextOrder(xpBody)
     r2.Size = UDim2.new(1, 0, 0, 24)
     r2.BackgroundTransparency = 1
     r2.Font = Enum.Font.Gotham
@@ -2026,9 +2226,9 @@ do
     register(r2, "TextColor3", "SubText")
     r2.Text = "Time to 100%: --"
 
-    local function splitCsvNums(s)
+    local function splitCsvNums(sv)
         local out = {}
-        for token in string.gmatch((s or ""), "([^,]+)") do
+        for token in string.gmatch((sv or ""), "([^,]+)") do
             local cleaned = token:gsub("%%", ""):gsub("%s+", "")
             local n = tonumber(cleaned)
             if n then out[#out+1] = n end
@@ -2049,7 +2249,6 @@ do
         if not dmg or not curXP then return end
 
         local totalDPS = effectiveDPS(dmg, calcSkills, skillMultiplier)
-
         local hps = splitCsvNums(inputs["Enemy HP"].Text)
         local xps = splitCsvNums(inputs["Enemy XP %"].Text)
 
@@ -2074,9 +2273,9 @@ do
         local secondsTo100 = 0
 
         local segments = {
-            { name = "3x", seconds = pot3x * 600, mult = 3 },
-            { name = "2x", seconds = pot2x * 600, mult = 2 },
-            { name = "1x", seconds = math.huge, mult = 1 },
+            { seconds = pot3x * 600, mult = 3 },
+            { seconds = pot2x * 600, mult = 2 },
+            { seconds = math.huge, mult = 1 },
         }
 
         if baseXPps <= 0 then
@@ -2084,7 +2283,6 @@ do
         else
             for _, seg in ipairs(segments) do
                 if remainingXP <= 0 then break end
-
                 local rate = baseXPps * seg.mult
                 if rate <= 0 then
                     secondsTo100 = math.huge
@@ -2155,47 +2353,42 @@ do
         track(tb.FocusLost:Connect(recalcXP))
     end
 
-    uiButton(page, "Recalculate", recalcXP)
+    uiButton(xpBody, "Recalculate", recalcXP)
     task.defer(recalcXP)
-end
 
--- BOSS PAGE (v2.4)
-
-do
-    local page = Pages.Boss
-    uiSection(page, "Boss Calculator (v2.4)")
+    local bossBody = uiCollapsible(page, "Boss Calculator (v2.4)", false)
 
     local bossInputs = {}
-    local function addInput(labelText, defaultText)
-        local tb = uiFieldRow(page, labelText, defaultText, 0.42)
+    local function addBossInput(labelText, defaultText)
+        local tb = uiFieldRow(bossBody, labelText, defaultText, 0.42)
         bossInputs[labelText] = tb
         return tb
     end
 
-    addInput("Self HP", "1000")
-    addInput("Self DPS", "50")
-    addInput("Enemy HP", "2000")
-    addInput("Enemy DMG", "100")
+    addBossInput("Self HP", "1000")
+    addBossInput("Self DPS", "50")
+    addBossInput("Enemy HP", "2000")
+    addBossInput("Enemy DMG", "100")
 
-    uiSection(page, "Skill Modifiers")
+    uiSection(bossBody, "Skill Modifiers")
 
     local bossCalcSkills = { Q = false, E = false, R = false }
     local bossSkillMultiplier = { Q = 200, E = 200, R = 200 }
 
-    local rowSkill = uiRow3(page)
-    local rowMult  = uiRow3(page)
+    local rowSkillB = uiRow3(bossBody)
+    local rowMultB  = uiRow3(bossBody)
 
-    uiSection(page, "Boss Mode")
+    uiSection(bossBody, "Boss Mode")
     local bossModeEnabled = false
     local bossModeBtn
-    bossModeBtn = uiButton(page, "Boss Mode: OFF", function()
+    bossModeBtn = uiButton(bossBody, "Boss Mode: OFF", function()
         bossModeEnabled = not bossModeEnabled
         bossModeBtn.Text = "Boss Mode: " .. (bossModeEnabled and "ON" or "OFF")
     end)
 
-    uiSection(page, "Result")
-    local br = Instance.new("TextLabel", page)
-    br.LayoutOrder = nextOrder(page)
+    uiSection(bossBody, "Result")
+    local br = Instance.new("TextLabel", bossBody)
+    br.LayoutOrder = nextOrder(bossBody)
     br.Size = UDim2.new(1, 0, 0, 32)
     br.BackgroundTransparency = 1
     br.Font = Enum.Font.Gotham
@@ -2236,8 +2429,8 @@ do
     track(bossModeBtn.MouseButton1Click:Connect(recalcBoss))
 
     for _, k in ipairs({ "Q", "E", "R" }) do
-        local sbtn = uiSmallBtn(rowSkill, k .. ": OFF")
-        local mbtn = uiSmallBtn(rowMult, bossSkillMultiplier[k] .. "%")
+        local sbtn = uiSmallBtn(rowSkillB, k .. ": OFF")
+        local mbtn = uiSmallBtn(rowMultB, bossSkillMultiplier[k] .. "%")
 
         local function refreshBossSkillBtn()
             sbtn.Text = k .. ": " .. (bossCalcSkills[k] and "ON" or "OFF")
@@ -2271,7 +2464,7 @@ do
         track(tb.FocusLost:Connect(recalcBoss))
     end
 
-    uiButton(page, "Recalculate", recalcBoss)
+    uiButton(bossBody, "Recalculate", recalcBoss)
     task.defer(recalcBoss)
 end
 
@@ -2646,6 +2839,7 @@ do
     shapeCanvas.Size = UDim2.fromOffset(94, 94)
     shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
     shapeCanvas.BackgroundTransparency = 1
+    lockTransparency(shapeCanvas)
 
     local shapeEdges = table.create(9)
     for i = 1, 9 do
@@ -2825,7 +3019,7 @@ do
 
                 if now - lastCull >= CLICKER_STATE_CULL_SEC then
                     lastCull = now
-                    collectgarbage("step", 64)
+                    gcinfo()
                 end
 
                 refreshClickerView()
@@ -2840,6 +3034,216 @@ do
 end
 
 
+-- STATISTICS PAGE
+
+do
+    local page = Pages.Statistics
+
+    uiSection(page, "Statistics / Achievements")
+
+    local summaryLabel = Instance.new("TextLabel", page)
+    summaryLabel.LayoutOrder = nextOrder(page)
+    summaryLabel.Size = UDim2.new(1, 0, 0, 42)
+    summaryLabel.BackgroundTransparency = 1
+    summaryLabel.TextXAlignment = Enum.TextXAlignment.Left
+    summaryLabel.TextYAlignment = Enum.TextYAlignment.Top
+    summaryLabel.Font = Enum.Font.Gotham
+    summaryLabel.TextSize = 13
+    summaryLabel.TextWrapped = true
+    summaryLabel.TextColor3 = Theme.SubText
+    register(summaryLabel, "TextColor3", "SubText")
+
+    local function createAchievementCard(titleText, height)
+        local card = Instance.new("Frame", page)
+        card.LayoutOrder = nextOrder(page)
+        card.Size = UDim2.new(1, 0, 0, height or 78)
+        card.BackgroundColor3 = Theme.PanelDark
+        card.BorderSizePixel = 0
+        makeRound(card, 8)
+        register(card, "BackgroundColor3", "PanelDark")
+
+        local stroke = addStroke(card, STAT_TIERS.None.color, 1.25, 0.12)
+
+        local title = Instance.new("TextLabel", card)
+        title.Size = UDim2.new(1, -16, 0, 22)
+        title.Position = UDim2.fromOffset(8, 8)
+        title.BackgroundTransparency = 1
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 13
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.TextColor3 = Theme.Text
+        title.Text = titleText
+        register(title, "TextColor3", "Text")
+
+        local detail = Instance.new("TextLabel", card)
+        detail.Size = UDim2.new(1, -16, 0, (height or 78) - 36)
+        detail.Position = UDim2.fromOffset(8, 30)
+        detail.BackgroundTransparency = 1
+        detail.Font = Enum.Font.Gotham
+        detail.TextSize = 12
+        detail.TextWrapped = true
+        detail.TextXAlignment = Enum.TextXAlignment.Left
+        detail.TextYAlignment = Enum.TextYAlignment.Top
+        detail.TextColor3 = Theme.SubText
+        register(detail, "TextColor3", "SubText")
+
+        return card, detail, stroke
+    end
+
+    local _, clickerDetail, clickerStroke = createAchievementCard("High Score in Clicker mini game")
+    local progressionCard, progressionDetail, progressionStroke = createAchievementCard("Clicker Progression", 96)
+    local _, sessionDetail, sessionStroke = createAchievementCard("Longest Session")
+    local _, skillsDetail, skillsStroke = createAchievementCard("Total Skills Activated")
+
+    progressionDetail.Size = UDim2.new(1, -124, 0, 60)
+
+    local progressionPreview = Instance.new("Frame", progressionCard)
+    progressionPreview.Size = UDim2.fromOffset(86, 62)
+    progressionPreview.Position = UDim2.new(1, -94, 0, 18)
+    progressionPreview.BackgroundTransparency = 1
+    lockTransparency(progressionPreview)
+
+    local previewEdges = table.create(9)
+    for i = 1, 9 do
+        local edge = Instance.new("Frame", progressionPreview)
+        edge.AnchorPoint = Vector2.new(0.5, 0.5)
+        edge.Size = UDim2.fromOffset(2, 2)
+        edge.BorderSizePixel = 0
+        edge.Visible = false
+        edge.BackgroundColor3 = Theme.Accent
+        register(edge, "BackgroundColor3", "Accent")
+        previewEdges[i] = edge
+    end
+
+    local previewCycle = Instance.new("TextLabel", progressionPreview)
+    previewCycle.Size = UDim2.new(1, 0, 0, 16)
+    previewCycle.Position = UDim2.new(0, 0, 1, -16)
+    previewCycle.BackgroundTransparency = 1
+    previewCycle.Font = Enum.Font.GothamBold
+    previewCycle.TextSize = 11
+    previewCycle.TextXAlignment = Enum.TextXAlignment.Center
+    previewCycle.TextColor3 = Theme.Text
+    register(previewCycle, "TextColor3", "Text")
+
+    local function applyTier(stroke, tierName)
+        local tier = STAT_TIERS[tierName] or STAT_TIERS.None
+        stroke.Color = tier.color
+    end
+
+    local function refreshProgressionPreview()
+        local n = math.clamp(clickerShapeVertices, 3, 9)
+        local radius = 18
+        local cx, cy = 43, 24
+        local palette = {
+            Color3.fromRGB(120, 180, 255),
+            Color3.fromRGB(140, 230, 160),
+            Color3.fromRGB(255, 175, 95),
+            Color3.fromRGB(220, 135, 255),
+            Color3.fromRGB(255, 110, 145),
+            Color3.fromRGB(255, 230, 120),
+        }
+        local cycleColor = palette[(clickerShapeCycle % #palette) + 1]
+
+        for i = 1, 9 do
+            local edge = previewEdges[i]
+            if i <= n then
+                local a1 = ((i - 1) / n) * (2 * math.pi) - (math.pi / 2)
+                local a2 = (i / n) * (2 * math.pi) - (math.pi / 2)
+                local x1 = cx + (math.cos(a1) * radius)
+                local y1 = cy + (math.sin(a1) * radius)
+                local x2 = cx + (math.cos(a2) * radius)
+                local y2 = cy + (math.sin(a2) * radius)
+                local dx, dy = x2 - x1, y2 - y1
+                local len = math.sqrt((dx * dx) + (dy * dy))
+
+                edge.Visible = true
+                edge.BackgroundColor3 = cycleColor
+                edge.Size = UDim2.fromOffset(math.max(2, len), 2)
+                edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                edge.Rotation = angleDeg(dy, dx)
+            else
+                edge.Visible = false
+            end
+        end
+
+        previewCycle.Text = string.format("C%d", clickerShapeCycle)
+        previewCycle.TextColor3 = cycleColor
+    end
+
+    local function refreshStatisticsView()
+        if clickerHighScore > statisticsData.clickerHighScore then
+            statisticsData.clickerHighScore = clickerHighScore
+        end
+
+        local clickerScoreBest = statisticsData.clickerHighScore
+        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 100000, 10000000)
+
+        local progressionCycle = clickerShapeCycle
+        local progressionTier = getTierByThreshold(progressionCycle, 2, 8, 15)
+
+        local sessionSecs = statisticsData.longestSessionSeconds
+        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 6 * 3600, 10 * 3600)
+        local skillCount = statisticsData.totalSkillActivations
+        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
+
+        clickerDetail.Text = string.format(
+            "Best score: %d\nBronze 10,000 | Silver 100,000 | Gold 10,000,000\nCurrent Tier: %s",
+            clickerScoreBest,
+            STAT_TIERS[clickerTier].label
+        )
+        applyTier(clickerStroke, clickerTier)
+
+        progressionDetail.Text = string.format(
+            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C8 | Gold C15\nCurrent Tier: %s",
+            clickerShapeVertices,
+            progressionCycle,
+            STAT_TIERS[progressionTier].label
+        )
+        applyTier(progressionStroke, progressionTier)
+        refreshProgressionPreview()
+
+        sessionDetail.Text = string.format(
+            "Best: %s\nBronze 4h | Silver 6h | Gold 10h\nCurrent Tier: %s",
+            formatDurationHM(sessionSecs),
+            STAT_TIERS[sessionTier].label
+        )
+        applyTier(sessionStroke, sessionTier)
+
+        skillsDetail.Text = string.format(
+            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nCurrent Tier: %s",
+            skillCount,
+            STAT_TIERS[skillTier].label
+        )
+        applyTier(skillsStroke, skillTier)
+
+        summaryLabel.Text = string.format(
+            "Session now: %s | Last end reason: %s",
+            formatDurationHM(os.clock() - statisticsSessionStartClock),
+            tostring(statisticsData.lastSessionReason or "unknown")
+        )
+    end
+
+    uiButton(page, "Update Statistics", function()
+        finalizeSessionStatistics("manual update")
+        statisticsData.sessionActive = true
+        statisticsData.sessionStartTime = os.time()
+        statisticsData.lastSessionReason = "running"
+        saveClickerState(true)
+        saveStatistics()
+        refreshStatisticsView()
+        log("System", "Statistics updated and saved")
+    end)
+
+    ThemeRefreshers[#ThemeRefreshers + 1] = refreshStatisticsView
+    refreshStatisticsView()
+
+    task.spawn(function()
+        while running and not __destroyed do
+            task.wait(2)
+            refreshStatisticsView()
+        end
+    end)
+end
 -- CONFIG PAGE
 
 do
@@ -2867,6 +3271,8 @@ do
             memoryGuardMode = memoryGuardMode,
             memoryGuardCapGB = memoryGuardCapGB,
             theme = serializeTheme(Theme),
+            transparencyAlpha = uiTransparencyAlpha,
+            blurAmount = blurAmount,
         }
     end
 
@@ -2897,6 +3303,12 @@ do
         if setfpscap and fpsCapEnabled then pcall(function() setfpscap(targetFPS) end) end
         if cfg.theme then
             pcall(function() applyTheme(deserializeTheme(cfg.theme)) end)
+        end
+        if cfg.transparencyAlpha ~= nil and setTransparency then
+            pcall(function() setTransparency(cfg.transparencyAlpha) end)
+        end
+        if cfg.blurAmount ~= nil then
+            pcall(function() setBlur(cfg.blurAmount) end)
         end
         log("System", "Config applied")
     end
@@ -3181,6 +3593,7 @@ end))
 pcall(function()
     game:BindToClose(function()
         saveClickerHighScore(true)
+        finalizeSessionStatistics("game close")
         dumpLogsToFile("game close")
     end)
 end)
