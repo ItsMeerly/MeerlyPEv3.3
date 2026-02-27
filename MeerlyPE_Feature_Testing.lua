@@ -1817,11 +1817,11 @@ do
 end
 
 
--- XP PAGE (v2.4)
+-- XP PAGE (v3)
 
 do
     local page = Pages.XP
-    uiSection(page, "XP Calculator (v2.4)")
+    uiSection(page, "XP Calculator (v3)")
 
     local inputs = {}
     local function addInput(labelText, defaultText)
@@ -1871,15 +1871,23 @@ do
     local function splitCsvNums(s)
         local out = {}
         for token in string.gmatch((s or ""), "([^,]+)") do
-            local n = tonumber((token:gsub("%s+", "")))
+            local cleaned = token:gsub("%%", ""):gsub("%s+", "")
+            local n = tonumber(cleaned)
             if n then out[#out+1] = n end
         end
         return out
     end
 
+    local function parseNum(text)
+        if text == nil then return nil end
+        local cleaned = tostring(text):gsub("%%", ""):gsub("%s+", "")
+        if cleaned == "" then return nil end
+        return tonumber(cleaned)
+    end
+
     local function recalcXP()
-        local dmg = tonumber(inputs["Auto Damage"].Text)
-        local curXP = tonumber(inputs["Current XP %"].Text)
+        local dmg = parseNum(inputs["Auto Damage"].Text)
+        local curXP = parseNum(inputs["Current XP %"].Text)
         if not dmg or not curXP then return end
 
         local totalDPS = effectiveDPS(dmg, calcSkills, skillMultiplier)
@@ -1896,12 +1904,12 @@ do
             end
         end
 
-        local xpMul = tonumber(inputs["XP Multiplier"].Text) or 1
+        local xpMul = parseNum(inputs["XP Multiplier"].Text) or 1
         if xpMul <= 0 then xpMul = 1 end
         baseXPhr = baseXPhr * xpMul
 
-        local pot2x = math.max(0, tonumber(inputs["2x Potions (10m)"].Text) or 0)
-        local pot3x = math.max(0, tonumber(inputs["3x Potions (10m)"].Text) or 0)
+        local pot2x = math.max(0, parseNum(inputs["2x Potions (10m)"].Text) or 0)
+        local pot3x = math.max(0, parseNum(inputs["3x Potions (10m)"].Text) or 0)
 
         local baseXPps = baseXPhr / 3600
         local remainingXP = math.max(0, 100 - curXP)
@@ -1992,7 +2000,6 @@ do
     uiButton(page, "Recalculate", recalcXP)
     task.defer(recalcXP)
 end
-
 
 -- BOSS PAGE (v2.4)
 
