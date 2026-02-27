@@ -1223,9 +1223,26 @@ end
 
 -- WIRE TRANSPARENCY (needs changing)
 
+local TransparencyLocks = setmetatable({}, { __mode = "k" })
+
+local function isTransparencyLocked(obj)
+    if not obj then return false end
+    local ok, val = pcall(function()
+        return obj:GetAttribute("__lockTransparency") == true
+    end)
+    if ok and val then
+        return true
+    end
+    return TransparencyLocks[obj] == true
+end
+
 local function lockTransparency(obj)
-    if obj and obj.SetAttribute then
+    if not obj then return obj end
+    local ok = pcall(function()
         obj:SetAttribute("__lockTransparency", true)
+    end)
+    if not ok then
+        TransparencyLocks[obj] = true
     end
     return obj
 end
@@ -1240,7 +1257,7 @@ setTransparency = function(alpha)
 
     for _, obj in ipairs(window:GetDescendants()) do
         if obj:IsA("Frame") and obj ~= body and obj ~= content then
-            if not obj:GetAttribute("__layout") and not obj:GetAttribute("__lockTransparency") then
+            if not obj:GetAttribute("__layout") and not isTransparencyLocked(obj) then
                 obj.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
             end
         end
@@ -1249,7 +1266,7 @@ setTransparency = function(alpha)
     for _, page in pairs(Pages) do
         for _, child in ipairs(page:GetDescendants()) do
             if child:IsA("Frame") then
-                if not child:GetAttribute("__layout") and not child:GetAttribute("__lockTransparency") then
+                if not child:GetAttribute("__layout") and not isTransparencyLocked(child) then
                     child.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
                 end
             end
