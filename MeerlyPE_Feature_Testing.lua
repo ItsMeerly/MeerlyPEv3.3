@@ -463,6 +463,17 @@ local function addClickerScore(amount)
     end
 end
 
+local function angleDeg(dy, dx)
+    local ok, val = pcall(function()
+        if math.atan2 then
+            return math.deg(math.atan2(dy, dx))
+        end
+        return math.deg(math.atan(dy, dx))
+    end)
+    if ok and val then return val end
+    return 0
+end
+
 local function loadClickerHighScore()
     local okRead, raw = safeReadFile(clickerHighScoreFile)
     if okRead then
@@ -2660,6 +2671,7 @@ do
     upgradeGrid.VerticalAlignment = Enum.VerticalAlignment.Top
 
     local upgradeButtons = {}
+    local refreshClickerView
     for _, def in ipairs(CLICKER_UPGRADES) do
         local btn = Instance.new("TextButton", upgradeFrame)
         btn.BackgroundColor3 = Theme.Panel
@@ -2685,6 +2697,7 @@ do
             clickerScore -= cost
             clickerUpgradeLevels[def.id] = level + 1
             recalcClickerStats()
+            refreshClickerView()
         end))
 
         upgradeButtons[#upgradeButtons + 1] = { def = def, btn = btn }
@@ -2698,6 +2711,7 @@ do
     track(clickBtn.MouseButton1Click:Connect(function()
         if not clickerRunning then return end
         addClickerScore(clickPower)
+        refreshClickerView()
     end))
 
     track(resetBtn.MouseButton1Click:Connect(function()
@@ -2709,6 +2723,7 @@ do
         clickerShapeMilestone = 25
         clickerPassiveCarry = 0
         recalcClickerStats()
+        refreshClickerView()
     end))
 
     track(saveBtn.MouseButton1Click:Connect(function()
@@ -2746,7 +2761,7 @@ do
                 edge.BackgroundColor3 = c
                 edge.Size = UDim2.fromOffset(math.max(2, len), 2)
                 edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
-                edge.Rotation = math.deg(math.atan2(dy, dx))
+                edge.Rotation = angleDeg(dy, dx)
             else
                 edge.Visible = false
             end
@@ -2760,7 +2775,7 @@ do
         )
     end
 
-    local function refreshClickerView()
+    function refreshClickerView()
         statusLabel.Text = string.format(
             "State: %s\nScore: %d | High: %d | Click: +%d | Passive: +%d/s",
             clickerRunning and "RUNNING" or "PAUSED",
@@ -2787,32 +2802,39 @@ do
         local lastTick = os.clock()
         local lastCull = os.clock()
         while running and not __destroyed do
-            task.wait(1)
-            local now = os.clock()
+            task.wait(0.25)
+            local ok, err = pcall(function()
+                local now = os.clock()
 
-            if clickerRunning and passiveIncomePerSec > 0 then
-                local dt = now - lastTick
-                if dt > 0 then
-                    local gained = (passiveIncomePerSec * dt) + clickerPassiveCarry
-                    local whole = math.floor(gained)
-                    clickerPassiveCarry = gained - whole
-                    if whole > 0 then
-                        addClickerScore(whole)
+                if clickerRunning and passiveIncomePerSec > 0 then
+                    local dt = now - lastTick
+                    if dt > 0 then
+                        local gained = (passiveIncomePerSec * dt) + clickerPassiveCarry
+                        local whole = math.floor(gained)
+                        clickerPassiveCarry = gained - whole
+                        if whole > 0 then
+                            addClickerScore(whole)
+                        end
                     end
                 end
-            end
-            lastTick = now
+                lastTick = now
 
-            if now - clickerLastSave >= CLICKER_AUTOSAVE_SEC then
-                saveClickerHighScore(true)
-            end
+                if now - clickerLastSave >= CLICKER_AUTOSAVE_SEC then
+                    saveClickerHighScore(true)
+                end
 
-            if now - lastCull >= CLICKER_STATE_CULL_SEC then
-                lastCull = now
-                collectgarbage("step", 64)
-            end
+                if now - lastCull >= CLICKER_STATE_CULL_SEC then
+                    lastCull = now
+                    collectgarbage("step", 64)
+                end
 
-            refreshClickerView()
+                refreshClickerView()
+            end)
+
+            if not ok then
+                log("Error", "Clicker loop error: " .. tostring(err))
+                task.wait(1)
+            end
         end
     end)
 end
