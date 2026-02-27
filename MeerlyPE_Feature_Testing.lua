@@ -237,6 +237,7 @@ local clickerShapeVertices = 3
 local clickerShapeCycle = 0
 local clickerShapeProgress = 0
 local clickerShapeMilestone = 25
+local clickerPassiveCarry = 0
 
 
 -- LOGGING SYSTEM
@@ -493,6 +494,7 @@ local function loadClickerHighScore()
         end
     end
 
+    clickerPassiveCarry = 0
     recalcClickerStats()
 end
 
@@ -2705,6 +2707,7 @@ do
         clickerShapeCycle = 0
         clickerShapeProgress = 0
         clickerShapeMilestone = 25
+        clickerPassiveCarry = 0
         recalcClickerStats()
     end))
 
@@ -2790,7 +2793,12 @@ do
             if clickerRunning and passiveIncomePerSec > 0 then
                 local dt = now - lastTick
                 if dt > 0 then
-                    addClickerScore(passiveIncomePerSec * dt)
+                    local gained = (passiveIncomePerSec * dt) + clickerPassiveCarry
+                    local whole = math.floor(gained)
+                    clickerPassiveCarry = gained - whole
+                    if whole > 0 then
+                        addClickerScore(whole)
+                    end
                 end
             end
             lastTick = now
