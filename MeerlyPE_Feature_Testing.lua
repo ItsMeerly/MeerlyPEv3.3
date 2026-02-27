@@ -662,7 +662,7 @@ saveStatistics()
 -- ROOT GUI
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "MeerlyNW_UI_v4_Build6_2"
+gui.Name = "MeerlyNW_UI_v4_Build7"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -3162,10 +3162,10 @@ do
         local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 100000, 10000000)
 
         local progressionCycle = clickerShapeCycle
-        local progressionTier = getTierByThreshold(progressionCycle, 2, 8, 15)
+        local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10)
 
         local sessionSecs = statisticsData.longestSessionSeconds
-        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 6 * 3600, 10 * 3600)
+        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 8 * 3600, 12 * 3600)
         local skillCount = statisticsData.totalSkillActivations
         local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
 
@@ -3177,7 +3177,7 @@ do
         applyTier(clickerStroke, clickerTier)
 
         progressionDetail.Text = string.format(
-            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C8 | Gold C15\nCurrent Tier: %s",
+            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10\nCurrent Tier: %s",
             clickerShapeVertices,
             progressionCycle,
             STAT_TIERS[progressionTier].label
@@ -3186,7 +3186,7 @@ do
         refreshProgressionPreview()
 
         sessionDetail.Text = string.format(
-            "Best: %s\nBronze 4h | Silver 6h | Gold 10h\nCurrent Tier: %s",
+            "Best: %s\nBronze 4h | Silver 8h | Gold 12h\nCurrent Tier: %s",
             formatDurationHM(sessionSecs),
             STAT_TIERS[sessionTier].label
         )
@@ -3200,7 +3200,7 @@ do
         applyTier(skillsStroke, skillTier)
 
         summaryLabel.Text = string.format(
-            "Session now: %s | Last end reason: %s",
+            "Session now: %s | Current Action: %s",
             formatDurationHM(os.clock() - statisticsSessionStartClock),
             tostring(statisticsData.lastSessionReason or "unknown")
         )
