@@ -1,6 +1,6 @@
 -- ============================================================
 -- PE v4 Build 6.2.3 — Dev Build (XP CALC LOGIC IMPROVED)
--- Automation + Calculators + Console + Performance + Misc + Macro
+-- Automation + Calculators + Console + Misc + Macro
 -- ============================================================
 
 
@@ -911,7 +911,7 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "XP", "Boss", "Performance", "Misc", "Config", "Console", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Config", "Console", "Themes", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
@@ -2122,7 +2122,27 @@ end
 
 do
     local page = Pages.Misc
-    uiSection(page, "AFK & Safety")
+    uiSection(page, "Quick Actions")
+
+    uiButton(page, "Rejoin Server", function()
+        local placeId = game.PlaceId
+        local jobId = game.JobId
+        log("System", "Rejoining current server...")
+        task.spawn(function()
+            local ok, err = pcall(function()
+                if jobId and jobId ~= "" then
+                    TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+                else
+                    TeleportService:Teleport(placeId, player)
+                end
+            end)
+            if not ok then
+                log("Error", "Rejoin failed: " .. tostring(err))
+            end
+        end)
+    end)
+
+    uiSection(page, "AFK & Camera")
 
     uiToggle(page, "Anti-AFK", _G.__MeerlyState.antiAfkEnabled == true, function(v)
         antiAfkEnabled = v
@@ -2146,52 +2166,6 @@ do
             log("System", "Memory Stats UI disabled")
         end
     end)
-
-    uiSection(page, "Memory Guard")
-
-    local modeBtn = uiButton(page, "Memory Action: Off", nil)
-    local modes = { "Off", "AutoRejoin", "AutoQuit" }
-    local function refreshModeBtn()
-        modeBtn.Text = "Memory Action: " .. memoryGuardMode
-    end
-    local function cycleMode()
-        local idx = table.find(modes, memoryGuardMode) or 1
-        idx = (idx % #modes) + 1
-        memoryGuardMode = modes[idx]
-        refreshModeBtn()
-        log("System", "Memory guard mode set to " .. memoryGuardMode)
-    end
-    track(modeBtn.MouseButton1Click:Connect(cycleMode))
-    refreshModeBtn()
-
-    local capBox, _ = uiFieldRow(page, "Combined Lua+Engine Cap (GB)", tostring(memoryGuardCapGB), 0.58)
-    track(capBox.FocusLost:Connect(function()
-        local v = tonumber(capBox.Text)
-        if v and v >= 0.5 and v <= 128 then
-            memoryGuardCapGB = v
-        end
-        capBox.Text = tostring(memoryGuardCapGB)
-    end))
-
-    uiButton(page, "Rejoin Server", function()
-        local placeId = game.PlaceId
-        local jobId = game.JobId
-        log("System", "Rejoining current server...")
-        task.spawn(function()
-            local ok, err = pcall(function()
-                if jobId and jobId ~= "" then
-                    TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
-                else
-                    TeleportService:Teleport(placeId, player)
-                end
-            end)
-            if not ok then
-                log("Error", "Rejoin failed: " .. tostring(err))
-            end
-        end)
-    end)
-
-    uiSection(page, "Camera")
 
     local Camera = workspace.CurrentCamera
 
@@ -2243,53 +2217,7 @@ do
         end
     end)
 
-    uiSection(page, "Safety")
-    uiButton(page, "KILL SWITCH (Destroy UI)", function()
-        killSwitch("button")
-    end)
-
-    local info = Instance.new("TextLabel", page)
-    info.Size = UDim2.new(1, 0, 0, 84)
-    info.BackgroundTransparency = 1
-    info.TextWrapped = true
-    info.TextXAlignment = Enum.TextXAlignment.Left
-    info.TextYAlignment = Enum.TextYAlignment.Top
-    info.Font = Enum.Font.Gotham
-    info.TextSize = 14
-    info.TextColor3 = Theme.SubText
-    register(info, "TextColor3", "SubText")
-    info.Text =
-        "• Anti-AFK presses Space every 10 minutes.\n" ..
-        "• Memory Stats is a separate floating UI (doesn't hide with ;).\n" ..
-        "• Kill Switch destroys everything."
-end
-
-
--- WATCHDOG LOOP
-
-local watchdogThreshold = 4
-_G.__MeerlyState.lastHeartbeat = _G.__MeerlyState.lastHeartbeat or os.clock()
-
-task.spawn(function()
-    while running do
-        task.wait(1)
-        if not _G.__MeerlyState.watchdogEnabled then
-            continue
-        end
-
-        local delta = os.clock() - (_G.__MeerlyState.lastHeartbeat or os.clock())
-        if delta > watchdogThreshold then
-            log("System", string.format("Watchdog warning: heartbeat delayed (%.2fs)", delta))
-        end
-    end
-end)
-
-
--- PERFORMANCE PAGE
-
-do
-    local page = Pages.Performance
-    uiSection(page, "Performance")
+    uiSection(page, "Performance & Background")
 
     uiToggle(page, "FPS Cap", fpsCapEnabled, function(v)
         fpsCapEnabled = v
@@ -2354,7 +2282,6 @@ do
         log("System", v and "Background survival enabled — optimized for tabbed-out AFK" or "Background survival disabled")
     end)
 
-    -- EXTRA LONGEVITY TOGGLES
     uiToggle(page, "Disable 3D Rendering", false, function(v)
         if RunService.Set3dRenderingEnabled then
             pcall(function() RunService:Set3dRenderingEnabled(not v) end)
@@ -2402,6 +2329,77 @@ do
         end
     end))
 
+    uiSection(page, "Memory Guard")
+
+    local modeBtn = uiButton(page, "Memory Action: Off", nil)
+    local modes = { "Off", "AutoRejoin", "AutoQuit" }
+    local function refreshModeBtn()
+        modeBtn.Text = "Memory Action: " .. memoryGuardMode
+    end
+    local function cycleMode()
+        local idx = table.find(modes, memoryGuardMode) or 1
+        idx = (idx % #modes) + 1
+        memoryGuardMode = modes[idx]
+        refreshModeBtn()
+        log("System", "Memory guard mode set to " .. memoryGuardMode)
+    end
+    track(modeBtn.MouseButton1Click:Connect(cycleMode))
+    refreshModeBtn()
+
+    local capBox, _ = uiFieldRow(page, "Combined Lua+Engine Cap (GB)", tostring(memoryGuardCapGB), 0.58)
+    track(capBox.FocusLost:Connect(function()
+        local v = tonumber(capBox.Text)
+        if v and v >= 0.5 and v <= 128 then
+            memoryGuardCapGB = v
+        end
+        capBox.Text = tostring(memoryGuardCapGB)
+    end))
+
+    uiSection(page, "Safety")
+    uiButton(page, "KILL SWITCH (Destroy UI)", function()
+        killSwitch("button")
+    end)
+
+    local info = Instance.new("TextLabel", page)
+    info.Size = UDim2.new(1, 0, 0, 84)
+    info.BackgroundTransparency = 1
+    info.TextWrapped = true
+    info.TextXAlignment = Enum.TextXAlignment.Left
+    info.TextYAlignment = Enum.TextYAlignment.Top
+    info.Font = Enum.Font.Gotham
+    info.TextSize = 14
+    info.TextColor3 = Theme.SubText
+    register(info, "TextColor3", "SubText")
+    info.Text =
+        "• Anti-AFK presses Space every 10 minutes.\n" ..
+        "• Memory Stats is a separate floating UI (doesn't hide with ;).\n" ..
+        "• Kill Switch destroys everything."
+end
+
+
+-- WATCHDOG LOOP
+
+local watchdogThreshold = 4
+_G.__MeerlyState.lastHeartbeat = _G.__MeerlyState.lastHeartbeat or os.clock()
+
+task.spawn(function()
+    while running do
+        task.wait(1)
+        if not _G.__MeerlyState.watchdogEnabled then
+            continue
+        end
+
+        local delta = os.clock() - (_G.__MeerlyState.lastHeartbeat or os.clock())
+        if delta > watchdogThreshold then
+            log("System", string.format("Watchdog warning: heartbeat delayed (%.2fs)", delta))
+        end
+    end
+end)
+
+
+-- MEMORY/PERFORMANCE LOOP
+
+do
     task.spawn(function()
         while running do
             task.wait(5)
