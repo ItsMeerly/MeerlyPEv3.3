@@ -3159,7 +3159,7 @@ do
         end
 
         local clickerScoreBest = statisticsData.clickerHighScore
-        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 100000, 10000000)
+        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 500000, 10000000)
 
         local progressionCycle = clickerShapeCycle
         local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10)
@@ -3170,7 +3170,7 @@ do
         local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
 
         clickerDetail.Text = string.format(
-            "Best score: %d\nBronze 10,000 | Silver 100,000 | Gold 10,000,000\nCurrent Tier: %s",
+            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000\nCurrent Tier: %s",
             clickerScoreBest,
             STAT_TIERS[clickerTier].label
         )
