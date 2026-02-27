@@ -215,7 +215,6 @@ local memoryGuardCooldown = 30
 -- MINI CLICKER GAME STATE (LOW MEMORY)
 local clickerScore = 0
 local clickerHighScore = 0
-local clickerUpgradeLevel = 0
 local clickerRunning = false
 local clickPower = 1
 local passiveIncomePerSec = 0
@@ -224,6 +223,21 @@ local clickerHighScoreFile = "clicker_highscore.txt"
 local clickerStateFile = "clicker_state.txt"
 local CLICKER_AUTOSAVE_SEC = 600
 local CLICKER_STATE_CULL_SEC = 30
+
+local CLICKER_UPGRADES = {
+    { id = "Tap",  name = "Tap Training", kind = "clickFlat",  value = 1,    baseCost = 15,  growth = 1.22 },
+    { id = "Gen",  name = "Generator",    kind = "passiveFlat", value = 1,    baseCost = 40,  growth = 1.28 },
+    { id = "Over", name = "Overclock",    kind = "clickMult",   value = 0.12, baseCost = 110, growth = 1.42 },
+    { id = "Auto", name = "Automation",   kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
+}
+
+local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+
+local clickerShapeVertices = 3
+local clickerShapeCycle = 0
+local clickerShapeProgress = 0
+local clickerShapeMilestone = 25
+local clickerPassiveCarry = 0
 
 
 -- LOGGING SYSTEM
@@ -399,6 +413,56 @@ local function runFileIOSelfTest(prefix)
     return true, name
 end
 
+local function clickerUpgradeCost(def, level)
+    return math.max(1, math.floor((def.baseCost * (def.growth ^ level)) + 0.5))
+end
+
+local function recalcClickerStats()
+    local clickFlat = 1
+    local passiveFlat = 0
+    local clickMult = 1
+    local passiveMult = 1
+
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        local lv = clickerUpgradeLevels[def.id] or 0
+        if lv > 0 then
+            if def.kind == "clickFlat" then
+                clickFlat += (def.value * lv)
+            elseif def.kind == "passiveFlat" then
+                passiveFlat += (def.value * lv)
+            elseif def.kind == "clickMult" then
+                clickMult *= (1 + (def.value * lv))
+            elseif def.kind == "passiveMult" then
+                passiveMult *= (1 + (def.value * lv))
+            end
+        end
+    end
+
+    clickPower = math.max(1, math.floor(clickFlat * clickMult + 0.5))
+    passiveIncomePerSec = math.max(0, math.floor(passiveFlat * passiveMult + 0.5))
+end
+
+local function addClickerScore(amount)
+    amount = math.max(0, math.floor(tonumber(amount) or 0))
+    if amount <= 0 then return end
+
+    clickerScore += amount
+    if clickerScore > clickerHighScore then
+        clickerHighScore = clickerScore
+    end
+
+    clickerShapeProgress += amount
+    while clickerShapeProgress >= clickerShapeMilestone do
+        clickerShapeProgress -= clickerShapeMilestone
+        clickerShapeVertices += 1
+        if clickerShapeVertices > 9 then
+            clickerShapeVertices = 3
+            clickerShapeCycle += 1
+        end
+        clickerShapeMilestone = math.floor((clickerShapeMilestone * 1.35) + 5)
+    end
+end
+
 local function loadClickerHighScore()
     local okRead, raw = safeReadFile(clickerHighScoreFile)
     if okRead then
@@ -410,19 +474,36 @@ local function loadClickerHighScore()
 
     local okState, rawState = safeReadFile(clickerStateFile)
     if okState and type(rawState) == "string" then
-        local score, level = rawState:match("^(%-?%d+)|(%-?%d+)$")
-        local parsedScore = tonumber(score)
-        local parsedLevel = tonumber(level)
-        if parsedScore and parsedLevel then
+        local scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        local parsedScore = tonumber(scorePart)
+        if parsedScore then
             clickerScore = math.max(0, math.floor(parsedScore))
-            clickerUpgradeLevel = math.max(0, math.floor(parsedLevel))
-            clickPower = 1 + clickerUpgradeLevel
-            passiveIncomePerSec = clickerUpgradeLevel
-            if clickerScore > clickerHighScore then
-                clickerHighScore = clickerScore
+        end
+
+        if type(upgradesPart) == "string" then
+            for chunk in string.gmatch(upgradesPart, "[^;]+") do
+                local id, lv = chunk:match("^(%a+):(%-?%d+)$")
+                if id and lv and clickerUpgradeLevels[id] ~= nil then
+                    clickerUpgradeLevels[id] = math.max(0, math.floor(tonumber(lv) or 0))
+                end
             end
         end
+
+        if clickerScore > clickerHighScore then
+            clickerHighScore = clickerScore
+        end
     end
+
+    clickerPassiveCarry = 0
+    recalcClickerStats()
+end
+
+local function encodeClickerUpgrades()
+    local parts = table.create(#CLICKER_UPGRADES)
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        parts[#parts + 1] = string.format("%s:%d", def.id, clickerUpgradeLevels[def.id] or 0)
+    end
+    return table.concat(parts, ";")
 end
 
 local function saveClickerState(force)
@@ -431,7 +512,8 @@ local function saveClickerState(force)
     end
     clickerLastSave = os.clock()
 
-    local okState, errState = safeWriteFile(clickerStateFile, string.format("%d|%d", math.floor(clickerScore), math.floor(clickerUpgradeLevel)))
+    local payload = string.format("%d|%s", math.floor(clickerScore), encodeClickerUpgrades())
+    local okState, errState = safeWriteFile(clickerStateFile, payload)
     if not okState then
         log("Error", "Clicker state save failed: " .. tostring(errState))
     end
@@ -445,13 +527,6 @@ end
 local function saveClickerHighScore(force)
     saveClickerState(force)
 end
-
-local function clickerUpgradeCost(level)
-    return 15 + (level * 10)
-end
-
-
-
 
 loadClickerHighScore()
 
@@ -2520,9 +2595,14 @@ do
 
     uiSection(page, "AFK Mini Clicker (Lightweight)")
 
+    local _, setRunBtnState = uiToggle(page, "Mini Game", clickerRunning, function(v)
+        clickerRunning = v
+    end)
+    setRunBtnState(clickerRunning, true)
+
     local statusLabel = Instance.new("TextLabel", page)
     statusLabel.LayoutOrder = nextOrder(page)
-    statusLabel.Size = UDim2.new(1, 0, 0, 52)
+    statusLabel.Size = UDim2.new(1, 0, 0, 56)
     statusLabel.BackgroundTransparency = 1
     statusLabel.TextXAlignment = Enum.TextXAlignment.Left
     statusLabel.TextYAlignment = Enum.TextYAlignment.Top
@@ -2532,74 +2612,175 @@ do
     statusLabel.TextColor3 = Theme.SubText
     register(statusLabel, "TextColor3", "SubText")
 
+    local shapeWrap = Instance.new("Frame", page)
+    shapeWrap.LayoutOrder = nextOrder(page)
+    shapeWrap.Size = UDim2.new(1, 0, 0, 130)
+    shapeWrap.BackgroundColor3 = Theme.PanelDark
+    shapeWrap.BorderSizePixel = 0
+    makeRound(shapeWrap, 8)
+    addStroke(shapeWrap, Theme.Border, 1, 0.45)
+    register(shapeWrap, "BackgroundColor3", "PanelDark")
+
+    local shapeTitle = Instance.new("TextLabel", shapeWrap)
+    shapeTitle.Size = UDim2.new(1, -12, 0, 20)
+    shapeTitle.Position = UDim2.fromOffset(8, 6)
+    shapeTitle.BackgroundTransparency = 1
+    shapeTitle.Font = Enum.Font.Gotham
+    shapeTitle.TextSize = 12
+    shapeTitle.TextXAlignment = Enum.TextXAlignment.Left
+    shapeTitle.TextColor3 = Theme.SubText
+    register(shapeTitle, "TextColor3", "SubText")
+
+    local shapeCanvas = Instance.new("Frame", shapeWrap)
+    shapeCanvas.Size = UDim2.fromOffset(94, 94)
+    shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
+    shapeCanvas.BackgroundTransparency = 1
+
+    local shapeEdges = table.create(9)
+    for i = 1, 9 do
+        local edge = Instance.new("Frame", shapeCanvas)
+        edge.AnchorPoint = Vector2.new(0.5, 0.5)
+        edge.Size = UDim2.fromOffset(2, 2)
+        edge.BorderSizePixel = 0
+        edge.Visible = false
+        edge.BackgroundColor3 = Theme.Accent
+        register(edge, "BackgroundColor3", "Accent")
+        shapeEdges[i] = edge
+    end
+
+    local upgradeFrame = Instance.new("Frame", page)
+    upgradeFrame.LayoutOrder = nextOrder(page)
+    upgradeFrame.Size = UDim2.new(1, 0, 0, 230)
+    markLayoutFrame(upgradeFrame)
+
+    local upgradeGrid = Instance.new("UIGridLayout", upgradeFrame)
+    upgradeGrid.CellSize = UDim2.new(0.49, 0, 0, 72)
+    upgradeGrid.CellPadding = UDim2.fromOffset(8, 8)
+    upgradeGrid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    upgradeGrid.VerticalAlignment = Enum.VerticalAlignment.Top
+
+    local upgradeButtons = {}
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        local btn = Instance.new("TextButton", upgradeFrame)
+        btn.BackgroundColor3 = Theme.Panel
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 12
+        btn.TextWrapped = true
+        btn.TextColor3 = Theme.Text
+        makeRound(btn, 6)
+        ensureStroke(btn)
+        register(btn, "BackgroundColor3", "Panel")
+        register(btn, "TextColor3", "Text")
+
+        track(btn.MouseButton1Click:Connect(function()
+            if not clickerRunning then return end
+            local level = clickerUpgradeLevels[def.id] or 0
+            local cost = clickerUpgradeCost(def, level)
+            if clickerScore < cost then
+                log("Clicker", string.format("%s requires %d", def.name, cost))
+                return
+            end
+            clickerScore -= cost
+            clickerUpgradeLevels[def.id] = level + 1
+            recalcClickerStats()
+        end))
+
+        upgradeButtons[#upgradeButtons + 1] = { def = def, btn = btn }
+    end
+
+    local actionRow = uiRow3(page)
+    local clickBtn = uiSmallBtn(actionRow, "Click")
+    local resetBtn = uiSmallBtn(actionRow, "Reset")
+    local saveBtn = uiSmallBtn(actionRow, "Save")
+
+    track(clickBtn.MouseButton1Click:Connect(function()
+        if not clickerRunning then return end
+        addClickerScore(clickPower)
+    end))
+
+    track(resetBtn.MouseButton1Click:Connect(function()
+        clickerScore = 0
+        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+        clickerShapeVertices = 3
+        clickerShapeCycle = 0
+        clickerShapeProgress = 0
+        clickerShapeMilestone = 25
+        clickerPassiveCarry = 0
+        recalcClickerStats()
+    end))
+
+    track(saveBtn.MouseButton1Click:Connect(function()
+        saveClickerHighScore(true)
+        log("Clicker", "Saved: " .. clickerHighScoreFile .. " + " .. clickerStateFile)
+    end))
+
+    local function updateShapeVisual()
+        local n = math.clamp(clickerShapeVertices, 3, 9)
+        local radius = 36
+        local cx, cy = 47, 47
+        local palette = {
+            Color3.fromRGB(120, 180, 255),
+            Color3.fromRGB(140, 230, 160),
+            Color3.fromRGB(255, 175, 95),
+            Color3.fromRGB(220, 135, 255),
+            Color3.fromRGB(255, 110, 145),
+            Color3.fromRGB(255, 230, 120),
+        }
+        local c = palette[(clickerShapeCycle % #palette) + 1]
+
+        for i = 1, 9 do
+            local edge = shapeEdges[i]
+            if i <= n then
+                local a1 = ((i - 1) / n) * (2 * math.pi) - (math.pi / 2)
+                local a2 = (i / n) * (2 * math.pi) - (math.pi / 2)
+                local x1 = cx + (math.cos(a1) * radius)
+                local y1 = cy + (math.sin(a1) * radius)
+                local x2 = cx + (math.cos(a2) * radius)
+                local y2 = cy + (math.sin(a2) * radius)
+                local dx, dy = x2 - x1, y2 - y1
+                local len = math.sqrt((dx * dx) + (dy * dy))
+
+                edge.Visible = true
+                edge.BackgroundColor3 = c
+                edge.Size = UDim2.fromOffset(math.max(2, len), 2)
+                edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                edge.Rotation = math.deg(math.atan2(dy, dx))
+            else
+                edge.Visible = false
+            end
+        end
+
+        shapeTitle.Text = string.format(
+            "Shape: %d-gon | Next vertex in %d clicks | Cycle %d",
+            n,
+            math.max(0, clickerShapeMilestone - clickerShapeProgress),
+            clickerShapeCycle
+        )
+    end
+
     local function refreshClickerView()
-        local nextCost = clickerUpgradeCost(clickerUpgradeLevel)
         statusLabel.Text = string.format(
-            "State: %s\nScore: %d | High: %d | Power: %d | Passive: %d/s | Upgrade Cost: %d",
+            "State: %s\nScore: %d | High: %d | Click: +%d | Passive: +%d/s",
             clickerRunning and "RUNNING" or "PAUSED",
             clickerScore,
             clickerHighScore,
             clickPower,
-            passiveIncomePerSec,
-            nextCost
+            passiveIncomePerSec
         )
+
+        for _, item in ipairs(upgradeButtons) do
+            local def = item.def
+            local lv = clickerUpgradeLevels[def.id] or 0
+            local cost = clickerUpgradeCost(def, lv)
+            item.btn.Text = string.format("%s\nLv %d | Cost %d", def.name, lv, cost)
+        end
+
+        updateShapeVisual()
     end
+
     ThemeRefreshers[#ThemeRefreshers + 1] = refreshClickerView
-
-    uiButton(page, "Click (+Power)", function()
-        if not clickerRunning then
-            return
-        end
-        clickerScore += clickPower
-        if clickerScore > clickerHighScore then
-            clickerHighScore = clickerScore
-        end
-        refreshClickerView()
-    end)
-
-    uiButton(page, "Buy Upgrade (+1 Power, +1/s Passive)", function()
-        if not clickerRunning then
-            return
-        end
-        local cost = clickerUpgradeCost(clickerUpgradeLevel)
-        if clickerScore < cost then
-            log("Clicker", string.format("Need %d score for next upgrade", cost))
-            return
-        end
-        clickerScore -= cost
-        clickerUpgradeLevel += 1
-        clickPower = 1 + clickerUpgradeLevel
-        passiveIncomePerSec = clickerUpgradeLevel
-        if clickerScore > clickerHighScore then
-            clickerHighScore = clickerScore
-        end
-        refreshClickerView()
-    end)
-
-    local _, setRunBtnState = uiToggle(page, "Mini Game", clickerRunning, function(v)
-        clickerRunning = v
-        refreshClickerView()
-    end)
-    setRunBtnState(clickerRunning, true)
-
-    uiButton(page, "Reset Current Run", function()
-        clickerScore = 0
-        clickerUpgradeLevel = 0
-        clickPower = 1
-        passiveIncomePerSec = 0
-        refreshClickerView()
-    end)
-
-    uiButton(page, "Force Save Highscore", function()
-        saveClickerHighScore(true)
-        log("Clicker", "Highscore saved to " .. clickerHighScoreFile)
-    end)
-
-    uiButton(page, "Show Save Path", function()
-        log("Clicker", "Highscore file: " .. clickerHighScoreFile)
-        log("Clicker", "State file: " .. clickerStateFile)
-    end)
-
     refreshClickerView()
 
     task.spawn(function()
@@ -2612,9 +2793,11 @@ do
             if clickerRunning and passiveIncomePerSec > 0 then
                 local dt = now - lastTick
                 if dt > 0 then
-                    clickerScore += math.floor(passiveIncomePerSec * dt)
-                    if clickerScore > clickerHighScore then
-                        clickerHighScore = clickerScore
+                    local gained = (passiveIncomePerSec * dt) + clickerPassiveCarry
+                    local whole = math.floor(gained)
+                    clickerPassiveCarry = gained - whole
+                    if whole > 0 then
+                        addClickerScore(whole)
                     end
                 end
             end
@@ -2930,6 +3113,7 @@ Notes:
 • Memory Stats UI is separate and does NOT hide with the main UI.
 • Macro and Config Save/Load uses writefile/readfile (available in some environments).
 • Themes Accent RGB color picker is now saved in Config.
+• Clicker has top-level ON/OFF, upgrade grid, and scaling shape milestones.
 • Clicker highscore autosaves every 10 minutes and on close.
 ]]
 end
