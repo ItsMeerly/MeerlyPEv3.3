@@ -123,11 +123,18 @@ local Blur = Instance.new("BlurEffect")
 Blur.Size = 0
 Blur.Parent = Lighting
 
-local function setBlur(amount)
-    Blur.Size = amount
-end
-
 local setTransparency
+local uiTransparencyAlpha = 0
+local blurAmount = 0
+
+local function setBlur(amount)
+    blurAmount = math.max(0, tonumber(amount) or 0)
+    if not Blur or not Blur.Parent then
+        Blur = Instance.new("BlurEffect")
+        Blur.Parent = Lighting
+    end
+    Blur.Size = blurAmount
+end
 
 
 -- GLOBAL SINGLETONS & STATE
@@ -1216,17 +1223,25 @@ end
 
 -- WIRE TRANSPARENCY (needs changing)
 
+local function lockTransparency(obj)
+    if obj and obj.SetAttribute then
+        obj:SetAttribute("__lockTransparency", true)
+    end
+    return obj
+end
+
 setTransparency = function(alpha)
     alpha = tonumber(alpha) or 0
-    window.BackgroundTransparency = math.clamp(alpha, 0, 0.45)
-    topBar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
-    sidebar.BackgroundTransparency = math.clamp(alpha, 0, 0.25)
-    body.BackgroundTransparency = math.clamp(alpha, 0, 0.35)
+    uiTransparencyAlpha = math.clamp(alpha, 0, 0.45)
+    window.BackgroundTransparency = uiTransparencyAlpha
+    topBar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
+    sidebar.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.25)
+    body.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.35)
 
     for _, obj in ipairs(window:GetDescendants()) do
         if obj:IsA("Frame") and obj ~= body and obj ~= content then
-            if not obj:GetAttribute("__layout") then
-                obj.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
+            if not obj:GetAttribute("__layout") and not obj:GetAttribute("__lockTransparency") then
+                obj.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
             end
         end
     end
@@ -1234,8 +1249,8 @@ setTransparency = function(alpha)
     for _, page in pairs(Pages) do
         for _, child in ipairs(page:GetDescendants()) do
             if child:IsA("Frame") then
-                if not child:GetAttribute("__layout") then
-                    child.BackgroundTransparency = math.clamp(alpha, 0, 0.6)
+                if not child:GetAttribute("__layout") and not child:GetAttribute("__lockTransparency") then
+                    child.BackgroundTransparency = math.clamp(uiTransparencyAlpha, 0, 0.6)
                 end
             end
         end
@@ -2824,6 +2839,7 @@ do
     shapeCanvas.Size = UDim2.fromOffset(94, 94)
     shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
     shapeCanvas.BackgroundTransparency = 1
+    lockTransparency(shapeCanvas)
 
     local shapeEdges = table.create(9)
     for i = 1, 9 do
@@ -3254,6 +3270,8 @@ do
             memoryGuardMode = memoryGuardMode,
             memoryGuardCapGB = memoryGuardCapGB,
             theme = serializeTheme(Theme),
+            transparencyAlpha = uiTransparencyAlpha,
+            blurAmount = blurAmount,
         }
     end
 
@@ -3284,6 +3302,12 @@ do
         if setfpscap and fpsCapEnabled then pcall(function() setfpscap(targetFPS) end) end
         if cfg.theme then
             pcall(function() applyTheme(deserializeTheme(cfg.theme)) end)
+        end
+        if cfg.transparencyAlpha ~= nil and setTransparency then
+            pcall(function() setTransparency(cfg.transparencyAlpha) end)
+        end
+        if cfg.blurAmount ~= nil then
+            pcall(function() setBlur(cfg.blurAmount) end)
         end
         log("System", "Config applied")
     end
