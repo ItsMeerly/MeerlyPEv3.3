@@ -3101,7 +3101,6 @@ do
     progressionPreview.Size = UDim2.fromOffset(86, 62)
     progressionPreview.Position = UDim2.new(1, -94, 0, 18)
     progressionPreview.BackgroundTransparency = 1
-    lockTransparency(progressionPreview)
 
     local previewEdges = table.create(9)
     for i = 1, 9 do
