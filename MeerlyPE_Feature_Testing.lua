@@ -239,6 +239,25 @@ local clickerShapeProgress = 0
 local clickerShapeMilestone = 25
 local clickerPassiveCarry = 0
 
+-- STATISTICS / ACHIEVEMENTS
+local statisticsFile = "statistics_data.json"
+local statisticsSessionStartClock = os.clock()
+local statisticsData = {
+    longestSessionSeconds = 0,
+    totalSkillActivations = 0,
+    clickerHighScore = 0,
+    sessionActive = false,
+    sessionStartTime = 0,
+    lastSessionReason = "",
+}
+
+local STAT_TIERS = {
+    None = { label = "Grey", color = Color3.fromRGB(96, 96, 108) },
+    Bronze = { label = "Bronze", color = Color3.fromRGB(184, 115, 51) },
+    Silver = { label = "Silver", color = Color3.fromRGB(170, 170, 178) },
+    Gold = { label = "Gold", color = Color3.fromRGB(235, 198, 64) },
+}
+
 
 -- LOGGING SYSTEM
 
@@ -342,6 +361,78 @@ local function safeReadFile(path)
         return ok, data
     end
     return false, "readfile not available"
+end
+
+
+local function formatDurationHM(totalSeconds)
+    totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+    local h = math.floor(totalSeconds / 3600)
+    local m = math.floor((totalSeconds % 3600) / 60)
+    return string.format("%dh %02dm", h, m)
+end
+
+local function getTierByThreshold(value, bronze, silver, gold)
+    value = tonumber(value) or 0
+    if value >= gold then return "Gold" end
+    if value >= silver then return "Silver" end
+    if value >= bronze then return "Bronze" end
+    return "None"
+end
+
+local function saveStatistics()
+    local payload = HttpService:JSONEncode(statisticsData)
+    local ok, err = safeWriteFile(statisticsFile, payload)
+    if not ok then
+        log("Error", "Statistics save failed: " .. tostring(err))
+    end
+    return ok
+end
+
+local function loadStatistics()
+    local okRead, raw = safeReadFile(statisticsFile)
+    if okRead and type(raw) == "string" and #raw > 0 then
+        local okDecode, parsed = pcall(function() return HttpService:JSONDecode(raw) end)
+        if okDecode and type(parsed) == "table" then
+            statisticsData.longestSessionSeconds = math.max(0, math.floor(tonumber(parsed.longestSessionSeconds) or 0))
+            statisticsData.totalSkillActivations = math.max(0, math.floor(tonumber(parsed.totalSkillActivations) or 0))
+            statisticsData.clickerHighScore = math.max(0, math.floor(tonumber(parsed.clickerHighScore) or 0))
+            statisticsData.sessionActive = parsed.sessionActive == true
+            statisticsData.sessionStartTime = math.max(0, math.floor(tonumber(parsed.sessionStartTime) or 0))
+            statisticsData.lastSessionReason = tostring(parsed.lastSessionReason or "")
+        end
+    end
+
+    if statisticsData.sessionActive and statisticsData.sessionStartTime > 0 then
+        local recoveredSeconds = math.max(0, os.time() - statisticsData.sessionStartTime)
+        if recoveredSeconds > statisticsData.longestSessionSeconds then
+            statisticsData.longestSessionSeconds = recoveredSeconds
+            log("System", "Recovered session length from previous run: " .. formatDurationHM(recoveredSeconds))
+        end
+    end
+
+    statisticsData.sessionActive = true
+    statisticsData.sessionStartTime = os.time()
+    statisticsData.lastSessionReason = "running"
+end
+
+local function finalizeSessionStatistics(reason)
+    local elapsed = math.max(0, math.floor(os.clock() - statisticsSessionStartClock))
+    if elapsed > statisticsData.longestSessionSeconds then
+        statisticsData.longestSessionSeconds = elapsed
+    end
+
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+    end
+
+    statisticsData.sessionActive = false
+    statisticsData.lastSessionReason = tostring(reason or "session_end")
+    saveStatistics()
+end
+
+local function incrementSkillActivation(count)
+    count = math.max(1, math.floor(tonumber(count) or 1))
+    statisticsData.totalSkillActivations += count
 end
 
 
@@ -485,7 +576,11 @@ local function loadClickerHighScore()
 
     local okState, rawState = safeReadFile(clickerStateFile)
     if okState and type(rawState) == "string" then
-        local scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        local scorePart, upgradesPart, vPart, cPart, pPart, mPart = rawState:match("^(%-?%d+)|([^|]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)|(%-?%d+)$")
+        if not scorePart then
+            scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        end
+
         local parsedScore = tonumber(scorePart)
         if parsedScore then
             clickerScore = math.max(0, math.floor(parsedScore))
@@ -500,6 +595,16 @@ local function loadClickerHighScore()
             end
         end
 
+        if vPart and cPart and pPart and mPart then
+            clickerShapeVertices = math.clamp(math.floor(tonumber(vPart) or 3), 3, 9)
+            clickerShapeCycle = math.max(0, math.floor(tonumber(cPart) or 0))
+            clickerShapeProgress = math.max(0, math.floor(tonumber(pPart) or 0))
+            clickerShapeMilestone = math.max(25, math.floor(tonumber(mPart) or 25))
+            if clickerShapeProgress >= clickerShapeMilestone then
+                clickerShapeProgress = clickerShapeProgress % clickerShapeMilestone
+            end
+        end
+
         if clickerScore > clickerHighScore then
             clickerHighScore = clickerScore
         end
@@ -507,6 +612,10 @@ local function loadClickerHighScore()
 
     clickerPassiveCarry = 0
     recalcClickerStats()
+
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+    end
 end
 
 local function encodeClickerUpgrades()
@@ -523,13 +632,17 @@ local function saveClickerState(force)
     end
     clickerLastSave = os.clock()
 
-    local payload = string.format("%d|%s", math.floor(clickerScore), encodeClickerUpgrades())
+    local payload = string.format("%d|%s|%d|%d|%d|%d", math.floor(clickerScore), encodeClickerUpgrades(), math.floor(clickerShapeVertices), math.floor(clickerShapeCycle), math.floor(clickerShapeProgress), math.floor(clickerShapeMilestone))
     local okState, errState = safeWriteFile(clickerStateFile, payload)
     if not okState then
         log("Error", "Clicker state save failed: " .. tostring(errState))
     end
 
     local okHigh, errHigh = safeWriteFile(clickerHighScoreFile, tostring(math.floor(clickerHighScore)))
+    if clickerHighScore > statisticsData.clickerHighScore then
+        statisticsData.clickerHighScore = clickerHighScore
+        saveStatistics()
+    end
     if not okHigh then
         log("Error", "Clicker highscore save failed: " .. tostring(errHigh))
     end
@@ -540,6 +653,11 @@ local function saveClickerHighScore(force)
 end
 
 loadClickerHighScore()
+loadStatistics()
+if clickerHighScore > statisticsData.clickerHighScore then
+    statisticsData.clickerHighScore = clickerHighScore
+end
+saveStatistics()
 
 -- ROOT GUI
 
@@ -613,6 +731,10 @@ local function killSwitch(reason)
 
     pcall(function()
         saveClickerHighScore(true)
+    end)
+
+    pcall(function()
+        finalizeSessionStatistics(reason or "kill switch")
     end)
 
     pcall(function()
@@ -1069,7 +1191,7 @@ local function sidebarButton(text)
     return btn
 end
 
-local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Clicker", "Config", "Console", "Themes", "Help" }
+local pageNames = { "Automation", "Macro", "XP", "Boss", "Misc", "Clicker", "Statistics", "Config", "Console", "Themes", "Help" }
 for _, name in ipairs(pageNames) do
     sidebarButton(name)
     createPage(name)
@@ -1555,6 +1677,7 @@ task.spawn(function()
             for _, skill in ipairs(enabled) do
                 if canUseSkill(skill) then
                     pressKey(SKILL_KEYS[skill])
+                    incrementSkillActivation(1)
 
                     local now = os.clock()
                     skillState[skill].lastUse = now
@@ -1582,6 +1705,7 @@ task.spawn(function()
             local skill = enabled[staggerIndex]
             if skill and canUseSkill(skill) then
                 pressKey(SKILL_KEYS[skill])
+                incrementSkillActivation(1)
 
                 skillState[skill].lastUse = now
                 skillState[skill].nextCooldownMs =
@@ -2825,7 +2949,7 @@ do
 
                 if now - lastCull >= CLICKER_STATE_CULL_SEC then
                     lastCull = now
-                    collectgarbage("step", 64)
+                    gcinfo()
                 end
 
                 refreshClickerView()
@@ -2840,6 +2964,204 @@ do
 end
 
 
+-- STATISTICS PAGE
+
+do
+    local page = Pages.Statistics
+
+    uiSection(page, "Statistics / Achievements")
+
+    local summaryLabel = Instance.new("TextLabel", page)
+    summaryLabel.LayoutOrder = nextOrder(page)
+    summaryLabel.Size = UDim2.new(1, 0, 0, 42)
+    summaryLabel.BackgroundTransparency = 1
+    summaryLabel.TextXAlignment = Enum.TextXAlignment.Left
+    summaryLabel.TextYAlignment = Enum.TextYAlignment.Top
+    summaryLabel.Font = Enum.Font.Gotham
+    summaryLabel.TextSize = 13
+    summaryLabel.TextWrapped = true
+    summaryLabel.TextColor3 = Theme.SubText
+    register(summaryLabel, "TextColor3", "SubText")
+
+    local function createAchievementCard(titleText, height)
+        local card = Instance.new("Frame", page)
+        card.LayoutOrder = nextOrder(page)
+        card.Size = UDim2.new(1, 0, 0, height or 78)
+        card.BackgroundColor3 = Theme.PanelDark
+        card.BorderSizePixel = 0
+        makeRound(card, 8)
+        register(card, "BackgroundColor3", "PanelDark")
+
+        local stroke = addStroke(card, STAT_TIERS.None.color, 1.25, 0.12)
+
+        local title = Instance.new("TextLabel", card)
+        title.Size = UDim2.new(1, -16, 0, 22)
+        title.Position = UDim2.fromOffset(8, 8)
+        title.BackgroundTransparency = 1
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 13
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.TextColor3 = Theme.Text
+        title.Text = titleText
+        register(title, "TextColor3", "Text")
+
+        local detail = Instance.new("TextLabel", card)
+        detail.Size = UDim2.new(1, -16, 0, (height or 78) - 36)
+        detail.Position = UDim2.fromOffset(8, 30)
+        detail.BackgroundTransparency = 1
+        detail.Font = Enum.Font.Gotham
+        detail.TextSize = 12
+        detail.TextWrapped = true
+        detail.TextXAlignment = Enum.TextXAlignment.Left
+        detail.TextYAlignment = Enum.TextYAlignment.Top
+        detail.TextColor3 = Theme.SubText
+        register(detail, "TextColor3", "SubText")
+
+        return card, detail, stroke
+    end
+
+    local _, clickerDetail, clickerStroke = createAchievementCard("High Score in Clicker mini game")
+    local progressionCard, progressionDetail, progressionStroke = createAchievementCard("Clicker Progression", 96)
+    local _, sessionDetail, sessionStroke = createAchievementCard("Longest Session")
+    local _, skillsDetail, skillsStroke = createAchievementCard("Total Skills Activated")
+
+    progressionDetail.Size = UDim2.new(1, -124, 0, 60)
+
+    local progressionPreview = Instance.new("Frame", progressionCard)
+    progressionPreview.Size = UDim2.fromOffset(86, 62)
+    progressionPreview.Position = UDim2.new(1, -94, 0.5, -12)
+    progressionPreview.BackgroundTransparency = 1
+
+    local previewEdges = table.create(9)
+    for i = 1, 9 do
+        local edge = Instance.new("Frame", progressionPreview)
+        edge.AnchorPoint = Vector2.new(0.5, 0.5)
+        edge.Size = UDim2.fromOffset(2, 2)
+        edge.BorderSizePixel = 0
+        edge.Visible = false
+        edge.BackgroundColor3 = Theme.Accent
+        register(edge, "BackgroundColor3", "Accent")
+        previewEdges[i] = edge
+    end
+
+    local previewCycle = Instance.new("TextLabel", progressionPreview)
+    previewCycle.Size = UDim2.new(1, 0, 0, 16)
+    previewCycle.Position = UDim2.new(0, 0, 1, -16)
+    previewCycle.BackgroundTransparency = 1
+    previewCycle.Font = Enum.Font.GothamBold
+    previewCycle.TextSize = 11
+    previewCycle.TextXAlignment = Enum.TextXAlignment.Center
+    previewCycle.TextColor3 = Theme.Text
+    register(previewCycle, "TextColor3", "Text")
+
+    local function applyTier(stroke, tierName)
+        local tier = STAT_TIERS[tierName] or STAT_TIERS.None
+        stroke.Color = tier.color
+    end
+
+    local function refreshProgressionPreview()
+        local n = math.clamp(clickerShapeVertices, 3, 9)
+        local radius = 18
+        local cx, cy = 43, 24
+
+        for i = 1, 9 do
+            local edge = previewEdges[i]
+            if i <= n then
+                local a1 = ((i - 1) / n) * (2 * math.pi) - (math.pi / 2)
+                local a2 = (i / n) * (2 * math.pi) - (math.pi / 2)
+                local x1 = cx + (math.cos(a1) * radius)
+                local y1 = cy + (math.sin(a1) * radius)
+                local x2 = cx + (math.cos(a2) * radius)
+                local y2 = cy + (math.sin(a2) * radius)
+                local dx, dy = x2 - x1, y2 - y1
+                local len = math.sqrt((dx * dx) + (dy * dy))
+
+                edge.Visible = true
+                edge.Size = UDim2.fromOffset(math.max(2, len), 2)
+                edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                edge.Rotation = angleDeg(dy, dx)
+            else
+                edge.Visible = false
+            end
+        end
+
+        previewCycle.Text = string.format("C%d", clickerShapeCycle)
+    end
+
+    local function refreshStatisticsView()
+        if clickerHighScore > statisticsData.clickerHighScore then
+            statisticsData.clickerHighScore = clickerHighScore
+        end
+
+        local clickerScoreBest = statisticsData.clickerHighScore
+        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 100000, 10000000)
+
+        local progressionCycle = clickerShapeCycle
+        local progressionTier = getTierByThreshold(progressionCycle, 2, 8, 15)
+
+        local sessionSecs = statisticsData.longestSessionSeconds
+        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 6 * 3600, 10 * 3600)
+        local skillCount = statisticsData.totalSkillActivations
+        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
+
+        clickerDetail.Text = string.format(
+            "Best score: %d\nBronze 10,000 | Silver 100,000 | Gold 10,000,000\nCurrent Tier: %s",
+            clickerScoreBest,
+            STAT_TIERS[clickerTier].label
+        )
+        applyTier(clickerStroke, clickerTier)
+
+        progressionDetail.Text = string.format(
+            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C8 | Gold C15\nCurrent Tier: %s",
+            clickerShapeVertices,
+            progressionCycle,
+            STAT_TIERS[progressionTier].label
+        )
+        applyTier(progressionStroke, progressionTier)
+        refreshProgressionPreview()
+
+        sessionDetail.Text = string.format(
+            "Best: %s\nBronze 4h | Silver 6h | Gold 10h\nCurrent Tier: %s",
+            formatDurationHM(sessionSecs),
+            STAT_TIERS[sessionTier].label
+        )
+        applyTier(sessionStroke, sessionTier)
+
+        skillsDetail.Text = string.format(
+            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nCurrent Tier: %s",
+            skillCount,
+            STAT_TIERS[skillTier].label
+        )
+        applyTier(skillsStroke, skillTier)
+
+        summaryLabel.Text = string.format(
+            "Session now: %s | Last end reason: %s",
+            formatDurationHM(os.clock() - statisticsSessionStartClock),
+            tostring(statisticsData.lastSessionReason or "unknown")
+        )
+    end
+
+    uiButton(page, "Update Statistics", function()
+        finalizeSessionStatistics("manual update")
+        statisticsData.sessionActive = true
+        statisticsData.sessionStartTime = os.time()
+        statisticsData.lastSessionReason = "running"
+        saveClickerState(true)
+        saveStatistics()
+        refreshStatisticsView()
+        log("System", "Statistics updated and saved")
+    end)
+
+    ThemeRefreshers[#ThemeRefreshers + 1] = refreshStatisticsView
+    refreshStatisticsView()
+
+    task.spawn(function()
+        while running and not __destroyed do
+            task.wait(2)
+            refreshStatisticsView()
+        end
+    end)
+end
 -- CONFIG PAGE
 
 do
@@ -3181,6 +3503,7 @@ end))
 pcall(function()
     game:BindToClose(function()
         saveClickerHighScore(true)
+        finalizeSessionStatistics("game close")
         dumpLogsToFile("game close")
     end)
 end)
