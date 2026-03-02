@@ -366,6 +366,18 @@ local function safeReadFile(path)
     return false, "readfile not available"
 end
 
+local function tableFind(tbl, value)
+    if type(table.find) == "function" then
+        return table.find(tbl, value)
+    end
+    for i, v in ipairs(tbl or {}) do
+        if v == value then
+            return i
+        end
+    end
+    return nil
+end
+
 
 local function formatDurationHM(totalSeconds)
     totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
@@ -1533,7 +1545,7 @@ local function uiDropdown(parent, labelText, options, selectedValue, callback)
     register(btn, "BackgroundColor3", "PanelDark")
     register(btn, "TextColor3", "Text")
 
-    local idx = table.find(options, selectedValue) or 1
+    local idx = tableFind(options, selectedValue) or 1
     local function refresh()
         btn.Text = tostring(options[idx] or "-") .. "  ▾"
     end
@@ -1547,7 +1559,7 @@ local function uiDropdown(parent, labelText, options, selectedValue, callback)
 
     refresh()
     return row, function(v)
-        local i = table.find(options, v)
+        local i = tableFind(options, v)
         if i then
             idx = i
             refresh()
@@ -1722,7 +1734,7 @@ do
     end
 
     presetBtn = uiButton(page, "Stagger Preset: " .. (staggerLabels[selectedChainMode] or selectedChainMode), function()
-        local idx = table.find(staggerOrder, selectedChainMode) or 1
+        local idx = tableFind(staggerOrder, selectedChainMode) or 1
         idx = (idx % #staggerOrder) + 1
         selectedChainMode = staggerOrder[idx]
         refreshPresetBtn()
@@ -3379,8 +3391,15 @@ do
             return Color3.new(1, 1, 1)
         end
         local okTheme, themeTbl = pcall(function() return deserializeTheme(decoded.theme) end)
-        if okTheme and type(themeTbl) == "table" and typeof(themeTbl.Accent) == "Color3" then
-            return themeTbl.Accent
+        if okTheme and type(themeTbl) == "table" then
+            local accent = themeTbl.Accent
+            if type(typeof) == "function" then
+                if typeof(accent) == "Color3" then
+                    return accent
+                end
+            elseif type(accent) == "userdata" then
+                return accent
+            end
         end
         return Color3.new(1, 1, 1)
     end
