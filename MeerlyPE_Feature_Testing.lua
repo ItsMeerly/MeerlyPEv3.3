@@ -225,13 +225,24 @@ local CLICKER_AUTOSAVE_SEC = 600
 local CLICKER_STATE_CULL_SEC = 30
 
 local CLICKER_UPGRADES = {
-    { id = "Tap",  name = "Tap Training", kind = "clickFlat",  value = 1,    baseCost = 15,  growth = 1.22 },
-    { id = "Gen",  name = "Generator",    kind = "passiveFlat", value = 1,    baseCost = 40,  growth = 1.28 },
-    { id = "Over", name = "Overclock",    kind = "clickMult",   value = 0.12, baseCost = 110, growth = 1.42 },
-    { id = "Auto", name = "Automation",   kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
+    { id = "Tap",   name = "Tap Training",   kind = "clickFlat",   value = 1,    baseCost = 15,   growth = 1.22 },
+    { id = "Gen",   name = "Generator",      kind = "passiveFlat", value = 1,    baseCost = 40,   growth = 1.28 },
+    { id = "Over",  name = "Overclock",      kind = "clickMult",   value = 0.12, baseCost = 110,  growth = 1.42 },
+    { id = "Auto",  name = "Automation",     kind = "passiveMult", value = 0.14, baseCost = 170,  growth = 1.48 },
+    { id = "Turbo", name = "Turbo Gloves",   kind = "clickFlat",   value = 4,    baseCost = 420,  growth = 1.36 },
+    { id = "Drone", name = "Drone Farm",     kind = "passiveFlat", value = 6,    baseCost = 780,  growth = 1.41 },
+    { id = "Nova",  name = "Nova Catalyst",  kind = "clickMult",   value = 0.20, baseCost = 1350, growth = 1.5 },
 }
 
-local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+local function newClickerUpgradeLevels()
+    local levels = {}
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        levels[def.id] = 0
+    end
+    return levels
+end
+
+local clickerUpgradeLevels = newClickerUpgradeLevels()
 
 local clickerShapeVertices = 3
 local clickerShapeCycle = 0
@@ -256,6 +267,9 @@ local STAT_TIERS = {
     Bronze = { label = "Bronze", color = Color3.fromRGB(184, 115, 51) },
     Silver = { label = "Silver", color = Color3.fromRGB(170, 170, 178) },
     Gold = { label = "Gold", color = Color3.fromRGB(235, 198, 64) },
+    Diamond = { label = "Diamond", color = Color3.fromRGB(80, 170, 255) },
+    Platinum = { label = "Platinum", color = Color3.fromRGB(245, 245, 255) },
+    Master = { label = "Master", color = Color3.fromRGB(255, 0, 255) },
 }
 
 
@@ -371,12 +385,17 @@ local function formatDurationHM(totalSeconds)
     return string.format("%dh %02dm", h, m)
 end
 
-local function getTierByThreshold(value, bronze, silver, gold)
+local function getTierByThreshold(value, tierTargets)
     value = tonumber(value) or 0
-    if value >= gold then return "Gold" end
-    if value >= silver then return "Silver" end
-    if value >= bronze then return "Bronze" end
-    return "None"
+    local order = { "Bronze", "Silver", "Gold", "Diamond", "Platinum", "Master" }
+    local current = "None"
+    for _, tierName in ipairs(order) do
+        local target = tierTargets[tierName]
+        if target and value >= target then
+            current = tierName
+        end
+    end
+    return current
 end
 
 local function saveStatistics()
@@ -2839,7 +2858,7 @@ do
 
     local upgradeFrame = Instance.new("Frame", page)
     upgradeFrame.LayoutOrder = nextOrder(page)
-    upgradeFrame.Size = UDim2.new(1, 0, 0, 230)
+    upgradeFrame.Size = UDim2.new(1, 0, 0, 318)
     markLayoutFrame(upgradeFrame)
 
     local upgradeGrid = Instance.new("UIGridLayout", upgradeFrame)
@@ -2894,7 +2913,7 @@ do
 
     track(resetBtn.MouseButton1Click:Connect(function()
         clickerScore = 0
-        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+        clickerUpgradeLevels = newClickerUpgradeLevels()
         clickerShapeVertices = 3
         clickerShapeCycle = 0
         clickerShapeProgress = 0
@@ -3159,25 +3178,57 @@ do
         end
 
         local clickerScoreBest = statisticsData.clickerHighScore
-        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 500000, 10000000)
+        local clickerTierTargets = {
+            Bronze = 10000,
+            Silver = 500000,
+            Gold = 10000000,
+            Diamond = 50000000,
+            Platinum = 250000000,
+            Master = 1000000000,
+        }
+        local clickerTier = getTierByThreshold(clickerScoreBest, clickerTierTargets)
 
         local progressionCycle = clickerShapeCycle
-        local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10)
+        local progressionTierTargets = {
+            Bronze = 2,
+            Silver = 6,
+            Gold = 10,
+            Diamond = 15,
+            Platinum = 21,
+            Master = 28,
+        }
+        local progressionTier = getTierByThreshold(progressionCycle, progressionTierTargets)
 
         local sessionSecs = statisticsData.longestSessionSeconds
-        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 8 * 3600, 12 * 3600)
+        local sessionTierTargets = {
+            Bronze = 4 * 3600,
+            Silver = 8 * 3600,
+            Gold = 12 * 3600,
+            Diamond = 18 * 3600,
+            Platinum = 24 * 3600,
+            Master = 36 * 3600,
+        }
+        local sessionTier = getTierByThreshold(sessionSecs, sessionTierTargets)
         local skillCount = statisticsData.totalSkillActivations
-        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
+        local skillTierTargets = {
+            Bronze = 1000,
+            Silver = 10000,
+            Gold = 50000,
+            Diamond = 150000,
+            Platinum = 500000,
+            Master = 1000000,
+        }
+        local skillTier = getTierByThreshold(skillCount, skillTierTargets)
 
         clickerDetail.Text = string.format(
-            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000\nCurrent Tier: %s",
+            "Best score: %d\nB 10,000 | S 500,000 | G 10,000,000 | D 50,000,000 | P 250,000,000 | M 1,000,000,000\nCurrent Tier: %s",
             clickerScoreBest,
             STAT_TIERS[clickerTier].label
         )
         applyTier(clickerStroke, clickerTier)
 
         progressionDetail.Text = string.format(
-            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10\nCurrent Tier: %s",
+            "Shape: %d-gon | Cycle: %d\nB C2 | S C6 | G C10 | D C15 | P C21 | M C28\nCurrent Tier: %s",
             clickerShapeVertices,
             progressionCycle,
             STAT_TIERS[progressionTier].label
@@ -3186,14 +3237,14 @@ do
         refreshProgressionPreview()
 
         sessionDetail.Text = string.format(
-            "Best: %s\nBronze 4h | Silver 8h | Gold 12h\nCurrent Tier: %s",
+            "Best: %s\nB 4h | S 8h | G 12h | D 18h | P 24h | M 36h\nCurrent Tier: %s",
             formatDurationHM(sessionSecs),
             STAT_TIERS[sessionTier].label
         )
         applyTier(sessionStroke, sessionTier)
 
         skillsDetail.Text = string.format(
-            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nCurrent Tier: %s",
+            "Total activations: %d\nB 1,000 | S 10,000 | G 50,000 | D 150,000 | P 500,000 | M 1,000,000\nCurrent Tier: %s",
             skillCount,
             STAT_TIERS[skillTier].label
         )
