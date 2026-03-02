@@ -1,306 +1,300 @@
-diff --git a/MeerlyPE_Feature_Testing b/MeerlyPE_Feature_Testing
-index c39f267184057539b2e9fb9c9b7dc124f2200b6c..bdc48b07331f7e5ca13d98db7484b1dd0e4f13f5 100644
---- a/MeerlyPE_Feature_Testing
-+++ b/MeerlyPE_Feature_Testing
-@@ -3,50 +3,63 @@
- -- Automation + Calculators + Console + Performance + Misc + Macro
+diff --git a/MeerlyPE_Feature_Testing.lua b/MeerlyPE_Feature_Testing.lua
+index 0000000..1111111 100644
+--- a/MeerlyPE_Feature_Testing.lua
++++ b/MeerlyPE_Feature_Testing.lua
+@@ -1,5 +1,5 @@
  -- ============================================================
- 
- -----------------------
- -- SERVICES
- -----------------------
- local Players             = game:GetService("Players")
- local RunService          = game:GetService("RunService")
- local Lighting            = game:GetService("Lighting")
- local UserInputService    = game:GetService("UserInputService")
- local TeleportService     = game:GetService("TeleportService")
- local VirtualInputManager = game:GetService("VirtualInputManager")
- local VirtualUser         = game:GetService("VirtualUser")
- local Stats               = game:GetService("Stats")
- local HttpService         = game:GetService("HttpService")
- 
- local player = Players.LocalPlayer
- math.randomseed(os.clock())
- 
- -----------------------
- -- ACCESS GATE CONFIG
- -----------------------
- local KEYGATE_LINK = "https://work.ink/2kaV/meerlype-key123"
- local KEYGATE_KEY = "JoinOathGuildToday!"
- 
-+-- Editable splash content
-+local SPLASH_CHANGELOG = {
-+    "Build 6.2 stabilized and polished.",
-+    "Improved XP calculation consistency.",
-+    "Added theme customization controls.",
-+    "Upgraded keygate splash layout with update feed.",
-+}
-+
-+local SPLASH_SOCIALS = {
-+    { name = "Discord", value = "discord.gg/your-server" },
-+    { name = "Email", value = "support@yourmail.com" },
-+}
-+
- -----------------------
- -- CONNECTION TRACKING / SAFE TEARDOWN
- -----------------------
- local __destroyed = false
- local __connections = {}
- 
- local function track(conn)
-     if conn then
-         __connections[#__connections + 1] = conn
-     end
-     return conn
- end
- 
- -----------------------
- -- THEME SYSTEM
- -----------------------
- local Theme = {
-     Accent     = Color3.fromRGB(120, 180, 255),
-     Background = Color3.fromRGB(16, 16, 20),
-     Panel      = Color3.fromRGB(22, 22, 28),
-     PanelDark  = Color3.fromRGB(18, 18, 22),
-     Border     = Color3.fromRGB(40, 40, 48),
-     Text       = Color3.fromRGB(235, 235, 240),
-     SubText    = Color3.fromRGB(150, 150, 155),
+ -- PE v4 Build 7 — Dev Build (UX REWORK + CLICKER GAME + STATISTICS)
+ -- Automation + Calculators + Minigame + Console + Misc + Macro
+ -- ============================================================
+
+@@
+--- STATISTICS / ACHIEVEMENTS
++-- STATISTICS / ACHIEVEMENTS
+ local statisticsFile = "statistics_data.json"
+ local statisticsSessionStartClock = os.clock()
+ local statisticsData = {
+     longestSessionSeconds = 0,
+     totalSkillActivations = 0,
+     clickerHighScore = 0,
+     sessionActive = false,
+     sessionStartTime = 0,
+     lastSessionReason = "",
  }
-@@ -508,144 +521,223 @@ local function positionKill()
+ 
+-local STAT_TIERS = {
+-    None = { label = "Grey", color = Color3.fromRGB(96, 96, 108) },
+-    Bronze = { label = "Bronze", color = Color3.fromRGB(184, 115, 51) },
+-    Silver = { label = "Silver", color = Color3.fromRGB(170, 170, 178) },
+-    Gold = { label = "Gold", color = Color3.fromRGB(235, 198, 64) },
+-}
++-- TIERS (expanded)
++local STAT_TIERS = {
++    None     = { label = "Grey",     color = Color3.fromRGB(96, 96, 108) },
++    Bronze   = { label = "Bronze",   color = Color3.fromRGB(184, 115, 51) },
++    Silver   = { label = "Silver",   color = Color3.fromRGB(170, 170, 178) },
++    Gold     = { label = "Gold",     color = Color3.fromRGB(235, 198, 64) },
++
++    -- New tiers requested:
++    Diamond  = { label = "Diamond",  color = Color3.fromRGB(80, 180, 255) },  -- Diamond Blue
++    Platinum = { label = "Platinum", color = Color3.fromRGB(245, 245, 245) }, -- Platinum White
++    Master   = { label = "Master",   color = Color3.fromRGB(255, 30, 255) },  -- Bright Magenta
++}
+@@
+-local function getTierByThreshold(value, bronze, silver, gold)
+-    value = tonumber(value) or 0
+-    if value >= gold then return "Gold" end
+-    if value >= silver then return "Silver" end
+-    if value >= bronze then return "Bronze" end
+-    return "None"
+-end
++-- Tier helper (now supports 6 thresholds)
++-- thresholds = { bronze=..., silver=..., gold=..., platinum=..., diamond=..., master=... }
++local function getTierByThreshold(value, thresholds)
++    value = tonumber(value) or 0
++    thresholds = thresholds or {}
++
++    local bronze   = tonumber(thresholds.bronze)   or math.huge
++    local silver   = tonumber(thresholds.silver)   or math.huge
++    local gold     = tonumber(thresholds.gold)     or math.huge
++    local platinum = tonumber(thresholds.platinum) or math.huge
++    local diamond  = tonumber(thresholds.diamond)  or math.huge
++    local master   = tonumber(thresholds.master)   or math.huge
++
++    -- Highest -> lowest
++    if value >= master   then return "Master" end
++    if value >= diamond  then return "Diamond" end
++    if value >= platinum then return "Platinum" end
++    if value >= gold     then return "Gold" end
++    if value >= silver   then return "Silver" end
++    if value >= bronze   then return "Bronze" end
++    return "None"
++end
+
+@@
+--- MINI CLICKER GAME STATE (LOW MEMORY)
++-- MINI CLICKER GAME STATE (LOW MEMORY)
+ local clickerScore = 0
+ local clickerHighScore = 0
+ local clickerRunning = false
+ local clickPower = 1
+ local passiveIncomePerSec = 0
+@@
+-local CLICKER_UPGRADES = {
+-    { id = "Tap",  name = "Tap Training", kind = "clickFlat",  value = 1,    baseCost = 15,  growth = 1.22 },
+-    { id = "Gen",  name = "Generator",    kind = "passiveFlat", value = 1,    baseCost = 40,  growth = 1.28 },
+-    { id = "Over", name = "Overclock",    kind = "clickMult",   value = 0.12, baseCost = 110, growth = 1.42 },
+-    { id = "Auto", name = "Automation",   kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
+-}
+-
+-local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
++-- Upgrades now scale in BOTH cost and output.
++-- cost: baseCost * growth^level
++-- output: for flats uses geometric series, for mults uses geometric series as additive bonus.
++local CLICKER_UPGRADES = {
++    -- Original 4 (kept, but now include outGrowth)
++    { id = "Tap",  name = "Tap Training", kind = "clickFlat",    value = 1,    baseCost = 15,  growth = 1.22, outGrowth = 1.08 },
++    { id = "Gen",  name = "Generator",    kind = "passiveFlat",  value = 1,    baseCost = 40,  growth = 1.28, outGrowth = 1.10 },
++    { id = "Over", name = "Overclock",    kind = "clickMult",    value = 0.12, baseCost = 110, growth = 1.42, outGrowth = 1.06 },
++    { id = "Auto", name = "Automation",   kind = "passiveMult",  value = 0.14, baseCost = 170, growth = 1.48, outGrowth = 1.06 },
++
++    -- New upgrades (adds depth, scales output too)
++    { id = "Burst", name = "Burst Fingers", kind = "clickFlat",   value = 4,    baseCost = 450,  growth = 1.30, outGrowth = 1.10 },
++    { id = "Forge", name = "Click Forge",   kind = "passiveFlat", value = 6,    baseCost = 900,  growth = 1.32, outGrowth = 1.12 },
++    { id = "Focus", name = "Focus",         kind = "clickMult",   value = 0.06, baseCost = 1200, growth = 1.36, outGrowth = 1.07 },
++    { id = "Plant", name = "Power Plant",   kind = "passiveMult", value = 0.07, baseCost = 1600, growth = 1.38, outGrowth = 1.07 },
++}
++
++-- Must include every upgrade id so load/save + reset works cleanly.
++local clickerUpgradeLevels = {
++    Tap = 0, Gen = 0, Over = 0, Auto = 0,
++    Burst = 0, Forge = 0, Focus = 0, Plant = 0,
++}
+@@
+ local function clickerUpgradeCost(def, level)
+     return math.max(1, math.floor((def.baseCost * (def.growth ^ level)) + 0.5))
  end
- positionKill()
- track(window:GetPropertyChangedSignal("AbsolutePosition"):Connect(positionKill))
- track(window:GetPropertyChangedSignal("AbsoluteSize"):Connect(positionKill))
- track(killBtn.MouseButton1Click:Connect(function()
-     killSwitch("KILL button")
- end))
  
- -----------------------
- -- SPLASH / KEYGATE
- -----------------------
- local function showSplashGate(onUnlock)
-     setBlur(18)
- 
-     window.Visible = false
-     killBtn.Visible = false
- 
-     local splash = Instance.new("Frame")
-     splash.Name = "SplashGate"
-     splash.Parent = gui
-     splash.Size = UDim2.fromScale(1, 1)
-     splash.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
-     splash.BackgroundTransparency = 0.2
-     splash.ZIndex = 10000
- 
-+    local function formatBulletedList(lines)
-+        local out = {}
-+        for _, line in ipairs(lines) do
-+            out[#out + 1] = "• " .. tostring(line)
++-- Geometric series sum:
++-- base + base*g + ... for lv terms => base * (g^lv - 1)/(g - 1)
++local function geometricSum(base, g, lv)
++    lv = math.max(0, math.floor(tonumber(lv) or 0))
++    base = tonumber(base) or 0
++    g = tonumber(g) or 1
++    if lv <= 0 then return 0 end
++    if math.abs(g - 1) < 1e-6 then
++        return base * lv
++    end
++    return base * ((g ^ lv) - 1) / (g - 1)
++end
++
+ local function recalcClickerStats()
+-    local clickFlat = 1
+-    local passiveFlat = 0
+-    local clickMult = 1
+-    local passiveMult = 1
+-
+-    for _, def in ipairs(CLICKER_UPGRADES) do
+-        local lv = clickerUpgradeLevels[def.id] or 0
+-        if lv > 0 then
+-            if def.kind == "clickFlat" then
+-                clickFlat += (def.value * lv)
+-            elseif def.kind == "passiveFlat" then
+-                passiveFlat += (def.value * lv)
+-            elseif def.kind == "clickMult" then
+-                clickMult *= (1 + (def.value * lv))
+-            elseif def.kind == "passiveMult" then
+-                passiveMult *= (1 + (def.value * lv))
+-            end
+-        end
+-    end
+-
+-    clickPower = math.max(1, math.floor(clickFlat * clickMult + 0.5))
+-    passiveIncomePerSec = math.max(0, math.floor(passiveFlat * passiveMult + 0.5))
++    local clickFlat = 1
++    local passiveFlat = 0
++    local clickMult = 1
++    local passiveMult = 1
++
++    for _, def in ipairs(CLICKER_UPGRADES) do
++        local lv = clickerUpgradeLevels[def.id] or 0
++        if lv > 0 then
++            local og = def.outGrowth or 1
++
++            if def.kind == "clickFlat" then
++                clickFlat += geometricSum(def.value, og, lv)
++
++            elseif def.kind == "passiveFlat" then
++                passiveFlat += geometricSum(def.value, og, lv)
++
++            elseif def.kind == "clickMult" then
++                -- Additive bonus series, applied multiplicatively as (1 + bonus)
++                local bonus = geometricSum(def.value, og, lv)
++                clickMult *= (1 + bonus)
++
++            elseif def.kind == "passiveMult" then
++                local bonus = geometricSum(def.value, og, lv)
++                passiveMult *= (1 + bonus)
++            end
 +        end
-+        return table.concat(out, "\n")
 +    end
 +
-+    local function formatSocials(lines)
-+        local out = {}
-+        for _, entry in ipairs(lines) do
-+            out[#out + 1] = string.format("%s: %s", tostring(entry.name or ""), tostring(entry.value or ""))
-+        end
-+        return table.concat(out, "\n")
-+    end
-+
-     local card = Instance.new("Frame")
-     card.Parent = splash
-     card.AnchorPoint = Vector2.new(0.5, 0.5)
-     card.Position = UDim2.fromScale(0.5, 0.5)
--    card.Size = UDim2.fromOffset(460, 300)
-+    card.Size = UDim2.fromOffset(920, 320)
-     card.BackgroundColor3 = Theme.PanelDark
-     card.BorderSizePixel = 0
-     card.ZIndex = 10001
-     makeRound(card, 8)
++    clickPower = math.max(1, math.floor((clickFlat * clickMult) + 0.5))
++    passiveIncomePerSec = math.max(0, math.floor((passiveFlat * passiveMult) + 0.5))
+ end
+
+@@
+ -- CLICKER PAGE
+@@
+-    upgradeFrame.Size = UDim2.new(1, 0, 0, 230)
++    upgradeFrame.Size = UDim2.new(1, 0, 0, 310)
+     markLayoutFrame(upgradeFrame)
+@@
+     track(resetBtn.MouseButton1Click:Connect(function()
+         clickerScore = 0
+-        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
++        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Burst = 0, Forge = 0, Focus = 0, Plant = 0 }
+         clickerShapeVertices = 3
+         clickerShapeCycle = 0
+         clickerShapeProgress = 0
+         clickerShapeMilestone = 25
+         clickerPassiveCarry = 0
+         recalcClickerStats()
+         refreshClickerView()
+     end))
+
+@@
+     local function refreshStatisticsView()
+@@
+-        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 500000, 10000000)
++        local clickerTier = getTierByThreshold(clickerScoreBest, {
++            bronze = 10_000,
++            silver = 500_000,
++            gold = 10_000_000,
++            platinum = 50_000_000,
++            diamond = 200_000_000,
++            master = 1_000_000_000,
++        })
  
-+    local columns = Instance.new("Frame")
-+    columns.Parent = card
-+    columns.BackgroundTransparency = 1
-+    columns.Position = UDim2.fromOffset(16, 14)
-+    columns.Size = UDim2.fromOffset(888, 292)
-+    columns.ZIndex = 10002
-+
-+    local rowLayout = Instance.new("UIListLayout")
-+    rowLayout.Parent = columns
-+    rowLayout.FillDirection = Enum.FillDirection.Horizontal
-+    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-+    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-+    rowLayout.Padding = UDim.new(0, 12)
-+
-+    local function makeSidePanel(titleText, bodyText)
-+        local panel = Instance.new("Frame")
-+        panel.Size = UDim2.fromOffset(228, 292)
-+        panel.BackgroundColor3 = Theme.Panel
-+        panel.BorderSizePixel = 0
-+        panel.ZIndex = 10002
-+        makeRound(panel, 8)
-+
-+        local title = Instance.new("TextLabel")
-+        title.Parent = panel
-+        title.BackgroundTransparency = 1
-+        title.Size = UDim2.fromOffset(196, 28)
-+        title.Position = UDim2.fromOffset(16, 14)
-+        title.Font = Enum.Font.GothamBold
-+        title.TextSize = 18
-+        title.TextXAlignment = Enum.TextXAlignment.Left
-+        title.TextColor3 = Theme.Text
-+        title.Text = titleText
-+        title.ZIndex = 10003
-+
-+        local body = Instance.new("TextLabel")
-+        body.Parent = panel
-+        body.BackgroundTransparency = 1
-+        body.Size = UDim2.fromOffset(196, 236)
-+        body.Position = UDim2.fromOffset(16, 46)
-+        body.Font = Enum.Font.Gotham
-+        body.TextSize = 14
-+        body.TextWrapped = true
-+        body.TextYAlignment = Enum.TextYAlignment.Top
-+        body.TextXAlignment = Enum.TextXAlignment.Left
-+        body.TextColor3 = Theme.SubText
-+        body.Text = bodyText
-+        body.ZIndex = 10003
-+
-+        return panel
-+    end
-+
-+    local leftPanel = makeSidePanel("Changelog", formatBulletedList(SPLASH_CHANGELOG))
-+    leftPanel.Parent = columns
-+
-+    local gatePanel = Instance.new("Frame")
-+    gatePanel.Parent = columns
-+    gatePanel.Size = UDim2.fromOffset(420, 292)
-+    gatePanel.BackgroundTransparency = 1
-+    gatePanel.ZIndex = 10002
-+
-     local titleLbl = Instance.new("TextLabel")
--    titleLbl.Parent = card
-+    titleLbl.Parent = gatePanel
-     titleLbl.BackgroundTransparency = 1
-     titleLbl.Size = UDim2.fromOffset(420, 38)
--    titleLbl.Position = UDim2.fromOffset(20, 18)
-+    titleLbl.Position = UDim2.fromOffset(0, 4)
-     titleLbl.Font = Enum.Font.GothamBold
-     titleLbl.TextSize = 24
-     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-     titleLbl.TextColor3 = Theme.Text
-     titleLbl.Text = "Meerly PE v4 Build 6.2"
-     titleLbl.ZIndex = 10002
+         local progressionCycle = clickerShapeCycle
+-        local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10)
++        local progressionTier = getTierByThreshold(progressionCycle, {
++            bronze = 2,
++            silver = 6,
++            gold = 10,
++            platinum = 15,
++            diamond = 22,
++            master = 30,
++        })
  
-     local subtitleLbl = Instance.new("TextLabel")
--    subtitleLbl.Parent = card
-+    subtitleLbl.Parent = gatePanel
-     subtitleLbl.BackgroundTransparency = 1
-     subtitleLbl.Size = UDim2.fromOffset(420, 24)
--    subtitleLbl.Position = UDim2.fromOffset(20, 56)
-+    subtitleLbl.Position = UDim2.fromOffset(0, 42)
-     subtitleLbl.Font = Enum.Font.Gotham
-     subtitleLbl.TextSize = 14
-     subtitleLbl.TextXAlignment = Enum.TextXAlignment.Left
-     subtitleLbl.TextColor3 = Theme.SubText
-     subtitleLbl.Text = "Open Work.Ink to get your key, then unlock the client."
-     subtitleLbl.ZIndex = 10002
+         local sessionSecs = statisticsData.longestSessionSeconds
+-        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 8 * 3600, 12 * 3600)
++        local sessionTier = getTierByThreshold(sessionSecs, {
++            bronze = 4 * 3600,
++            silver = 8 * 3600,
++            gold = 12 * 3600,
++            platinum = 18 * 3600,
++            diamond = 24 * 3600,
++            master = 36 * 3600,
++        })
+         local skillCount = statisticsData.totalSkillActivations
+-        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
++        local skillTier = getTierByThreshold(skillCount, {
++            bronze = 1_000,
++            silver = 10_000,
++            gold = 50_000,
++            platinum = 150_000,
++            diamond = 500_000,
++            master = 1_500_000,
++        })
  
-     local linkBox = Instance.new("TextBox")
--    linkBox.Parent = card
-+    linkBox.Parent = gatePanel
-     linkBox.Size = UDim2.fromOffset(420, 34)
--    linkBox.Position = UDim2.fromOffset(20, 95)
-+    linkBox.Position = UDim2.fromOffset(0, 83)
-     linkBox.BackgroundColor3 = Theme.Panel
-     linkBox.BorderSizePixel = 0
-     linkBox.Font = Enum.Font.Code
-     linkBox.TextSize = 15
-     linkBox.TextXAlignment = Enum.TextXAlignment.Left
-     linkBox.TextColor3 = Theme.Text
-     linkBox.PlaceholderText = "Work.Ink link"
-     linkBox.Text = KEYGATE_LINK
-     linkBox.ClearTextOnFocus = false
-     linkBox.ZIndex = 10002
-     makeRound(linkBox, 8)
+-        clickerDetail.Text = string.format(
+-            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000\nCurrent Tier: %s",
+-            clickerScoreBest,
+-            STAT_TIERS[clickerTier].label
+-        )
++        clickerDetail.Text = string.format(
++            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000\nPlatinum 50,000,000 | Diamond 200,000,000 | Master 1,000,000,000\nCurrent Tier: %s",
++            clickerScoreBest,
++            STAT_TIERS[clickerTier].label
++        )
+         applyTier(clickerStroke, clickerTier)
  
-     local keyInput = Instance.new("TextBox")
--    keyInput.Parent = card
-+    keyInput.Parent = gatePanel
-     keyInput.Size = UDim2.fromOffset(420, 42)
--    keyInput.Position = UDim2.fromOffset(20, 144)
-+    keyInput.Position = UDim2.fromOffset(0, 132)
-     keyInput.BackgroundColor3 = Theme.Panel
-     keyInput.BorderSizePixel = 0
-     keyInput.Font = Enum.Font.Gotham
-     keyInput.TextSize = 16
-     keyInput.TextColor3 = Theme.Text
-     keyInput.PlaceholderText = "Enter key"
-     keyInput.Text = ""
-     keyInput.ClearTextOnFocus = false
-     keyInput.ZIndex = 10002
-     makeRound(keyInput, 8)
+-        progressionDetail.Text = string.format(
+-            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10\nCurrent Tier: %s",
+-            clickerShapeVertices,
+-            progressionCycle,
+-            STAT_TIERS[progressionTier].label
+-        )
++        progressionDetail.Text = string.format(
++            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10\nPlatinum C15 | Diamond C22 | Master C30\nCurrent Tier: %s",
++            clickerShapeVertices,
++            progressionCycle,
++            STAT_TIERS[progressionTier].label
++        )
+         applyTier(progressionStroke, progressionTier)
+         refreshProgressionPreview()
  
-     local statusLbl = Instance.new("TextLabel")
--    statusLbl.Parent = card
-+    statusLbl.Parent = gatePanel
-     statusLbl.BackgroundTransparency = 1
-     statusLbl.Size = UDim2.fromOffset(420, 24)
--    statusLbl.Position = UDim2.fromOffset(20, 194)
-+    statusLbl.Position = UDim2.fromOffset(0, 182)
-     statusLbl.Font = Enum.Font.Gotham
-     statusLbl.TextSize = 13
-     statusLbl.TextXAlignment = Enum.TextXAlignment.Left
-     statusLbl.TextColor3 = Theme.SubText
-     statusLbl.Text = ""
-     statusLbl.ZIndex = 10002
+-        sessionDetail.Text = string.format(
+-            "Best: %s\nBronze 4h | Silver 8h | Gold 12h\nCurrent Tier: %s",
+-            formatDurationHM(sessionSecs),
+-            STAT_TIERS[sessionTier].label
+-        )
++        sessionDetail.Text = string.format(
++            "Best: %s\nBronze 4h | Silver 8h | Gold 12h\nPlatinum 18h | Diamond 24h | Master 36h\nCurrent Tier: %s",
++            formatDurationHM(sessionSecs),
++            STAT_TIERS[sessionTier].label
++        )
+         applyTier(sessionStroke, sessionTier)
  
-     local unlockBtn = Instance.new("TextButton")
--    unlockBtn.Parent = card
-+    unlockBtn.Parent = gatePanel
-     unlockBtn.Size = UDim2.fromOffset(420, 40)
--    unlockBtn.Position = UDim2.fromOffset(20, 230)
-+    unlockBtn.Position = UDim2.fromOffset(0, 218)
-     unlockBtn.BackgroundColor3 = Theme.Accent
-     unlockBtn.BorderSizePixel = 0
-     unlockBtn.Font = Enum.Font.GothamBold
-     unlockBtn.TextSize = 15
-     unlockBtn.TextColor3 = Color3.new(1, 1, 1)
-     unlockBtn.Text = "Unlock"
-     unlockBtn.ZIndex = 10002
-     makeRound(unlockBtn, 8)
- 
-+    local rightPanel = makeSidePanel("Socials", formatSocials(SPLASH_SOCIALS))
-+    rightPanel.Parent = columns
-+
-     local closeBtn = Instance.new("TextButton")
-     closeBtn.Parent = card
-     closeBtn.Size = UDim2.fromOffset(28, 28)
--    closeBtn.Position = UDim2.fromOffset(424, 8)
-+    closeBtn.Position = UDim2.fromOffset(884, 8)
-     closeBtn.BackgroundColor3 = Color3.fromRGB(120, 45, 45)
-     closeBtn.BorderSizePixel = 0
-     closeBtn.Font = Enum.Font.GothamBold
-     closeBtn.TextSize = 16
-     closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-     closeBtn.Text = "X"
-     closeBtn.ZIndex = 10003
-     makeRound(closeBtn, 8)
- 
-     local function normalizedKey(text)
-         local t = tostring(text or "")
-         t = t:gsub('^%s*"', ""):gsub('"%s*$', "")
-         t = t:gsub("^%s+", ""):gsub("%s+$", "")
-         return t
-     end
- 
-     local function attemptUnlock()
-         local entered = normalizedKey(keyInput.Text)
-         local required = normalizedKey(KEYGATE_KEY)
- 
-         if entered == required or string.lower(entered) == string.lower(required) then
-             statusLbl.TextColor3 = Color3.fromRGB(120, 220, 130)
-             statusLbl.Text = "Access granted. Loading client..."
-             task.wait(0.15)
-             splash:Destroy()
+-        skillsDetail.Text = string.format(
+-            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nCurrent Tier: %s",
+-            skillCount,
+-            STAT_TIERS[skillTier].label
+-        )
++        skillsDetail.Text = string.format(
++            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nPlatinum 150,000 | Diamond 500,000 | Master 1,500,000\nCurrent Tier: %s",
++            skillCount,
++            STAT_TIERS[skillTier].label
++        )
+         applyTier(skillsStroke, skillTier)
