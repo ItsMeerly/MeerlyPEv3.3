@@ -229,9 +229,11 @@ local CLICKER_UPGRADES = {
     { id = "Gen",  name = "Generator",    kind = "passiveFlat", value = 1,    baseCost = 40,  growth = 1.28 },
     { id = "Over", name = "Overclock",    kind = "clickMult",   value = 0.12, baseCost = 110, growth = 1.42 },
     { id = "Auto", name = "Automation",   kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
+    { id = "Forge", name = "Power Forge",  kind = "clickFlat",  value = 8,    baseCost = 1250, growth = 1.57 },
+    { id = "Core",  name = "Quantum Core", kind = "passiveMult", value = 0.28, baseCost = 3200, growth = 1.66 },
 }
 
-local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Forge = 0, Core = 0 }
 
 local clickerShapeVertices = 3
 local clickerShapeCycle = 0
@@ -256,6 +258,7 @@ local STAT_TIERS = {
     Bronze = { label = "Bronze", color = Color3.fromRGB(184, 115, 51) },
     Silver = { label = "Silver", color = Color3.fromRGB(170, 170, 178) },
     Gold = { label = "Gold", color = Color3.fromRGB(235, 198, 64) },
+    Diamond = { label = "Diamond", color = Color3.fromRGB(110, 225, 255) },
 }
 
 
@@ -363,6 +366,18 @@ local function safeReadFile(path)
     return false, "readfile not available"
 end
 
+local function tableFind(tbl, value)
+    if type(table.find) == "function" then
+        return table.find(tbl, value)
+    end
+    for i, v in ipairs(tbl or {}) do
+        if v == value then
+            return i
+        end
+    end
+    return nil
+end
+
 
 local function formatDurationHM(totalSeconds)
     totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
@@ -371,8 +386,9 @@ local function formatDurationHM(totalSeconds)
     return string.format("%dh %02dm", h, m)
 end
 
-local function getTierByThreshold(value, bronze, silver, gold)
+local function getTierByThreshold(value, bronze, silver, gold, diamond)
     value = tonumber(value) or 0
+    if diamond and value >= diamond then return "Diamond" end
     if value >= gold then return "Gold" end
     if value >= silver then return "Silver" end
     if value >= bronze then return "Bronze" end
@@ -1499,6 +1515,58 @@ local function uiFieldRow(parent, labelText, defaultText, labelWidthScale)
     return tb, row
 end
 
+local function uiDropdown(parent, labelText, options, selectedValue, callback)
+    local row = Instance.new("Frame", parent)
+    row.LayoutOrder = nextOrder(parent)
+    row.Size = UDim2.new(1, 0, 0, 32)
+    markLayoutFrame(row)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(0.42, 0, 1, 0)
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextColor3 = Theme.SubText
+    lbl.Text = labelText
+    register(lbl, "TextColor3", "SubText")
+
+    local btn = Instance.new("TextButton", row)
+    btn.Size = UDim2.new(0.58, 0, 1, 0)
+    btn.Position = UDim2.new(0.42, 0, 0, 0)
+    btn.BackgroundColor3 = Theme.PanelDark
+    btn.TextColor3 = Theme.Text
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 13
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    makeRound(btn, 4)
+    ensureStroke(btn)
+    register(btn, "BackgroundColor3", "PanelDark")
+    register(btn, "TextColor3", "Text")
+
+    local idx = tableFind(options, selectedValue) or 1
+    local function refresh()
+        btn.Text = tostring(options[idx] or "-") .. "  ▾"
+    end
+
+    track(btn.MouseButton1Click:Connect(function()
+        if #options <= 1 then return end
+        idx = (idx % #options) + 1
+        refresh()
+        if callback then callback(options[idx], idx) end
+    end))
+
+    refresh()
+    return row, function(v)
+        local i = tableFind(options, v)
+        if i then
+            idx = i
+            refresh()
+        end
+    end
+end
+
 
 -- FLOATING MEMORY STATS UI - SEPARATE SCREEN GUI
 
@@ -1666,7 +1734,7 @@ do
     end
 
     presetBtn = uiButton(page, "Stagger Preset: " .. (staggerLabels[selectedChainMode] or selectedChainMode), function()
-        local idx = table.find(staggerOrder, selectedChainMode) or 1
+        local idx = tableFind(staggerOrder, selectedChainMode) or 1
         idx = (idx % #staggerOrder) + 1
         selectedChainMode = staggerOrder[idx]
         refreshPresetBtn()
@@ -2458,9 +2526,10 @@ end
 
 do
     local page = Pages.Misc
-    uiSection(page, "Quick Actions")
+    uiSection(page, "Misc Controls")
 
-    uiButton(page, "Rejoin Server", function()
+    local quickGroup = uiCollapsible(page, "Quick Actions", false)
+    uiButton(quickGroup, "Rejoin Server", function()
         local placeId = game.PlaceId
         local jobId = game.JobId
         log("System", "Rejoining current server...")
@@ -2478,21 +2547,20 @@ do
         end)
     end)
 
-    uiSection(page, "AFK & Camera")
-
-    uiToggle(page, "Anti-AFK", _G.__MeerlyState.antiAfkEnabled == true, function(v)
+    local afkGroup = uiCollapsible(page, "AFK & Camera", false)
+    uiToggle(afkGroup, "Anti-AFK", _G.__MeerlyState.antiAfkEnabled == true, function(v)
         antiAfkEnabled = v
         _G.__MeerlyState.antiAfkEnabled = v
         log("System", v and "Anti-AFK enabled" or "Anti-AFK disabled")
     end)
 
-    uiToggle(page, "Watchdog", _G.__MeerlyState.watchdogEnabled == true, function(v)
+    uiToggle(afkGroup, "Watchdog", _G.__MeerlyState.watchdogEnabled == true, function(v)
         watchdogEnabled = v
         _G.__MeerlyState.watchdogEnabled = v
         log("System", v and "Watchdog enabled" or "Watchdog disabled")
     end)
 
-    uiToggle(page, "Memory Stats", false, function(v)
+    uiToggle(afkGroup, "Memory Stats", false, function(v)
         memoryStatsEnabled = v
         memoryGui.Enabled = v
         if v then
@@ -2522,7 +2590,7 @@ do
         Camera.CFrame = savedCameraCFrame or Camera.CFrame
     end
 
-    uiToggle(page, "AFK Camera Mode", AFKCameraEnabled, function(v)
+    uiToggle(afkGroup, "AFK Camera Mode", AFKCameraEnabled, function(v)
         AFKCameraEnabled = v
         if v then
             savedCameraType = Camera.CameraType
@@ -2540,7 +2608,7 @@ do
         if AFKCameraEnabled then applyAFKCamera() end
     end))
 
-    uiToggle(page, "Zoom Unlock", zoomUnlockEnabled, function(v)
+    uiToggle(afkGroup, "Zoom Unlock", zoomUnlockEnabled, function(v)
         zoomUnlockEnabled = v
         if v then
             player.CameraMinZoomDistance = 0.5
@@ -2553,9 +2621,9 @@ do
         end
     end)
 
-    uiSection(page, "Performance & Background")
+    local performanceGroup = uiCollapsible(page, "Performance & Background", false)
 
-    uiToggle(page, "FPS Cap", fpsCapEnabled, function(v)
+    uiToggle(performanceGroup, "FPS Cap", fpsCapEnabled, function(v)
         fpsCapEnabled = v
         if fpsCapEnabled and setfpscap then
             setfpscap(targetFPS)
@@ -2570,20 +2638,17 @@ do
         end
     end)
 
-    local fpsBox = uiTextbox(page, "Target FPS (30–240)", tostring(targetFPS))
-    track(fpsBox.FocusLost:Connect(function()
-        local v = tonumber(fpsBox.Text)
-        if v and v >= 30 and v <= 240 then
-            targetFPS = v
-            fpsBox.Text = tostring(targetFPS)
+    local _, setFpsDropdown = uiDropdown(performanceGroup, "Target FPS", { "30", "60", "120", "144", "240" }, tostring(targetFPS), function(v)
+        local parsed = tonumber(v)
+        if parsed then
+            targetFPS = parsed
             if fpsCapEnabled and setfpscap then
                 setfpscap(targetFPS)
-                log("System", "FPS cap updated to " .. targetFPS)
             end
-        else
-            fpsBox.Text = tostring(targetFPS)
+            log("System", "FPS target set to " .. targetFPS)
         end
-    end))
+    end)
+    setFpsDropdown(tostring(targetFPS))
 
     local function applyVisuals(disable)
         Lighting.GlobalShadows = not disable
@@ -2595,13 +2660,13 @@ do
         end
     end
 
-    uiToggle(page, "Low Graphics Mode", visualsDisabled, function(v)
+    uiToggle(performanceGroup, "Low Graphics Mode", visualsDisabled, function(v)
         visualsDisabled = v
         applyVisuals(v)
         log("System", v and "Visual effects disabled" or "Visual effects restored")
     end)
 
-    uiToggle(page, "Streaming Optimization", streamingOptimized, function(v)
+    uiToggle(performanceGroup, "Streaming Optimization", streamingOptimized, function(v)
         streamingOptimized = v
         if v then
             pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
@@ -2613,12 +2678,12 @@ do
         end
     end)
 
-    uiToggle(page, "Background Survival Mode", backgroundMode, function(v)
+    uiToggle(performanceGroup, "Background Survival Mode", backgroundMode, function(v)
         backgroundMode = v
         log("System", v and "Background survival enabled — optimized for tabbed-out AFK" or "Background survival disabled")
     end)
 
-    uiToggle(page, "Disable 3D Rendering", false, function(v)
+    uiToggle(performanceGroup, "Disable 3D Rendering", false, function(v)
         if RunService.Set3dRenderingEnabled then
             pcall(function() RunService:Set3dRenderingEnabled(not v) end)
             log("System", v and "3D rendering disabled" or "3D rendering enabled")
@@ -2627,7 +2692,7 @@ do
         end
     end)
 
-    uiToggle(page, "Mute Game Sounds", false, function(v)
+    uiToggle(performanceGroup, "Mute Game Sounds", false, function(v)
         pcall(function() game:GetService("SoundService").RespectFilteringEnabled = true end)
         pcall(function()
             local ss = game:GetService("SoundService")
@@ -2635,6 +2700,18 @@ do
         end)
         log("System", v and "Sounds muted" or "Sounds unmuted")
     end)
+
+    local _, setQualityDropdown = uiDropdown(performanceGroup, "Render Profile", { "Auto", "Low" }, "Auto", function(v)
+        if v == "Low" then
+            pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        else
+            pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+        end
+        log("System", "Render profile: " .. v)
+    end)
+    if streamingOptimized or backgroundMode then
+        setQualityDropdown("Low")
+    end
 
     track(UserInputService.WindowFocused:Connect(function()
         windowFocused = true
@@ -2665,24 +2742,15 @@ do
         end
     end))
 
-    uiSection(page, "Memory Guard")
+    local memoryGroup = uiCollapsible(page, "Memory Guard", false)
 
-    local modeBtn = uiButton(page, "Memory Action: Off", nil)
-    local modes = { "Off", "AutoRejoin", "AutoQuit" }
-    local function refreshModeBtn()
-        modeBtn.Text = "Memory Action: " .. memoryGuardMode
-    end
-    local function cycleMode()
-        local idx = table.find(modes, memoryGuardMode) or 1
-        idx = (idx % #modes) + 1
-        memoryGuardMode = modes[idx]
-        refreshModeBtn()
+    local _, setModeDropdown = uiDropdown(memoryGroup, "Memory Action", { "Off", "AutoRejoin", "AutoQuit" }, memoryGuardMode, function(v)
+        memoryGuardMode = v
         log("System", "Memory guard mode set to " .. memoryGuardMode)
-    end
-    track(modeBtn.MouseButton1Click:Connect(cycleMode))
-    refreshModeBtn()
+    end)
+    setModeDropdown(memoryGuardMode)
 
-    local capBox, _ = uiFieldRow(page, "Combined Lua+Engine Cap (GB)", tostring(memoryGuardCapGB), 0.58)
+    local capBox, _ = uiFieldRow(memoryGroup, "Combined Lua+Engine Cap (GB)", tostring(memoryGuardCapGB), 0.58)
     track(capBox.FocusLost:Connect(function()
         local v = tonumber(capBox.Text)
         if v and v >= 0.5 and v <= 128 then
@@ -2691,8 +2759,8 @@ do
         capBox.Text = tostring(memoryGuardCapGB)
     end))
 
-    uiSection(page, "Safety")
-    uiButton(page, "KILL SWITCH (Destroy UI)", function()
+    local safetyGroup = uiCollapsible(page, "Safety", false)
+    uiButton(safetyGroup, "KILL SWITCH (Destroy UI)", function()
         killSwitch("button")
     end)
 
@@ -2707,8 +2775,8 @@ do
     info.TextColor3 = Theme.SubText
     register(info, "TextColor3", "SubText")
     info.Text =
-        "• Anti-AFK presses Space every 10 minutes.\n" ..
-        "• Memory Stats is a separate floating UI (doesn't hide with ;).\n" ..
+        "• Misc settings are grouped into collapsible sections.\n" ..
+        "• Dropdowns cycle through options per click for compact controls.\n" ..
         "• Kill Switch destroys everything."
 end
 
@@ -2825,6 +2893,14 @@ do
     shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
     shapeCanvas.BackgroundTransparency = 1
 
+    local shapeClickBtn = Instance.new("TextButton", shapeWrap)
+    shapeClickBtn.Size = UDim2.fromOffset(94, 94)
+    shapeClickBtn.Position = UDim2.new(0.5, -47, 0, 28)
+    shapeClickBtn.Text = ""
+    shapeClickBtn.BackgroundTransparency = 1
+    shapeClickBtn.AutoButtonColor = false
+    shapeClickBtn.BorderSizePixel = 0
+
     local shapeEdges = table.create(9)
     for i = 1, 9 do
         local edge = Instance.new("Frame", shapeCanvas)
@@ -2839,7 +2915,7 @@ do
 
     local upgradeFrame = Instance.new("Frame", page)
     upgradeFrame.LayoutOrder = nextOrder(page)
-    upgradeFrame.Size = UDim2.new(1, 0, 0, 230)
+    upgradeFrame.Size = UDim2.new(1, 0, 0, 310)
     markLayoutFrame(upgradeFrame)
 
     local upgradeGrid = Instance.new("UIGridLayout", upgradeFrame)
@@ -2881,20 +2957,28 @@ do
         upgradeButtons[#upgradeButtons + 1] = { def = def, btn = btn }
     end
 
-    local actionRow = uiRow3(page)
-    local clickBtn = uiSmallBtn(actionRow, "Click")
-    local resetBtn = uiSmallBtn(actionRow, "Reset")
-    local saveBtn = uiSmallBtn(actionRow, "Save")
-
-    track(clickBtn.MouseButton1Click:Connect(function()
+    track(shapeClickBtn.MouseButton1Click:Connect(function()
         if not clickerRunning then return end
         addClickerScore(clickPower)
+        local p = (clickerShapeMilestone > 0) and math.clamp(clickerShapeProgress / clickerShapeMilestone, 0, 1) or 0
+        shapeCanvas.Rotation = (p * 26) + 4
+        task.delay(0.08, function()
+            if shapeCanvas and shapeCanvas.Parent then
+                shapeCanvas.Rotation = p * 18
+            end
+        end)
         refreshClickerView()
     end))
 
+    local actionRow = uiRow3(page)
+    local resetBtn = uiSmallBtn(actionRow, "Reset")
+    local saveBtn = uiSmallBtn(actionRow, "Save")
+    local clickHint = uiSmallBtn(actionRow, "Shape = Click")
+    clickHint.Active = false
+
     track(resetBtn.MouseButton1Click:Connect(function()
         clickerScore = 0
-        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0 }
+        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Forge = 0, Core = 0 }
         clickerShapeVertices = 3
         clickerShapeCycle = 0
         clickerShapeProgress = 0
@@ -2945,10 +3029,18 @@ do
             end
         end
 
+        local nextIn = math.max(0, clickerShapeMilestone - clickerShapeProgress)
+        local progressPct = 0
+        if clickerShapeMilestone > 0 then
+            progressPct = math.clamp(clickerShapeProgress / clickerShapeMilestone, 0, 1)
+        end
+
+        shapeCanvas.Rotation = progressPct * 18
         shapeTitle.Text = string.format(
-            "Shape: %d-gon | Next vertex in %d clicks | Cycle %d",
+            "Shape: %d-gon | Next vertex in %d clicks (%.0f%%) | Cycle %d",
             n,
-            math.max(0, clickerShapeMilestone - clickerShapeProgress),
+            nextIn,
+            progressPct * 100,
             clickerShapeCycle
         )
     end
@@ -3159,25 +3251,25 @@ do
         end
 
         local clickerScoreBest = statisticsData.clickerHighScore
-        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 500000, 10000000)
+        local clickerTier = getTierByThreshold(clickerScoreBest, 10000, 500000, 10000000, 50000000)
 
         local progressionCycle = clickerShapeCycle
-        local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10)
+        local progressionTier = getTierByThreshold(progressionCycle, 2, 6, 10, 20)
 
         local sessionSecs = statisticsData.longestSessionSeconds
-        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 8 * 3600, 12 * 3600)
+        local sessionTier = getTierByThreshold(sessionSecs, 4 * 3600, 8 * 3600, 12 * 3600, 18 * 3600)
         local skillCount = statisticsData.totalSkillActivations
-        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000)
+        local skillTier = getTierByThreshold(skillCount, 1000, 10000, 50000, 150000)
 
         clickerDetail.Text = string.format(
-            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000\nCurrent Tier: %s",
+            "Best score: %d\nBronze 10,000 | Silver 500,000 | Gold 10,000,000 | Diamond 50,000,000\nCurrent Tier: %s",
             clickerScoreBest,
             STAT_TIERS[clickerTier].label
         )
         applyTier(clickerStroke, clickerTier)
 
         progressionDetail.Text = string.format(
-            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10\nCurrent Tier: %s",
+            "Shape: %d-gon | Cycle: %d\nBronze C2 | Silver C6 | Gold C10 | Diamond C20\nCurrent Tier: %s",
             clickerShapeVertices,
             progressionCycle,
             STAT_TIERS[progressionTier].label
@@ -3186,14 +3278,14 @@ do
         refreshProgressionPreview()
 
         sessionDetail.Text = string.format(
-            "Best: %s\nBronze 4h | Silver 8h | Gold 12h\nCurrent Tier: %s",
+            "Best: %s\nBronze 4h | Silver 8h | Gold 12h | Diamond 18h\nCurrent Tier: %s",
             formatDurationHM(sessionSecs),
             STAT_TIERS[sessionTier].label
         )
         applyTier(sessionStroke, sessionTier)
 
         skillsDetail.Text = string.format(
-            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000\nCurrent Tier: %s",
+            "Total activations: %d\nBronze 1,000 | Silver 10,000 | Gold 50,000 | Diamond 150,000\nCurrent Tier: %s",
             skillCount,
             STAT_TIERS[skillTier].label
         )
@@ -3288,6 +3380,30 @@ do
         log("System", "Config applied")
     end
 
+    local function getSlotThemeColor(slot)
+        local filename = string.format("%s%d.json", configPrefix, slot)
+        local okRead, raw = safeReadFile(filename)
+        if not okRead then
+            return Color3.new(1, 1, 1)
+        end
+        local okDecode, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not okDecode or type(decoded) ~= "table" or type(decoded.theme) ~= "string" then
+            return Color3.new(1, 1, 1)
+        end
+        local okTheme, themeTbl = pcall(function() return deserializeTheme(decoded.theme) end)
+        if okTheme and type(themeTbl) == "table" then
+            local accent = themeTbl.Accent
+            if type(typeof) == "function" then
+                if typeof(accent) == "Color3" then
+                    return accent
+                end
+            elseif type(accent) == "userdata" then
+                return accent
+            end
+        end
+        return Color3.new(1, 1, 1)
+    end
+
     uiButton(page, "I/O Self-Test (Config)", function()
         local ok, msg = runFileIOSelfTest("config_io")
         if ok then
@@ -3298,11 +3414,31 @@ do
     end)
 
     for slot = 1, 5 do
-        uiSection(page, "Slot " .. slot)
-        local row = uiRow3(page)
+        local slotGroup = uiCollapsible(page, "Slot " .. slot, false)
+
+        local row = uiRow3(slotGroup)
         local saveBtn = uiSmallBtn(row, "Save")
         local loadBtn = uiSmallBtn(row, "Load")
         local pathBtn = uiSmallBtn(row, "File")
+
+        local themePreview = Instance.new("Frame", slotGroup)
+        themePreview.LayoutOrder = nextOrder(slotGroup)
+        themePreview.Size = UDim2.new(1, 0, 0, 28)
+        themePreview.BackgroundColor3 = getSlotThemeColor(slot)
+        themePreview.BorderSizePixel = 0
+        makeRound(themePreview, 6)
+        addStroke(themePreview, Theme.Border, 1, 0.5)
+
+        local previewText = Instance.new("TextLabel", themePreview)
+        previewText.Size = UDim2.new(1, -10, 1, 0)
+        previewText.Position = UDim2.fromOffset(8, 0)
+        previewText.BackgroundTransparency = 1
+        previewText.Font = Enum.Font.Gotham
+        previewText.TextSize = 12
+        previewText.TextXAlignment = Enum.TextXAlignment.Left
+        previewText.TextColor3 = Theme.Text
+        previewText.Text = "Theme preview (slot accent or white fallback)"
+        register(previewText, "TextColor3", "Text")
 
         track(saveBtn.MouseButton1Click:Connect(function()
             local payload = captureConfig()
@@ -3314,6 +3450,7 @@ do
             local filename = string.format("%s%d.json", configPrefix, slot)
             local ok, err = safeWriteFile(filename, json)
             if ok then
+                themePreview.BackgroundColor3 = getSlotThemeColor(slot)
                 log("System", "Saved config to " .. filename)
             else
                 log("Error", "Save config failed: " .. tostring(err))
@@ -3333,11 +3470,13 @@ do
                 return
             end
             applyConfig(decoded)
+            themePreview.BackgroundColor3 = getSlotThemeColor(slot)
             log("System", "Loaded config from " .. filename)
         end))
 
         track(pathBtn.MouseButton1Click:Connect(function()
             log("System", string.format("Config file: %s%d.json", configPrefix, slot))
+            themePreview.BackgroundColor3 = getSlotThemeColor(slot)
         end))
     end
 end
@@ -3438,12 +3577,12 @@ end
 do
     local page = Pages.Themes
 
-    uiSection(page, "Theme Presets")
-    uiButton(page, "Default Theme", function()
+    local presetsGroup = uiCollapsible(page, "Theme Presets", false)
+    uiButton(presetsGroup, "Default Theme", function()
         applyTheme(cloneTheme(DEFAULT_THEME))
     end)
 
-    uiButton(page, "AMOLED", function()
+    uiButton(presetsGroup, "AMOLED", function()
         applyTheme({
             Accent = Color3.fromRGB(90, 160, 255),
             Background = Color3.fromRGB(0, 0, 0),
@@ -3455,11 +3594,11 @@ do
         })
     end)
 
-    uiSection(page, "Accent Color Picker")
-    local accentR = uiFieldRow(page, "Accent R (0-255)", tostring(math.floor(Theme.Accent.R * 255 + 0.5)), 0.58)
-    local accentG = uiFieldRow(page, "Accent G (0-255)", tostring(math.floor(Theme.Accent.G * 255 + 0.5)), 0.58)
-    local accentB = uiFieldRow(page, "Accent B (0-255)", tostring(math.floor(Theme.Accent.B * 255 + 0.5)), 0.58)
-    local accentPreview = uiButton(page, "Preview Accent", function() end)
+    local accentGroup = uiCollapsible(page, "Accent Color Picker", false)
+    local accentR = uiFieldRow(accentGroup, "Accent R (0-255)", tostring(math.floor(Theme.Accent.R * 255 + 0.5)), 0.58)
+    local accentG = uiFieldRow(accentGroup, "Accent G (0-255)", tostring(math.floor(Theme.Accent.G * 255 + 0.5)), 0.58)
+    local accentB = uiFieldRow(accentGroup, "Accent B (0-255)", tostring(math.floor(Theme.Accent.B * 255 + 0.5)), 0.58)
+    local accentPreview = uiButton(accentGroup, "Preview Accent", function() end)
 
     local function applyAccentFromInputs()
         local r = math.clamp(tonumber(accentR.Text) or 120, 0, 255)
@@ -3481,15 +3620,15 @@ do
     end
     accentPreview.BackgroundColor3 = Theme.Accent
 
-    uiSection(page, "Blur")
-    uiButton(page, "Blur Off", function() setBlur(0) end)
-    uiButton(page, "Blur Soft", function() setBlur(8) end)
-    uiButton(page, "Blur Heavy", function() setBlur(16) end)
+    local blurGroup = uiCollapsible(page, "Blur", false)
+    uiButton(blurGroup, "Blur Off", function() setBlur(0) end)
+    uiButton(blurGroup, "Blur Soft", function() setBlur(8) end)
+    uiButton(blurGroup, "Blur Heavy", function() setBlur(16) end)
 
-    uiSection(page, "Transparency")
-    uiButton(page, "Solid", function() setTransparency(0) end)
-    uiButton(page, "Glass", function() setTransparency(0.15) end)
-    uiButton(page, "Ultra Light", function() setTransparency(0.3) end)
+    local transparencyGroup = uiCollapsible(page, "Transparency", false)
+    uiButton(transparencyGroup, "Solid", function() setTransparency(0) end)
+    uiButton(transparencyGroup, "Glass", function() setTransparency(0.15) end)
+    uiButton(transparencyGroup, "Ultra Light", function() setTransparency(0.3) end)
 end
 
 
