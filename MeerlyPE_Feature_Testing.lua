@@ -385,8 +385,23 @@ local function formatDurationHM(totalSeconds)
     return string.format("%dh %02dm", h, m)
 end
 
-local function getTierByThreshold(value, tierTargets)
+local function getTierByThreshold(value, bronzeOrTargets, silver, gold, diamond, platinum, master)
     value = tonumber(value) or 0
+
+    local tierTargets
+    if type(bronzeOrTargets) == "table" then
+        tierTargets = bronzeOrTargets
+    else
+        tierTargets = {
+            Bronze = tonumber(bronzeOrTargets),
+            Silver = tonumber(silver),
+            Gold = tonumber(gold),
+            Diamond = tonumber(diamond),
+            Platinum = tonumber(platinum),
+            Master = tonumber(master),
+        }
+    end
+
     local order = { "Bronze", "Silver", "Gold", "Diamond", "Platinum", "Master" }
     local current = "None"
     for _, tierName in ipairs(order) do
