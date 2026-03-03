@@ -234,32 +234,9 @@ local CLICKER_UPGRADES = {
     { id = "Core", name = "Power Core",   kind = "passiveMult", value = 0.07, baseCost = 320, growth = 1.38 },
     { id = "Drip", name = "Drip Feed",    kind = "passiveFlat", value = 3,    baseCost = 520, growth = 1.33 },
     { id = "Grip", name = "Grip Strength",kind = "clickFlat",   value = 5,    baseCost = 740, growth = 1.31 },
-
-    -- EXTRA (12)
-    { id = "Pulse",name = "Pulse Tap",    kind = "clickFlat",   value = 8,    baseCost = 980,  growth = 1.35 },
-    { id = "Spark",name = "Spark Array",  kind = "passiveFlat", value = 5,    baseCost = 1220, growth = 1.34 },
-    { id = "Forge",name = "Finger Forge", kind = "clickMult",   value = 0.08, baseCost = 1560, growth = 1.39 },
-    { id = "Mint", name = "Coin Mint",    kind = "passiveMult", value = 0.09, baseCost = 1980, growth = 1.41 },
-    { id = "Limb", name = "Limb Trainer", kind = "clickFlat",   value = 14,   baseCost = 2540, growth = 1.37 },
-    { id = "Grid", name = "Grid Farm",    kind = "passiveFlat", value = 10,   baseCost = 3180, growth = 1.36 },
-    { id = "Echo", name = "Echo Burst",   kind = "clickMult",   value = 0.11, baseCost = 3860, growth = 1.43 },
-    { id = "Flow", name = "Flow Reactor", kind = "passiveMult", value = 0.12, baseCost = 4720, growth = 1.44 },
-    { id = "Hype", name = "Hype Gloves",  kind = "clickFlat",   value = 22,   baseCost = 5720, growth = 1.39 },
-    { id = "Mine", name = "Nanominer",    kind = "passiveFlat", value = 18,   baseCost = 6940, growth = 1.38 },
-    { id = "Nova", name = "Nova Timing",  kind = "clickMult",   value = 0.14, baseCost = 8350, growth = 1.46 },
-    { id = "Sync", name = "Sync Core",    kind = "passiveMult", value = 0.15, baseCost = 10050,growth = 1.47 },
 }
 
-local function buildDefaultClickerUpgradeLevels()
-    local levels = {}
-    for _, def in ipairs(CLICKER_UPGRADES) do
-        levels[def.id] = 0
-    end
-    return levels
-end
-
-local clickerUpgradeLevels = buildDefaultClickerUpgradeLevels()
-local clickerUpgradeWindowVisible = true
+local clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Crit = 0, Core = 0, Drip = 0, Grip = 0 }
 
 local clickerShapeVertices = 3
 local clickerShapeCycle = 0
@@ -2957,17 +2934,6 @@ do
     shapeCanvas.Position = UDim2.new(0.5, -47, 0, 28)
     shapeCanvas.BackgroundTransparency = 1
 
-    local shapeClickBtn = Instance.new("TextButton", shapeCanvas)
-    shapeClickBtn.Size = UDim2.fromScale(1, 1)
-    shapeClickBtn.BackgroundTransparency = 1
-    shapeClickBtn.BorderSizePixel = 0
-    shapeClickBtn.Font = Enum.Font.GothamBold
-    shapeClickBtn.TextSize = 11
-    shapeClickBtn.TextColor3 = Theme.SubText
-    shapeClickBtn.Text = "CLICK"
-    shapeClickBtn.AutoButtonColor = false
-    register(shapeClickBtn, "TextColor3", "SubText")
-
     local shapeEdges = table.create(9)
     for i = 1, 9 do
         local edge = Instance.new("Frame", shapeCanvas)
@@ -2980,95 +2946,21 @@ do
         shapeEdges[i] = edge
     end
 
-    local upgradeWindow = Instance.new("Frame", gui)
-    upgradeWindow.Name = "ClickerUpgradeWindow"
-    upgradeWindow.Size = UDim2.new(0, 420, 0, 440)
-    upgradeWindow.Position = UDim2.new(0.52, 0, 0.2, 0)
-    upgradeWindow.BackgroundColor3 = Theme.Background
-    upgradeWindow.BorderSizePixel = 0
-    upgradeWindow.Active = true
-    upgradeWindow.Draggable = true
-    register(upgradeWindow, "BackgroundColor3", "Background")
-    makeRound(upgradeWindow, 8)
-    addStroke(upgradeWindow, Theme.Border, 1.2, 0.35)
-    addGloss(upgradeWindow)
+    local upgradeFrame = Instance.new("Frame", page)
+    upgradeFrame.LayoutOrder = nextOrder(page)
+    upgradeFrame.Size = UDim2.new(1, 0, 0, 340)
+    markLayoutFrame(upgradeFrame)
 
-    local upgradeHeader = Instance.new("TextLabel", upgradeWindow)
-    upgradeHeader.Size = UDim2.new(1, -92, 0, 30)
-    upgradeHeader.Position = UDim2.fromOffset(10, 8)
-    upgradeHeader.BackgroundTransparency = 1
-    upgradeHeader.Font = Enum.Font.GothamBold
-    upgradeHeader.TextSize = 13
-    upgradeHeader.TextXAlignment = Enum.TextXAlignment.Left
-    upgradeHeader.TextColor3 = Theme.Text
-    upgradeHeader.Text = "Clicker Upgrades"
-    register(upgradeHeader, "TextColor3", "Text")
-
-    local upgradeHideBtn = Instance.new("TextButton", upgradeWindow)
-    upgradeHideBtn.Size = UDim2.fromOffset(68, 24)
-    upgradeHideBtn.Position = UDim2.new(1, -78, 0, 10)
-    upgradeHideBtn.BackgroundColor3 = Theme.Panel
-    upgradeHideBtn.BorderSizePixel = 0
-    upgradeHideBtn.Font = Enum.Font.GothamBold
-    upgradeHideBtn.TextSize = 12
-    upgradeHideBtn.TextColor3 = Theme.Text
-    upgradeHideBtn.Text = "Hide"
-    makeRound(upgradeHideBtn, 6)
-    ensureStroke(upgradeHideBtn)
-    register(upgradeHideBtn, "BackgroundColor3", "Panel")
-    register(upgradeHideBtn, "TextColor3", "Text")
-
-    local upgradeColumns = Instance.new("Frame", upgradeWindow)
-    upgradeColumns.Size = UDim2.new(1, -16, 1, -48)
-    upgradeColumns.Position = UDim2.fromOffset(8, 40)
-    upgradeColumns.BackgroundTransparency = 1
-
-    local function createUpgradeColumn(parent, titleText, xScale)
-        local col = Instance.new("Frame", parent)
-        col.Size = UDim2.new(0.49, 0, 1, 0)
-        col.Position = UDim2.new(xScale, 0, 0, 0)
-        col.BackgroundColor3 = Theme.PanelDark
-        col.BorderSizePixel = 0
-        makeRound(col, 6)
-        register(col, "BackgroundColor3", "PanelDark")
-        addStroke(col, Theme.Border, 1, 0.45)
-
-        local title = Instance.new("TextLabel", col)
-        title.Size = UDim2.new(1, -12, 0, 20)
-        title.Position = UDim2.fromOffset(6, 6)
-        title.BackgroundTransparency = 1
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = 12
-        title.TextXAlignment = Enum.TextXAlignment.Left
-        title.TextColor3 = Theme.SubText
-        title.Text = titleText
-        register(title, "TextColor3", "SubText")
-
-        local scroll = Instance.new("ScrollingFrame", col)
-        scroll.Size = UDim2.new(1, -12, 1, -32)
-        scroll.Position = UDim2.fromOffset(6, 26)
-        scroll.BackgroundTransparency = 1
-        scroll.BorderSizePixel = 0
-        scroll.CanvasSize = UDim2.fromOffset(0, 0)
-        scroll.ScrollBarThickness = 6
-
-        local list = Instance.new("UIListLayout", scroll)
-        list.Padding = UDim.new(0, 6)
-        list.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        list.VerticalAlignment = Enum.VerticalAlignment.Top
-
-        return scroll, list
-    end
-
-    local clickerUpgradeColumn, clickerUpgradeList = createUpgradeColumn(upgradeColumns, "Clicker", 0)
-    local passiveUpgradeColumn, passiveUpgradeList = createUpgradeColumn(upgradeColumns, "Passive", 0.51)
+    local upgradeGrid = Instance.new("UIGridLayout", upgradeFrame)
+    upgradeGrid.CellSize = UDim2.new(0.49, 0, 0, 72)
+    upgradeGrid.CellPadding = UDim2.fromOffset(8, 8)
+    upgradeGrid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    upgradeGrid.VerticalAlignment = Enum.VerticalAlignment.Top
 
     local upgradeButtons = {}
     local refreshClickerView
     for _, def in ipairs(CLICKER_UPGRADES) do
-        local targetColumn = (def.kind == "clickFlat" or def.kind == "clickMult") and clickerUpgradeColumn or passiveUpgradeColumn
-        local btn = Instance.new("TextButton", targetColumn)
-        btn.Size = UDim2.new(1, -4, 0, 60)
+        local btn = Instance.new("TextButton", upgradeFrame)
         btn.BackgroundColor3 = Theme.Panel
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -3098,33 +2990,20 @@ do
         upgradeButtons[#upgradeButtons + 1] = { def = def, btn = btn }
     end
 
-    local function refreshUpgradeColumnCanvas()
-        clickerUpgradeColumn.CanvasSize = UDim2.fromOffset(0, math.max(0, clickerUpgradeList.AbsoluteContentSize.Y + 6))
-        passiveUpgradeColumn.CanvasSize = UDim2.fromOffset(0, math.max(0, passiveUpgradeList.AbsoluteContentSize.Y + 6))
-    end
-
     local actionRow = uiRow3(page)
-    local upgradesToggleBtn = uiSmallBtn(actionRow, "Upgrades: ON")
+    local clickBtn = uiSmallBtn(actionRow, "Click")
     local resetBtn = uiSmallBtn(actionRow, "Reset")
     local saveBtn = uiSmallBtn(actionRow, "Save")
 
-    local function setUpgradeWindowVisible(v)
-        clickerUpgradeWindowVisible = (v == true)
-        upgradeWindow.Visible = clickerUpgradeWindowVisible
-        upgradesToggleBtn.Text = "Upgrades: " .. (clickerUpgradeWindowVisible and "ON" or "OFF")
-    end
-
-    track(upgradesToggleBtn.MouseButton1Click:Connect(function()
-        setUpgradeWindowVisible(not clickerUpgradeWindowVisible)
-    end))
-
-    track(upgradeHideBtn.MouseButton1Click:Connect(function()
-        setUpgradeWindowVisible(false)
+    track(clickBtn.MouseButton1Click:Connect(function()
+        if not clickerRunning then return end
+        addClickerScore(clickPower)
+        refreshClickerView()
     end))
 
     track(resetBtn.MouseButton1Click:Connect(function()
         clickerScore = 0
-        clickerUpgradeLevels = buildDefaultClickerUpgradeLevels()
+        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Crit = 0, Core = 0, Drip = 0, Grip = 0 }
         clickerShapeVertices = 3
         clickerShapeCycle = 0
         clickerShapeProgress = 0
@@ -3137,12 +3016,6 @@ do
     track(saveBtn.MouseButton1Click:Connect(function()
         saveClickerHighScore(true)
         log("Clicker", "Saved: " .. clickerHighScoreFile .. " + " .. clickerStateFile)
-    end))
-
-    track(shapeClickBtn.MouseButton1Click:Connect(function()
-        if not clickerRunning then return end
-        addClickerScore(clickPower)
-        refreshClickerView()
     end))
 
     local function updateShapeVisual()
@@ -3191,7 +3064,7 @@ do
 
     function refreshClickerView()
         statusLabel.Text = string.format(
-            "State: %s\nScore: %d | High: %d | Shape Click: +%d | Passive: +%d/s",
+            "State: %s\nScore: %d | High: %d | Click: +%d | Passive: +%d/s",
             clickerRunning and "RUNNING" or "PAUSED",
             clickerScore,
             clickerHighScore,
@@ -3207,10 +3080,8 @@ do
         end
 
         updateShapeVisual()
-        refreshUpgradeColumnCanvas()
     end
 
-    setUpgradeWindowVisible(clickerUpgradeWindowVisible)
     ThemeRefreshers[#ThemeRefreshers + 1] = refreshClickerView
     refreshClickerView()
 
