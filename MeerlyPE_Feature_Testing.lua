@@ -3049,7 +3049,6 @@ do
         scroll.Position = UDim2.fromOffset(6, 26)
         scroll.BackgroundTransparency = 1
         scroll.BorderSizePixel = 0
-        scroll.AutomaticCanvasSize = Enum.AutomaticSize.None
         scroll.CanvasSize = UDim2.fromOffset(0, 0)
         scroll.ScrollBarThickness = 6
 
@@ -3103,8 +3102,6 @@ do
         clickerUpgradeColumn.CanvasSize = UDim2.fromOffset(0, math.max(0, clickerUpgradeList.AbsoluteContentSize.Y + 6))
         passiveUpgradeColumn.CanvasSize = UDim2.fromOffset(0, math.max(0, passiveUpgradeList.AbsoluteContentSize.Y + 6))
     end
-    track(clickerUpgradeList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshUpgradeColumnCanvas))
-    track(passiveUpgradeList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshUpgradeColumnCanvas))
 
     local actionRow = uiRow3(page)
     local upgradesToggleBtn = uiSmallBtn(actionRow, "Upgrades: ON")
