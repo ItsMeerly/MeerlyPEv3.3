@@ -12,6 +12,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local Stats = game:GetService("Stats")
 local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 
@@ -39,23 +40,16 @@ local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
 
--- Enemy death effects can spam a BasePart named "Disappear" into Workspace.
--- We keep this on by default and use both event-based + fast-pass scanning to catch every spawn.
-local autoHideDisappearEnabled = true
-local disappearFastPassSeconds = 0.2
-
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
 local weaponChildRemovedConnection = nil
 local characterAddedConnection = nil
-local disappearAddedConnection = nil
 
 local trackedCharacter = nil
 local trackedWeapons = {}
 local trackedWeaponPartState = {}
 local trackedWeaponDamageState = {}
 local otherPlayerWeaponPartState = {}
-local disappearPartState = {}
 
 local backgroundMode = false
 local windowFocused = true
@@ -86,6 +80,59 @@ local uiTheme = {
 -- ---- Memory helpers ----
 -- safeTotalMemMb/luaMemMb/getCombinedMemoryGb are intentionally wrapped with pcall
 -- so unsupported executor APIs do not break the rest of the UI.
+
+
+local favoritesFolder = "Meerly_UM_RNG"
+local favoritesFile = favoritesFolder .. "/MUNRNG_Settings"
+local favoriteKeys = {}
+
+local function canUseFileApi()
+    return typeof(isfolder) == "function" and typeof(makefolder) == "function"
+        and typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(readfile) == "function"
+end
+
+local function loadFavorites()
+    if not canUseFileApi() then
+        return
+    end
+
+    local ok, err = pcall(function()
+        if not isfolder(favoritesFolder) then
+            makefolder(favoritesFolder)
+        end
+
+        if isfile(favoritesFile) then
+            local raw = readfile(favoritesFile)
+            local decoded = HttpService:JSONDecode(raw)
+            if typeof(decoded) == "table" then
+                favoriteKeys = decoded
+            end
+        else
+            writefile(favoritesFile, HttpService:JSONEncode(favoriteKeys))
+        end
+    end)
+
+    if not ok and log then
+        log("Favorites load failed: " .. tostring(err))
+    end
+end
+
+local function saveFavorites()
+    if not canUseFileApi() then
+        return
+    end
+
+    local ok, err = pcall(function()
+        if not isfolder(favoritesFolder) then
+            makefolder(favoritesFolder)
+        end
+        writefile(favoritesFile, HttpService:JSONEncode(favoriteKeys))
+    end)
+
+    if not ok and log then
+        log("Favorites save failed: " .. tostring(err))
+    end
+end
 local function safeTotalMemMb()
     local total
     pcall(function()
@@ -295,62 +342,6 @@ local function applyOtherPlayersWeaponHiding()
     end
 
     return hiddenCount
-end
-
--- Fast utility used by the Disappear-part system. We hide locally so this is client-safe and low risk.
-local function setDisappearPartHidden(part, hide)
-    local state = disappearPartState[part]
-    if not state then
-        state = { localTransparencyModifier = part.LocalTransparencyModifier, canCollide = part.CanCollide }
-        disappearPartState[part] = state
-    end
-
-    if hide then
-        part.LocalTransparencyModifier = 1
-        part.CanCollide = false
-    else
-        part.LocalTransparencyModifier = state.localTransparencyModifier or 0
-        part.CanCollide = state.canCollide
-    end
-end
-
--- This function is intentionally tiny because it may run at high frequency.
--- It handles both direct BasePart spawns named "Disappear" and containers that include one.
-local function processDisappearCandidate(instance)
-    if not autoHideDisappearEnabled then
-        return
-    end
-
-    if instance:IsA("BasePart") and instance.Name == "Disappear" then
-        setDisappearPartHidden(instance, true)
-        return
-    end
-
-    if not instance:IsA("BasePart") then
-        local d = instance:FindFirstChild("Disappear", true)
-        if d and d:IsA("BasePart") then
-            setDisappearPartHidden(d, true)
-        end
-    end
-end
-
--- Periodic fast scan catches edge cases where parts are renamed after spawn,
--- moved in bulk, or created before listeners are attached.
-local function fastScanDisappearParts()
-    for _, d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("BasePart") and d.Name == "Disappear" then
-            setDisappearPartHidden(d, autoHideDisappearEnabled)
-        end
-    end
-
-    if not autoHideDisappearEnabled then
-        for part in pairs(disappearPartState) do
-            if part and part.Parent then
-                setDisappearPartHidden(part, false)
-            end
-        end
-        disappearPartState = {}
-    end
 end
 
 local function isLikelyWeaponContainer(obj)
@@ -577,10 +568,31 @@ title.TextSize = 16
 title.TextColor3 = uiTheme.text
 title.Text = "Performance / Stability"
 
+local tabBar = Instance.new("Frame")
+tabBar.Parent = window
+tabBar.Size = UDim2.new(1, -20, 0, 30)
+tabBar.Position = UDim2.fromOffset(10, 44)
+tabBar.BackgroundColor3 = uiTheme.panel
+tabBar.BorderSizePixel = 0
+makeCorner(tabBar, 6)
+makeStroke(tabBar)
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.Parent = tabBar
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.Padding = UDim.new(0, 6)
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local tabPagesRoot = Instance.new("Frame")
+tabPagesRoot.Parent = window
+tabPagesRoot.Size = UDim2.new(1, -20, 1, -188)
+tabPagesRoot.Position = UDim2.fromOffset(10, 108)
+tabPagesRoot.BackgroundTransparency = 1
+
 local logBox = Instance.new("TextLabel")
 logBox.Parent = window
-logBox.Size = UDim2.new(1, -20, 0, 52)
-logBox.Position = UDim2.fromOffset(10, 44)
+logBox.Size = UDim2.new(1, -20, 0, 44)
+logBox.Position = UDim2.fromOffset(10, window.Size.Y.Offset - 52)
 logBox.BackgroundColor3 = uiTheme.panel
 logBox.BorderSizePixel = 0
 logBox.TextXAlignment = Enum.TextXAlignment.Left
@@ -599,24 +611,89 @@ log = function(msg)
     print("[MeerlyPerf]", msg)
 end
 
-local list = Instance.new("ScrollingFrame")
-list.Parent = window
-list.Size = UDim2.new(1, -20, 1, -158)
-list.Position = UDim2.fromOffset(10, 106)
-list.BackgroundTransparency = 1
-list.BorderSizePixel = 0
-list.ScrollBarThickness = 6
-list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-list.CanvasSize = UDim2.new()
+local tabPages = {}
+local tabButtons = {}
+local currentTabName = "Favourites"
+local activeList = nil
+local favoriteEntryByKey = {}
+local favoritesList = nil
 
-local layout = Instance.new("UIListLayout")
-layout.Parent = list
-layout.Padding = UDim.new(0, 8)
-layout.SortOrder = Enum.SortOrder.LayoutOrder
+local function isFavorite(key)
+    return favoriteKeys[key] == true
+end
 
-local function newRow(height)
+local function setFavorite(key, value)
+    favoriteKeys[key] = value and true or nil
+    saveFavorites()
+end
+
+local function switchTab(name)
+    if not tabPages[name] then return end
+    currentTabName = name
+    for tabName, tabPage in pairs(tabPages) do
+        tabPage.Visible = (tabName == name)
+    end
+    for tabName, tabBtn in pairs(tabButtons) do
+        tabBtn.BackgroundColor3 = (tabName == name) and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+        tabBtn.TextColor3 = (tabName == name) and Color3.fromRGB(10, 10, 12) or uiTheme.text
+    end
+    activeList = tabPages[name]
+end
+
+local function createTab(name)
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.Parent = tabPagesRoot
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 6
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.CanvasSize = UDim2.new()
+    page.Visible = false
+
+    local layout = Instance.new("UIListLayout")
+    layout.Parent = page
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    tabPages[name] = page
+
+    local btn = Instance.new("TextButton")
+    btn.Parent = tabBar
+    btn.Size = UDim2.fromOffset(92, 22)
+    btn.Position = UDim2.fromOffset(4, 4)
+    btn.BorderSizePixel = 0
+    btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.TextColor3 = uiTheme.text
+    btn.Text = name
+    makeCorner(btn, 5)
+    tabButtons[name] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        switchTab(name)
+    end)
+
+    return page
+end
+
+favoritesList = createTab("Favourites")
+createTab("Performance")
+createTab("Weapons")
+createTab("Player")
+createTab("Memory")
+createTab("Utility")
+
+loadFavorites()
+
+switchTab("Favourites")
+
+local function newRow(height, tabName)
+    local parentList = tabPages[tabName or currentTabName] or activeList
     local row = Instance.new("Frame")
-    row.Parent = list
+    row.Parent = parentList
     row.Size = UDim2.new(1, -4, 0, height or 34)
     row.BackgroundColor3 = uiTheme.panel
     row.BorderSizePixel = 0
@@ -625,13 +702,93 @@ local function newRow(height)
     return row
 end
 
--- Reusable toggle factory for on/off controls in the performance panel.
-local function makeToggle(labelText, default, callback)
-    local row = newRow(34)
+local function refreshFavoriteEntryLabel(key)
+    local entry = favoriteEntryByKey[key]
+    if entry and entry.button and entry.tabName then
+        entry.button.Text = entry.labelText .. "  [" .. entry.tabName .. "]"
+    end
+end
+
+local function ensureFavoriteEntry(key, labelText, tabName)
+    if not isFavorite(key) then
+        if favoriteEntryByKey[key] and favoriteEntryByKey[key].row then
+            favoriteEntryByKey[key].row:Destroy()
+        end
+        favoriteEntryByKey[key] = nil
+        return
+    end
+
+    local entry = favoriteEntryByKey[key]
+    if not entry then
+        local row = newRow(34, "Favourites")
+        local btn = Instance.new("TextButton")
+        btn.Parent = row
+        btn.Size = UDim2.new(1, -8, 1, -8)
+        btn.Position = UDim2.fromOffset(4, 4)
+        btn.BorderSizePixel = 0
+        btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 12
+        btn.TextColor3 = uiTheme.text
+        makeCorner(btn, 5)
+
+        entry = { row = row, button = btn, key = key, labelText = labelText, tabName = tabName }
+        favoriteEntryByKey[key] = entry
+
+        btn.MouseButton1Click:Connect(function()
+            switchTab(tabName)
+        end)
+    else
+        entry.labelText = labelText
+        entry.tabName = tabName
+    end
+
+    refreshFavoriteEntryLabel(key)
+end
+
+local function attachFavoriteButton(row, key, labelText, tabName)
+    if tabName == "Favourites" then
+        return
+    end
+
+    local favBtn = Instance.new("TextButton")
+    favBtn.Parent = row
+    favBtn.Size = UDim2.fromOffset(24, 24)
+    favBtn.Position = UDim2.new(1, -28, 0, 5)
+    favBtn.BorderSizePixel = 0
+    favBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 66)
+    favBtn.Font = Enum.Font.GothamBold
+    favBtn.TextSize = 14
+    favBtn.TextColor3 = uiTheme.text
+    makeCorner(favBtn, 5)
+
+    local function refreshStar()
+        favBtn.Text = isFavorite(key) and "★" or "☆"
+        favBtn.TextColor3 = isFavorite(key) and Color3.fromRGB(255, 220, 120) or uiTheme.text
+        ensureFavoriteEntry(key, labelText, tabName)
+    end
+
+    favBtn.MouseButton1Click:Connect(function()
+        setFavorite(key, not isFavorite(key))
+        refreshStar()
+        log((isFavorite(key) and "Added to" or "Removed from") .. " favourites: " .. labelText)
+    end)
+
+    refreshStar()
+end
+
+local function makeSettingKey(tabName, labelText)
+    return string.lower((tabName or "misc") .. "::" .. labelText):gsub("%s+", "_")
+end
+
+local function makeToggle(labelText, default, callback, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(34, tabName)
+    local key = makeSettingKey(tabName, labelText)
 
     local label = Instance.new("TextLabel")
     label.Parent = row
-    label.Size = UDim2.new(0.64, -12, 1, 0)
+    label.Size = UDim2.new(0.58, -12, 1, 0)
     label.Position = UDim2.fromOffset(10, 0)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.Gotham
@@ -642,8 +799,8 @@ local function makeToggle(labelText, default, callback)
 
     local button = Instance.new("TextButton")
     button.Parent = row
-    button.Size = UDim2.new(0.32, 0, 1, -8)
-    button.Position = UDim2.new(0.68, 0, 0, 4)
+    button.Size = UDim2.new(0.28, 0, 1, -8)
+    button.Position = UDim2.new(0.62, 0, 0, 4)
     button.BorderSizePixel = 0
     button.Font = Enum.Font.GothamBold
     button.TextSize = 12
@@ -662,6 +819,8 @@ local function makeToggle(labelText, default, callback)
         callback(state)
     end)
 
+    attachFavoriteButton(row, key, labelText, tabName)
+
     refresh()
     callback(state)
 
@@ -677,13 +836,14 @@ local function makeToggle(labelText, default, callback)
     }
 end
 
--- Reusable numeric/text input factory.
-local function makeInput(labelText, defaultText, onCommit)
-    local row = newRow(34)
+local function makeInput(labelText, defaultText, onCommit, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(34, tabName)
+    local key = makeSettingKey(tabName, labelText)
 
     local label = Instance.new("TextLabel")
     label.Parent = row
-    label.Size = UDim2.new(0.54, -12, 1, 0)
+    label.Size = UDim2.new(0.48, -12, 1, 0)
     label.Position = UDim2.fromOffset(10, 0)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.Gotham
@@ -694,8 +854,8 @@ local function makeInput(labelText, defaultText, onCommit)
 
     local box = Instance.new("TextBox")
     box.Parent = row
-    box.Size = UDim2.new(0.42, 0, 1, -8)
-    box.Position = UDim2.new(0.56, 0, 0, 4)
+    box.Size = UDim2.new(0.38, 0, 1, -8)
+    box.Position = UDim2.new(0.50, 0, 0, 4)
     box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
     box.BorderSizePixel = 0
     box.Font = Enum.Font.Gotham
@@ -712,15 +872,18 @@ local function makeInput(labelText, defaultText, onCommit)
         end
     end)
 
+    attachFavoriteButton(row, key, labelText, tabName)
+
     return box
 end
 
--- Reusable action-button factory.
-local function makeButton(text, onClick)
-    local row = newRow(34)
+local function makeButton(text, onClick, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(34, tabName)
+    local key = makeSettingKey(tabName, text)
     local btn = Instance.new("TextButton")
     btn.Parent = row
-    btn.Size = UDim2.new(1, -8, 1, -8)
+    btn.Size = UDim2.new(0.88, -8, 1, -8)
     btn.Position = UDim2.fromOffset(4, 4)
     btn.BorderSizePixel = 0
     btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
@@ -730,6 +893,9 @@ local function makeButton(text, onClick)
     btn.Text = text
     makeCorner(btn, 5)
     btn.MouseButton1Click:Connect(onClick)
+
+    attachFavoriteButton(row, key, text, tabName)
+
     return btn
 end
 
@@ -764,159 +930,29 @@ memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
 -- ---- Feature wiring (UI -> behavior) ----
+
+-- Utility tab
 makeToggle("Anti-AFK (presses Space every 10m)", _G.__MeerlyPerfState.antiAfkEnabled, function(v)
     _G.__MeerlyPerfState.antiAfkEnabled = v
     log(v and "Anti-AFK enabled" or "Anti-AFK disabled")
-end)
+end, "Utility")
 
 makeToggle("Watchdog", _G.__MeerlyPerfState.watchdogEnabled, function(v)
     _G.__MeerlyPerfState.watchdogEnabled = v
     log(v and "Watchdog enabled" or "Watchdog disabled")
-end)
-
-makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
-    memoryStatsEnabled = v
-    memoryGui.Enabled = v
-    log(v and "Memory stats enabled" or "Memory stats disabled")
-end)
-
-makeToggle("FPS Cap", fpsCapEnabled, function(v)
-    fpsCapEnabled = v
-    if fpsCapEnabled then
-        if safeSetFPS(targetFPS) then
-            log("FPS cap set: " .. targetFPS)
-        else
-            log("FPS cap unsupported by executor")
-        end
-    else
-        safeSetFPS(0)
-        log("FPS cap removed")
-    end
-end)
-
-makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
-    local val = tonumber(text)
-    if val and val >= 30 and val <= 240 then
-        targetFPS = math.floor(val)
-        if fpsCapEnabled then
-            safeSetFPS(targetFPS)
-            log("FPS cap updated: " .. targetFPS)
-        end
-    end
-    return tostring(targetFPS)
-end)
-
-makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
-    lowGraphicsEnabled = v
-    applyVisuals(v)
-    log(v and "Low graphics enabled" or "Low graphics disabled")
-end)
-
-makeToggle("Streaming Optimization", streamingOptimized, function(v)
-    streamingOptimized = v
-    if v then
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-        pcall(function() settings().Network.IncomingReplicationLag = 0.1 end)
-        log("Streaming optimization enabled")
-    else
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
-        log("Streaming optimization disabled")
-    end
-end)
-
-makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
-    aggressiveFxCullEnabled = v
-    applyAggressiveFxCull(v)
-end)
-
-makeToggle("Auto-hide Disappear Parts", autoHideDisappearEnabled, function(v)
-    autoHideDisappearEnabled = v
-    fastScanDisappearParts()
-    log(v and "Auto-hide Disappear enabled" or "Auto-hide Disappear disabled")
-end)
-
-makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
-    hideTrackedWeaponParts = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
-end)
-
-makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
-    weaponDamageOverrideEnabled = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
-end)
-
-makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
-    local v = tonumber(text)
-    if v then
-        weaponDamageOverride = v
-        if weaponDamageOverrideEnabled then
-            for weapon in pairs(trackedWeapons) do
-                applyWeaponState(weapon)
-            end
-            log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
-        end
-    end
-    return tostring(weaponDamageOverride)
-end)
-
-makeButton("Rescan Weapons", function()
-    rescanCharacterWeapons()
-end)
-
-makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
-    hideOtherPlayersWeapons = v
-    local hiddenCount = applyOtherPlayersWeaponHiding()
-    if v then
-        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
-    else
-        log("Other-player weapon hide disabled")
-    end
-end)
-
-makeInput("Disappear Fast Pass (0.1-2s)", tostring(disappearFastPassSeconds), function(text)
-    local v = tonumber(text)
-    if v and v >= 0.1 and v <= 2 then
-        disappearFastPassSeconds = v
-    end
-    return tostring(disappearFastPassSeconds)
-end)
-
-makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
-    local v = tonumber(text)
-    if v and v >= 3 and v <= 60 then
-        otherPlayersHidePassSeconds = math.floor(v)
-    end
-    return tostring(otherPlayersHidePassSeconds)
-end)
-
-makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
-    walkSpeedOverrideEnabled = v
-    applyWalkSpeed()
-    log(v and ("WalkSpeed override enabled: " .. tostring(walkSpeedValue)) or "WalkSpeed override disabled")
-end)
-
-makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
-    local v = tonumber(text)
-    if v and v >= 1 and v <= 250 then
-        walkSpeedValue = v
-        if walkSpeedOverrideEnabled then
-            applyWalkSpeed()
-            log("WalkSpeed updated: " .. tostring(walkSpeedValue))
-        end
-    end
-    return tostring(walkSpeedValue)
-end)
+end, "Utility")
 
 makeToggle("Background Survival Mode", backgroundMode, function(v)
     backgroundMode = v
     log(v and "Background mode enabled" or "Background mode disabled")
-end)
+end, "Utility")
+
+makeToggle("Mute Game Sounds", muteSounds, function(v)
+    muteSounds = v
+    pcall(function() SoundService.RespectFilteringEnabled = true end)
+    pcall(function() SoundService.Volume = v and 0 or 1 end)
+    log(v and "Game sounds muted" or "Game sounds unmuted")
+end, "Utility")
 
 makeToggle("Disable 3D Rendering", disable3D, function(v)
     disable3D = v
@@ -926,31 +962,7 @@ makeToggle("Disable 3D Rendering", disable3D, function(v)
     else
         log("3D render toggle unsupported")
     end
-end)
-
-makeToggle("Mute Game Sounds", muteSounds, function(v)
-    muteSounds = v
-    pcall(function() SoundService.RespectFilteringEnabled = true end)
-    pcall(function() SoundService.Volume = v and 0 or 1 end)
-    log(v and "Game sounds muted" or "Game sounds unmuted")
-end)
-
-local modeButton = makeButton("Memory Action: Off", function()
-    local order = { "Off", "AutoRejoin", "AutoQuit" }
-    local idx = table.find(order, memoryGuardMode) or 1
-    idx = (idx % #order) + 1
-    memoryGuardMode = order[idx]
-    modeButton.Text = "Memory Action: " .. memoryGuardMode
-    log("Memory guard mode: " .. memoryGuardMode)
-end)
-
-makeInput("Memory Cap (GB)", tostring(memoryGuardCapGB), function(text)
-    local v = tonumber(text)
-    if v and v >= 0.5 and v <= 128 then
-        memoryGuardCapGB = v
-    end
-    return tostring(memoryGuardCapGB)
-end)
+end, "Utility")
 
 makeButton("Rejoin Server", function()
     log("Rejoining server...")
@@ -966,7 +978,153 @@ makeButton("Rejoin Server", function()
             log("Rejoin failed: " .. tostring(err))
         end
     end)
-end)
+end, "Utility")
+
+-- Performance tab
+makeToggle("FPS Cap", fpsCapEnabled, function(v)
+    fpsCapEnabled = v
+    if fpsCapEnabled then
+        if safeSetFPS(targetFPS) then
+            log("FPS cap set: " .. targetFPS)
+        else
+            log("FPS cap unsupported by executor")
+        end
+    else
+        safeSetFPS(0)
+        log("FPS cap removed")
+    end
+end, "Performance")
+
+makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
+    local val = tonumber(text)
+    if val and val >= 30 and val <= 240 then
+        targetFPS = math.floor(val)
+        if fpsCapEnabled then
+            safeSetFPS(targetFPS)
+            log("FPS cap updated: " .. targetFPS)
+        end
+    end
+    return tostring(targetFPS)
+end, "Performance")
+
+makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
+    lowGraphicsEnabled = v
+    applyVisuals(v)
+    log(v and "Low graphics enabled" or "Low graphics disabled")
+end, "Performance")
+
+makeToggle("Streaming Optimization", streamingOptimized, function(v)
+    streamingOptimized = v
+    if v then
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        pcall(function() settings().Network.IncomingReplicationLag = 0.1 end)
+        log("Streaming optimization enabled")
+    else
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+        log("Streaming optimization disabled")
+    end
+end, "Performance")
+
+makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
+    aggressiveFxCullEnabled = v
+    applyAggressiveFxCull(v)
+end, "Performance")
+
+-- Weapons tab
+makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
+    hideTrackedWeaponParts = v
+    for weapon in pairs(trackedWeapons) do
+        applyWeaponState(weapon)
+    end
+    log(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
+end, "Weapons")
+
+makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
+    weaponDamageOverrideEnabled = v
+    for weapon in pairs(trackedWeapons) do
+        applyWeaponState(weapon)
+    end
+    log(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
+end, "Weapons")
+
+makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
+    local v = tonumber(text)
+    if v then
+        weaponDamageOverride = v
+        if weaponDamageOverrideEnabled then
+            for weapon in pairs(trackedWeapons) do
+                applyWeaponState(weapon)
+            end
+            log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
+        end
+    end
+    return tostring(weaponDamageOverride)
+end, "Weapons")
+
+makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
+    hideOtherPlayersWeapons = v
+    local hiddenCount = applyOtherPlayersWeaponHiding()
+    if v then
+        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
+    else
+        log("Other-player weapon hide disabled")
+    end
+end, "Weapons")
+
+makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
+    local v = tonumber(text)
+    if v and v >= 3 and v <= 60 then
+        otherPlayersHidePassSeconds = math.floor(v)
+    end
+    return tostring(otherPlayersHidePassSeconds)
+end, "Weapons")
+
+makeButton("Rescan Weapons", function()
+    rescanCharacterWeapons()
+end, "Weapons")
+
+-- Player tab
+makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
+    walkSpeedOverrideEnabled = v
+    applyWalkSpeed()
+    log(v and ("WalkSpeed override enabled: " .. tostring(walkSpeedValue)) or "WalkSpeed override disabled")
+end, "Player")
+
+makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
+    local v = tonumber(text)
+    if v and v >= 1 and v <= 250 then
+        walkSpeedValue = v
+        if walkSpeedOverrideEnabled then
+            applyWalkSpeed()
+            log("WalkSpeed updated: " .. tostring(walkSpeedValue))
+        end
+    end
+    return tostring(walkSpeedValue)
+end, "Player")
+
+-- Memory tab
+makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
+    memoryStatsEnabled = v
+    memoryGui.Enabled = v
+    log(v and "Memory stats enabled" or "Memory stats disabled")
+end, "Memory")
+
+local modeButton = makeButton("Memory Action: Off", function()
+    local order = { "Off", "AutoRejoin", "AutoQuit" }
+    local idx = table.find(order, memoryGuardMode) or 1
+    idx = (idx % #order) + 1
+    memoryGuardMode = order[idx]
+    modeButton.Text = "Memory Action: " .. memoryGuardMode
+    log("Memory guard mode: " .. memoryGuardMode)
+end, "Memory")
+
+makeInput("Memory Cap (GB)", tostring(memoryGuardCapGB), function(text)
+    local v = tonumber(text)
+    if v and v >= 0.5 and v <= 128 then
+        memoryGuardCapGB = v
+    end
+    return tostring(memoryGuardCapGB)
+end, "Memory")
 
 -- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
 makeButton("KILL SWITCH", function()
@@ -990,14 +1148,10 @@ makeButton("KILL SWITCH", function()
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
     end
-    if disappearAddedConnection then
-        pcall(function() disappearAddedConnection:Disconnect() end)
-        disappearAddedConnection = nil
-    end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
     log("UI destroyed")
-end)
+end, "Utility")
 
 UserInputService.WindowFocused:Connect(function()
     windowFocused = true
@@ -1127,14 +1281,6 @@ characterAddedConnection = player.CharacterAdded:Connect(function(character)
     bindCharacterForWeapons(character)
 end)
 
--- Event path for immediate response on newly spawned Disappear parts.
-disappearAddedConnection = Workspace.DescendantAdded:Connect(function(instance)
-    processDisappearCandidate(instance)
-end)
-
--- Initial catch-up scan for already-existing Disappear parts.
-fastScanDisappearParts()
-
 task.spawn(function()
     while running do
         task.wait(3)
@@ -1157,15 +1303,6 @@ task.spawn(function()
         if walkSpeedOverrideEnabled then
             applyWalkSpeed()
         end
-    end
-end)
-
--- Very fast pass for high-density enemy areas where many Disappear parts spawn continuously.
--- Keeping this separate from other scans prevents misses without making weapon scans heavier.
-task.spawn(function()
-    while running do
-        task.wait(disappearFastPassSeconds)
-        fastScanDisappearParts()
     end
 end)
 
