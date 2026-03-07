@@ -1,11 +1,5 @@
 --[[
-    Meerly PE - Performance / Stability Only UI
-    Extracted from MeerlyPE_Feature_Testing.lua
-    Focuses strictly on:
-      - Anti-AFK + Watchdog
-      - FPS / graphics / streaming controls
-      - Background survival controls
-      - Memory stats + memory guard
+    Meerly Untitle Melee RNG
 ]]
 
 -- Roblox services used across performance, UI, and player-entity controls.
