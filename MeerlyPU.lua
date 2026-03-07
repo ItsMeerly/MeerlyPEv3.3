@@ -133,6 +133,9 @@ local function saveFavorites()
         log("Favorites save failed: " .. tostring(err))
     end
 end
+-- Returns engine-reported total memory in MB when available.
+-- Why: executor/environment differences can throw here, so we guard with pcall
+-- and treat missing values as non-fatal to keep the UI responsive.
 local function safeTotalMemMb()
     local total
     pcall(function()
@@ -141,6 +144,9 @@ local function safeTotalMemMb()
     return total
 end
 
+-- Returns Lua heap estimate in MB.
+-- Why: combining engine + Lua memory gives a more useful pressure signal
+-- for guard actions than either metric alone.
 local function luaMemMb()
     local ok, mb = pcall(function()
         return gcinfo() / 1024
@@ -148,6 +154,9 @@ local function luaMemMb()
     return ok and mb or nil
 end
 
+-- Computes memory view used by the floating panel + memory guard.
+-- Why: different executors report memory inconsistently; this function normalizes
+-- to a best-effort combined GB value while exposing raw components for display.
 local function getCombinedMemoryGb()
     local luaMb = luaMemMb() or 0
     local totalMb = safeTotalMemMb()
@@ -173,6 +182,9 @@ end
 
 -- ---- Rendering helpers ----
 -- Rendering helper block controls expensive post-processing and effect visibility.
+-- Removes/neutralizes blur effects currently present in Lighting.
+-- Why: blur and post-processing can be expensive on lower-end devices and
+-- this script prioritizes frame consistency over visual fidelity.
 local function stripBlurEffects()
     for _, obj in ipairs(Lighting:GetChildren()) do
         if obj:IsA("BlurEffect") then
@@ -182,6 +194,8 @@ local function stripBlurEffects()
     end
 end
 
+-- Applies low-visual mode toggles in a single place.
+-- Why: centralizing these writes avoids desync between UI state and render state.
 local function applyVisuals(disable)
     Lighting.GlobalShadows = not disable
     Lighting.FogEnd = disable and 1e6 or 100000
@@ -210,6 +224,9 @@ local function disableFxObject(obj)
     end
 end
 
+-- Disables common high-cost effect instances globally while enabled.
+-- Why: in particle-heavy combat scenarios, effects often dominate frame time.
+-- This also watches new descendants so late-spawned FX are culled immediately.
 local function applyAggressiveFxCull(enabled)
     if enabled then
         if fxCullConnection then
@@ -272,6 +289,10 @@ local characterNonWeaponNames = {
     ["Health"] = true,
 }
 
+-- Heuristic weapon detector for character children.
+-- What: filters out known body/clothing nodes and treats tools/parts/damage-tagged
+-- models as likely weapons.
+-- Why: game structures vary, so strict class checks miss many custom rigs.
 local function isLikelyWeaponContainerForCharacter(character, obj)
     if not character or obj.Parent ~= character then
         return false
@@ -297,6 +318,9 @@ local function isLikelyWeaponContainerForCharacter(character, obj)
     return hasPart
 end
 
+-- Applies local-only hide state to a BasePart while caching previous values.
+-- Why: LocalTransparencyModifier avoids server replication and lets us restore
+-- previous visual state cleanly when toggles are disabled.
 local function setPartHiddenLocal(part, hide, stateTable)
     local state = stateTable[part]
     if not state then
@@ -311,6 +335,9 @@ local function setPartHiddenLocal(part, hide, stateTable)
     end
 end
 
+-- Slow-pass scan for non-local player weapons.
+-- Why: periodic scanning is cheaper than per-instance listeners across all players,
+-- and is good enough for background visual simplification.
 local function applyOtherPlayersWeaponHiding()
     local hiddenCount = 0
     for _, other in ipairs(Players:GetPlayers()) do
@@ -385,6 +412,9 @@ local function applyDamageState(instance)
     end
 end
 
+-- Applies current local weapon policies (hide parts + damage override)
+-- to a tracked weapon container and all descendants.
+-- Why: keeps behavior consistent for both initial scans and live updates.
 local function applyWeaponState(container)
     if container:IsA("BasePart") then
         applyWeaponPartState(container)
@@ -404,6 +434,8 @@ local function applyWeaponState(container)
     end
 end
 
+-- Starts tracking a weapon container and immediately applies active policies.
+-- Why: newly spawned/equipped weapons should reflect current toggles instantly.
 local function trackWeapon(container)
     if trackedWeapons[container] then
         applyWeaponState(container)
@@ -415,6 +447,8 @@ local function trackWeapon(container)
     log("Tracked weapon: " .. container.Name)
 end
 
+-- Stops tracking a weapon and clears cached restore state for its parts/attributes.
+-- Why: prevents stale references and memory growth as weapons are created/removed.
 local function untrackWeapon(container)
     if not trackedWeapons[container] then
         return
@@ -433,6 +467,9 @@ local function untrackWeapon(container)
     end
 end
 
+-- Full rescan of local character children for likely weapon containers.
+-- Why: some games spawn/move weapon objects without consistent events, so periodic
+-- rescans keep the tracker accurate.
 local function rescanCharacterWeapons(silent)
     if not trackedCharacter then
         return
@@ -452,6 +489,8 @@ local function rescanCharacterWeapons(silent)
 end
 
 -- Rebinds weapon tracking whenever the local character changes (respawn/team swap).
+-- Rebinds weapon tracking to the current character model after spawn changes.
+-- Why: respawns swap the character instance, so old connections/state must be reset.
 local function bindCharacterForWeapons(character)
     trackedCharacter = character
     trackedWeapons = {}
@@ -481,6 +520,9 @@ local function bindCharacterForWeapons(character)
 end
 
 -- WalkSpeed override helper. Some games reset WalkSpeed frequently, so we re-apply on a loop.
+-- Enforces optional WalkSpeed override on the local Humanoid.
+-- Why: many games/scripts reset WalkSpeed; a periodic re-apply keeps the requested
+-- value stable while still allowing rollback to original speed.
 local function applyWalkSpeed()
     local character = player.Character
     if not character then return end
@@ -499,6 +541,8 @@ local function applyWalkSpeed()
     end
 end
 
+-- Best-effort FPS cap wrapper.
+-- Why: setfpscap is executor-specific, so this wrapper prevents hard failures.
 local function safeSetFPS(cap)
     if typeof(setfpscap) == "function" then
         pcall(function() setfpscap(cap) end)
@@ -507,6 +551,8 @@ local function safeSetFPS(cap)
     return false
 end
 
+-- Anti-AFK pulse utility that simulates a quick Space key press.
+-- Why: lightweight periodic movement input helps avoid idle kick logic.
 local function pressSpace()
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
@@ -515,12 +561,14 @@ local function pressSpace()
     end)
 end
 
+-- Small UI helper to keep panel visuals consistent.
 local function makeCorner(obj, radius)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, radius or 6)
     c.Parent = obj
 end
 
+-- Small UI helper adding subtle borders for readability on dark panels.
 local function makeStroke(obj)
     local s = Instance.new("UIStroke")
     s.Color = uiTheme.stroke
@@ -627,6 +675,8 @@ local function setFavorite(key, value)
     saveFavorites()
 end
 
+-- Activates one tab page and updates tab button styling.
+-- Why: single source of truth avoids duplicated selection logic across buttons.
 local function switchTab(name)
     if not tabPages[name] then return end
     currentTabName = name
@@ -640,6 +690,8 @@ local function switchTab(name)
     activeList = tabPages[name]
 end
 
+-- Creates both tab button and tab content page.
+-- Why: keeps tab registration + UI wiring in one factory for consistency.
 local function createTab(name)
     local page = Instance.new("ScrollingFrame")
     page.Name = name .. "Page"
@@ -709,6 +761,8 @@ local function refreshFavoriteEntryLabel(key)
     end
 end
 
+-- Mirrors a favorited setting into the Favourites tab as a quick jump action.
+-- Why: favourites should act like shortcuts, not duplicate stateful controls.
 local function ensureFavoriteEntry(key, labelText, tabName)
     if not isFavorite(key) then
         if favoriteEntryByKey[key] and favoriteEntryByKey[key].row then
@@ -746,6 +800,8 @@ local function ensureFavoriteEntry(key, labelText, tabName)
     refreshFavoriteEntryLabel(key)
 end
 
+-- Adds star toggle (☆/★) to a setting row and persists selection to disk.
+-- Why: keeps favoriting lightweight and local to each setting control.
 local function attachFavoriteButton(row, key, labelText, tabName)
     if tabName == "Favourites" then
         return
@@ -777,10 +833,15 @@ local function attachFavoriteButton(row, key, labelText, tabName)
     refreshStar()
 end
 
+-- Generates stable key used for favorites persistence.
+-- Why: key needs to survive UI rebuilds and remain human-predictable.
 local function makeSettingKey(tabName, labelText)
     return string.lower((tabName or "misc") .. "::" .. labelText):gsub("%s+", "_")
 end
 
+-- Generic toggle row factory with favorite support.
+-- What: renders label + ON/OFF button, invokes callback on state changes.
+-- Why: centralized control creation keeps tab UI behavior uniform.
 local function makeToggle(labelText, default, callback, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
@@ -836,6 +897,9 @@ local function makeToggle(labelText, default, callback, tabName)
     }
 end
 
+-- Generic input row factory with favorite support.
+-- What: commits value on focus loss, allowing validation/coercion in onCommit.
+-- Why: avoids duplicated textbox plumbing for each numeric setting.
 local function makeInput(labelText, defaultText, onCommit, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
@@ -877,6 +941,8 @@ local function makeInput(labelText, defaultText, onCommit, tabName)
     return box
 end
 
+-- Generic action button row factory with favorite support.
+-- Why: one pathway for action rows makes spacing/layout consistent everywhere.
 local function makeButton(text, onClick, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
@@ -931,7 +997,7 @@ memoryText.Text = "Memory: --"
 
 -- ---- Feature wiring (UI -> behavior) ----
 
--- Utility tab
+-- Utility tab: session safety / quality-of-life actions.
 makeToggle("Anti-AFK (presses Space every 10m)", _G.__MeerlyPerfState.antiAfkEnabled, function(v)
     _G.__MeerlyPerfState.antiAfkEnabled = v
     log(v and "Anti-AFK enabled" or "Anti-AFK disabled")
@@ -980,7 +1046,7 @@ makeButton("Rejoin Server", function()
     end)
 end, "Utility")
 
--- Performance tab
+-- Performance tab: rendering and frame-time controls.
 makeToggle("FPS Cap", fpsCapEnabled, function(v)
     fpsCapEnabled = v
     if fpsCapEnabled then
@@ -1030,7 +1096,7 @@ makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
     applyAggressiveFxCull(v)
 end, "Performance")
 
--- Weapons tab
+-- Weapons tab: local and other-player weapon visual/attribute controls.
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
     for weapon in pairs(trackedWeapons) do
@@ -1083,7 +1149,7 @@ makeButton("Rescan Weapons", function()
     rescanCharacterWeapons()
 end, "Weapons")
 
--- Player tab
+-- Player tab: local humanoid movement overrides.
 makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
     walkSpeedOverrideEnabled = v
     applyWalkSpeed()
@@ -1102,7 +1168,7 @@ makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
     return tostring(walkSpeedValue)
 end, "Player")
 
--- Memory tab
+-- Memory tab: telemetry + auto-recovery behavior when memory climbs.
 makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
     memoryStatsEnabled = v
     memoryGui.Enabled = v
@@ -1177,6 +1243,8 @@ UserInputService.WindowFocusReleased:Connect(function()
 end)
 
 -- ---- Background loops/watchers ----
+-- Heartbeat watchdog source timestamp update.
+-- Why: heartbeat gaps are a simple signal for frame stalls/freezes.
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
     local prev = _G.__MeerlyPerfState.lastHeartbeat or now
@@ -1187,6 +1255,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- Anti-AFK worker: emits a space pulse every 10 minutes while enabled.
 task.spawn(function()
     local interval = 600
     local nextFire = os.clock() + interval
@@ -1204,6 +1273,7 @@ task.spawn(function()
     end
 end)
 
+-- Watchdog worker: logs if heartbeat appears delayed beyond threshold.
 task.spawn(function()
     while running do
         task.wait(1)
@@ -1216,6 +1286,7 @@ task.spawn(function()
     end
 end)
 
+-- Background worker: drops quality when unfocused and background mode is on.
 task.spawn(function()
     while running do
         task.wait(2)
@@ -1225,6 +1296,7 @@ task.spawn(function()
     end
 end)
 
+-- Memory panel worker: refreshes floating memory telemetry.
 task.spawn(function()
     while running do
         task.wait(1)
@@ -1241,6 +1313,7 @@ task.spawn(function()
     end
 end)
 
+-- Memory guard worker: executes auto-action when memory cap is exceeded.
 task.spawn(function()
     while running do
         task.wait(5)
@@ -1281,6 +1354,7 @@ characterAddedConnection = player.CharacterAdded:Connect(function(character)
     bindCharacterForWeapons(character)
 end)
 
+-- Weapon rescan worker: periodic correction for missed/irregular spawns.
 task.spawn(function()
     while running do
         task.wait(3)
@@ -1288,6 +1362,7 @@ task.spawn(function()
     end
 end)
 
+-- Other-player hide worker: intentionally slow cadence to minimize overhead.
 task.spawn(function()
     while running do
         task.wait(otherPlayersHidePassSeconds)
@@ -1297,6 +1372,7 @@ task.spawn(function()
     end
 end)
 
+-- WalkSpeed enforcement worker: reapplies override if external scripts change it.
 task.spawn(function()
     while running do
         task.wait(0.75)
