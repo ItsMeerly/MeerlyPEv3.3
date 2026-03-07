@@ -658,7 +658,7 @@ local function setMainUiUnlocked(unlocked)
     tabBar.Visible = keyAccepted
     tabPagesRoot.Visible = keyAccepted
     logBox.Visible = keyAccepted
-    title.Text = keyAccepted and "Meerly Untitled Melee RNG - ';' hide/open" or "Key System"
+    title.Text = keyAccepted and "Meerly Untitled Melee RNG - hide/open with ;" or "Key System"
 end
 
 setMainUiUnlocked(false)
@@ -839,11 +839,11 @@ local function createTab(name)
     return page
 end
 
-createTab("Performance")
 createTab("Weapons")
 createTab("Player")
-createTab("Memory")
 createTab("Utility")
+createTab("Performance")
+createTab("Memory")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
@@ -1230,7 +1230,7 @@ makeToggle("Disable 3D Rendering", disable3D, function(v)
     end
 end, "Utility")
 
-makeToggle("Hide Disappear Entities (Test)", hideDisappearEntities, function(v)
+makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
     setDisappearHider(v)
 end, "Utility")
 
