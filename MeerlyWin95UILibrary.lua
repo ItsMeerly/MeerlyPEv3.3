@@ -563,7 +563,7 @@ function MeerlyWin95:_buildUI()
         Size = UDim2.new(1, -8, 0, 34),
         Position = UDim2.new(0, 4, 1, -38),
         BorderSizePixel = 0,
-        ZIndex = 7,
+        ZIndex = 40,
     })
     applyBevel(self.taskbar, self.theme.bevelLight, self.theme.bevelDark)
 
@@ -577,6 +577,9 @@ function MeerlyWin95:_buildUI()
     })
 
     self:_connect(tbLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+        self:_taskbarResize()
+    end)
+    self:_connect(self.taskbar:GetPropertyChangedSignal("AbsoluteSize"), function()
         self:_taskbarResize()
     end)
 
@@ -785,7 +788,7 @@ function MeerlyWin95:addPage(name, icon)
         TextSize = 18,
         LayoutOrder = #self.pageOrder + 1,
         BorderSizePixel = 0,
-        ZIndex = 8,
+        ZIndex = 41,
     })
     applyBevel(button, self.theme.bevelLight, self.theme.bevelDark)
 
@@ -955,79 +958,172 @@ function MeerlyWin95:_buildThemePage()
 
     local transLabel = make("TextLabel", {
         Parent = page,
-        Text = "Transparency (0.00 - 0.50):",
+        Text = "Transparency",
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(260, 22),
+        Size = UDim2.fromOffset(220, 22),
         Position = UDim2.fromOffset(8, y + 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
-    local transInput = make("TextBox", {
+    local transValue = make("TextLabel", {
         Parent = page,
-        Text = tostring(self.settings.uiTransparency),
+        Text = string.format("%.2f", self.settings.uiTransparency),
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(120, 24),
-        Position = UDim2.fromOffset(270, y + 8),
-        BorderSizePixel = 0,
-        ClearTextOnFocus = false,
+        Size = UDim2.fromOffset(70, 22),
+        Position = UDim2.fromOffset(232, y + 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Right,
     })
-    applyBevel(transInput, self.theme.bevelLight, self.theme.bevelDark)
+
+    local transTrack = make("Frame", {
+        Parent = page,
+        Size = UDim2.new(1, -16, 0, 18),
+        Position = UDim2.fromOffset(8, y + 30),
+        BorderSizePixel = 0,
+    })
+    applyBevel(transTrack, self.theme.bevelLight, self.theme.bevelDark)
+
+    local transFill = make("Frame", {
+        Parent = transTrack,
+        Size = UDim2.new(0, 0, 1, 0),
+        BorderSizePixel = 0,
+    })
+
+    local transKnob = make("Frame", {
+        Parent = transTrack,
+        Size = UDim2.fromOffset(8, 18),
+        Position = UDim2.fromOffset(0, 0),
+        BorderSizePixel = 0,
+    })
 
     local blurLabel = make("TextLabel", {
         Parent = page,
-        Text = "Blur (0-56):",
+        Text = "Blur",
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(120, 22),
-        Position = UDim2.fromOffset(8, y + 38),
+        Size = UDim2.fromOffset(220, 22),
+        Position = UDim2.fromOffset(8, y + 56),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
-    local blurInput = make("TextBox", {
+    local blurValue = make("TextLabel", {
         Parent = page,
-        Text = tostring(self.settings.blurAmount),
+        Text = string.format("%d", self.settings.blurAmount),
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(120, 24),
-        Position = UDim2.fromOffset(130, y + 36),
-        BorderSizePixel = 0,
-        ClearTextOnFocus = false,
+        Size = UDim2.fromOffset(70, 22),
+        Position = UDim2.fromOffset(232, y + 56),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Right,
     })
-    applyBevel(blurInput, self.theme.bevelLight, self.theme.bevelDark)
 
-    self:_connect(transInput.FocusLost, function()
-        local n = tonumber(transInput.Text)
-        if n then
-            self.settings.uiTransparency = math.clamp(n, 0, 0.5)
-            self.shell.BackgroundTransparency = self.settings.uiTransparency
-            self.window.BackgroundTransparency = self.settings.uiTransparency
-            self.content.BackgroundTransparency = self.settings.uiTransparency
-            self:log("EVENT", string.format("Transparency set %.2f", self.settings.uiTransparency))
+    local blurTrack = make("Frame", {
+        Parent = page,
+        Size = UDim2.new(1, -16, 0, 18),
+        Position = UDim2.fromOffset(8, y + 78),
+        BorderSizePixel = 0,
+    })
+    applyBevel(blurTrack, self.theme.bevelLight, self.theme.bevelDark)
+
+    local blurFill = make("Frame", {
+        Parent = blurTrack,
+        Size = UDim2.new(0, 0, 1, 0),
+        BorderSizePixel = 0,
+    })
+
+    local blurKnob = make("Frame", {
+        Parent = blurTrack,
+        Size = UDim2.fromOffset(8, 18),
+        Position = UDim2.fromOffset(0, 0),
+        BorderSizePixel = 0,
+    })
+
+    local function setTransparencyValue(v)
+        self.settings.uiTransparency = math.max(0, math.min(0.5, v))
+        local alpha = self.settings.uiTransparency / 0.5
+        local width = math.max(1, transTrack.AbsoluteSize.X)
+        local knobX = math.floor((width - transKnob.AbsoluteSize.X) * alpha)
+        transFill.Size = UDim2.new(alpha, 0, 1, 0)
+        transKnob.Position = UDim2.fromOffset(knobX, 0)
+        transValue.Text = string.format("%.2f", self.settings.uiTransparency)
+        self.shell.BackgroundTransparency = self.settings.uiTransparency
+        self.window.BackgroundTransparency = self.settings.uiTransparency
+        self.content.BackgroundTransparency = self.settings.uiTransparency
+    end
+
+    local function setBlurValue(v)
+        self.settings.blurAmount = math.floor(math.max(0, math.min(56, v)) + 0.5)
+        local alpha = self.settings.blurAmount / 56
+        local width = math.max(1, blurTrack.AbsoluteSize.X)
+        local knobX = math.floor((width - blurKnob.AbsoluteSize.X) * alpha)
+        blurFill.Size = UDim2.new(alpha, 0, 1, 0)
+        blurKnob.Position = UDim2.fromOffset(knobX, 0)
+        blurValue.Text = string.format("%d", self.settings.blurAmount)
+        self:_applyTheme()
+    end
+
+    local function bindSlider(track, setter, minValue, maxValue, eventLabel)
+        local dragging = false
+
+        local function applyFromPosition(x)
+            local width = math.max(1, track.AbsoluteSize.X)
+            local alpha = math.max(0, math.min(1, x / width))
+            local value = minValue + (maxValue - minValue) * alpha
+            setter(value)
         end
-    end)
 
-    self:_connect(blurInput.FocusLost, function()
-        local n = tonumber(blurInput.Text)
-        if n then
-            self.settings.blurAmount = math.clamp(n, 0, 56)
-            self:_applyTheme()
-            self:log("EVENT", "Blur set to " .. self.settings.blurAmount)
-        end
-    end)
+        self:_connect(track.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                local localX = input.Position.X - track.AbsolutePosition.X
+                applyFromPosition(localX)
+            end
+        end)
 
+        self:_connect(track.InputEnded, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                if dragging then
+                    dragging = false
+                    self:log("EVENT", eventLabel)
+                end
+            end
+        end)
+
+        self:_connect(UserInputService.InputChanged, function(input)
+            if not dragging then
+                return
+            end
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                local localX = input.Position.X - track.AbsolutePosition.X
+                applyFromPosition(localX)
+            end
+        end)
+    end
+
+    bindSlider(transTrack, setTransparencyValue, 0, 0.5, "Transparency updated")
+    bindSlider(blurTrack, setBlurValue, 0, 56, "Blur updated")
+
+    task.defer(function()
+        setTransparencyValue(self.settings.uiTransparency)
+        setBlurValue(self.settings.blurAmount)
+    end)
     table.insert(self.dynamicThemeParts, {
         apply = function(theme)
             title.TextColor3 = theme.text
             transLabel.TextColor3 = theme.text
+            transValue.TextColor3 = theme.text
             blurLabel.TextColor3 = theme.text
-            transInput.BackgroundColor3 = theme.window
-            transInput.TextColor3 = theme.text
-            blurInput.BackgroundColor3 = theme.window
-            blurInput.TextColor3 = theme.text
+            blurValue.TextColor3 = theme.text
+            transTrack.BackgroundColor3 = theme.window
+            transFill.BackgroundColor3 = theme.accent
+            transKnob.BackgroundColor3 = theme.text
+            blurTrack.BackgroundColor3 = theme.window
+            blurFill.BackgroundColor3 = theme.accent
+            blurKnob.BackgroundColor3 = theme.text
         end,
     })
 end
@@ -1289,68 +1385,7 @@ function MeerlyWin95:_safeExecutorAction(name, fn)
 end
 
 function MeerlyWin95:_buildSettingsPage()
-    local page = self:addPage("Settings", "ST")
-
-    local title = make("TextLabel", {
-        Parent = page,
-        Text = "General Settings",
-        Font = Enum.Font.Code,
-        TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 24),
-        Position = UDim2.fromOffset(8, 8),
-        BackgroundTransparency = 1,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    })
-
-    local keyInfo = make("TextLabel", {
-        Parent = page,
-        Text = "Main Toggle Key: " .. tostring(self.settings.toggleKey),
-        Font = Enum.Font.Code,
-        TextSize = 13,
-        Size = UDim2.new(1, -16, 0, 20),
-        Position = UDim2.fromOffset(8, 38),
-        BackgroundTransparency = 1,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    })
-
-    local keygateInfo = make("TextLabel", {
-        Parent = page,
-        Text = "Keygate URL: " .. KEY_LINK,
-        Font = Enum.Font.Code,
-        TextSize = 13,
-        Size = UDim2.new(1, -16, 0, 40),
-        Position = UDim2.fromOffset(8, 62),
-        BackgroundTransparency = 1,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-    })
-
-    local dumpCfg = make("TextButton", {
-        Parent = page,
-        Text = "Print Active Config Table",
-        Font = Enum.Font.Code,
-        TextSize = 13,
-        Size = UDim2.fromOffset(210, 24),
-        Position = UDim2.fromOffset(8, 108),
-        BorderSizePixel = 0,
-    })
-    applyBevel(dumpCfg, self.theme.bevelLight, self.theme.bevelDark)
-
-    self:_connect(dumpCfg.MouseButton1Click, function()
-        self:log("DEBUG", "Unified config table emitted to print output")
-        print("[MeerlyWin95][UnifiedConfig]", self:getUnifiedConfig())
-    end)
-
-    table.insert(self.dynamicThemeParts, {
-        apply = function(theme)
-            title.TextColor3 = theme.text
-            keyInfo.TextColor3 = theme.text
-            keygateInfo.TextColor3 = theme.subtle
-            dumpCfg.BackgroundColor3 = theme.window
-            dumpCfg.TextColor3 = theme.text
-        end,
-    })
+    -- Deprecated by request: keep only Roblox Settings as the Settings page.
 end
 
 function MeerlyWin95:_buildPerformancePage()
@@ -1407,7 +1442,7 @@ function MeerlyWin95:_buildPerformancePage()
 end
 
 function MeerlyWin95:_buildRobloxSettingsPage()
-    local page = self:addPage("RobloxSettings", "RB")
+    local page = self:addPage("Settings", "ST")
 
     local title = make("TextLabel", {
         Parent = page,
@@ -1616,7 +1651,6 @@ end
 function MeerlyWin95:_buildDefaultPages()
     self:_buildThemePage()
     self:_buildPerformancePage()
-    self:_buildSettingsPage()
     self:_buildConfigPage()
     self:_buildConsolePage()
     self:_buildRobloxSettingsPage()
