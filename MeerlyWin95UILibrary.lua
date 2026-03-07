@@ -189,9 +189,30 @@ end
 
 local function make(className, props)
     local inst = Instance.new(className)
+    local parent = nil
+
     for k, v in pairs(props or {}) do
-        inst[k] = v
+        if k == "Parent" then
+            parent = v
+        else
+            local ok, err = pcall(function()
+                inst[k] = v
+            end)
+            if not ok then
+                warn(string.format("[MeerlyWin95][make:%s] Failed property '%s': %s", className, tostring(k), tostring(err)))
+            end
+        end
     end
+
+    if parent ~= nil then
+        local ok, err = pcall(function()
+            inst.Parent = parent
+        end)
+        if not ok then
+            warn(string.format("[MeerlyWin95][make:%s] Failed to set Parent: %s", className, tostring(err)))
+        end
+    end
+
     return inst
 end
 
@@ -467,11 +488,19 @@ function MeerlyWin95:_taskbarResize()
     local insetX = 4
 
     local hostWidth = math.max(0, host.AbsoluteSize.X - (insetX * 2))
+    if hostWidth <= 0 and self.taskbar then
+        hostWidth = math.max(0, self.taskbar.AbsoluteSize.X - 16)
+    end
     if hostWidth <= 0 and self.window then
         hostWidth = math.max(0, self.window.AbsoluteSize.X - 28)
     end
 
-    if hostWidth <= 0 then
+    local hostHeight = math.max(0, host.AbsoluteSize.Y)
+    if hostHeight <= 0 and self.taskbar then
+        hostHeight = math.max(0, self.taskbar.AbsoluteSize.Y - 6)
+    end
+
+    if hostWidth <= 0 or hostHeight <= 0 then
         task.defer(function()
             if self.state and self.state.alive then
                 self:_taskbarResize()
@@ -485,8 +514,8 @@ function MeerlyWin95:_taskbarResize()
     local size = math.max(minHeight, math.min(maxHeight, widthEach))
 
     local totalWidth = (size * count) + totalGap
-    local startX = math.floor((host.AbsoluteSize.X - totalWidth) / 2)
-    local y = math.max(0, math.floor((host.AbsoluteSize.Y - size) / 2))
+    local startX = math.floor((hostWidth - totalWidth) / 2) + insetX
+    local y = math.max(0, math.floor((hostHeight - size) / 2))
 
     local x = startX
     for _, b in ipairs(buttons) do
@@ -717,6 +746,10 @@ function MeerlyWin95:_buildUI()
             self.state.unlocked = true
             self.keyGate.Visible = false
             status.Text = "Access granted"
+            self:_taskbarResize()
+            if self.state.selectedPage then
+                self:selectPage(self.state.selectedPage)
+            end
             self:log("EVENT", "Keygate unlocked")
         else
             status.Text = "Invalid key"
