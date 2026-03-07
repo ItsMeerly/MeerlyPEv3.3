@@ -57,6 +57,10 @@ local backgroundMode = false
 local windowFocused = true
 local disable3D = false
 local muteSounds = false
+local hideDisappearEntities = false
+local disappearOriginalName = "Disappear"
+local disappearRenamedName = "Disappear123"
+local renamedDisappearInstance = nil
 
 local heartbeatLagThreshold = 1.5
 local watchdogThreshold = 4
@@ -1022,6 +1026,83 @@ memoryText.TextSize = 13
 memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
+local function resolveDisappearController()
+    local playerScripts = player:FindFirstChild("PlayerScripts")
+    if not playerScripts then
+        return nil, "PlayerScripts not found"
+    end
+
+    local mobsClientController = playerScripts:FindFirstChild("MobsClientController")
+    if not mobsClientController then
+        return nil, "MobsClientController not found"
+    end
+
+    local disappearNode = mobsClientController:FindFirstChild(disappearOriginalName)
+    if disappearNode then
+        return disappearNode
+    end
+
+    if renamedDisappearInstance and renamedDisappearInstance.Parent == mobsClientController then
+        return renamedDisappearInstance
+    end
+
+    local renamedNode = mobsClientController:FindFirstChild(disappearRenamedName)
+    if renamedNode then
+        renamedDisappearInstance = renamedNode
+        return renamedNode
+    end
+
+    return nil, "Disappear root not found"
+end
+
+local function setDisappearHider(enabled)
+    hideDisappearEntities = enabled
+
+    local disappearNode, reason = resolveDisappearController()
+    if not disappearNode then
+        log(string.format("Disappear toggle failed: %s", tostring(reason)))
+        return
+    end
+
+    if enabled then
+        if disappearNode.Name == disappearRenamedName then
+            renamedDisappearInstance = disappearNode
+            log("Disappear root already renamed")
+            return
+        end
+
+        local ok, err = pcall(function()
+            disappearNode.Name = disappearRenamedName
+        end)
+        if ok then
+            renamedDisappearInstance = disappearNode
+            log(string.format("Disappear root renamed to '%s'", disappearRenamedName))
+        else
+            log("Failed to rename Disappear root: " .. tostring(err))
+        end
+    else
+        local nodeToRestore = renamedDisappearInstance
+        if not nodeToRestore or not nodeToRestore.Parent then
+            nodeToRestore = disappearNode
+        end
+
+        if not nodeToRestore or nodeToRestore.Name ~= disappearRenamedName then
+            log("Disappear root already restored")
+            return
+        end
+
+        local ok, err = pcall(function()
+            nodeToRestore.Name = disappearOriginalName
+        end)
+        if ok then
+            renamedDisappearInstance = nil
+            log("Disappear root restored to 'Disappear'")
+        else
+            log("Failed to restore Disappear root: " .. tostring(err))
+        end
+    end
+end
+
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- Utility tab: session safety / quality-of-life actions.
@@ -1055,6 +1136,10 @@ makeToggle("Disable 3D Rendering", disable3D, function(v)
     else
         log("3D render toggle unsupported")
     end
+end, "Utility")
+
+makeToggle("Hide Disappear Entities (Test)", hideDisappearEntities, function(v)
+    setDisappearHider(v)
 end, "Utility")
 
 makeButton("Rejoin Server", function()
@@ -1297,6 +1382,11 @@ makeButton("KILL SWITCH", function()
     if characterAddedConnection then
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
+    end
+    if hideDisappearEntities then
+        pcall(function()
+            setDisappearHider(false)
+        end)
     end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
