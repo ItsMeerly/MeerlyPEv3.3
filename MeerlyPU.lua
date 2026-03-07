@@ -58,8 +58,9 @@ local windowFocused = true
 local disable3D = false
 local muteSounds = false
 local hideDisappearEntities = false
-local disappearVisualCache = setmetatable({}, { __mode = "k" })
-local disappearWatchConnections = {}
+local disappearOriginalName = "Disappear"
+local disappearRenamedName = "Disappear123"
+local renamedDisappearInstance = nil
 
 local heartbeatLagThreshold = 1.5
 local watchdogThreshold = 4
@@ -1025,143 +1026,80 @@ memoryText.TextSize = 13
 memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
-local function cacheDisappearProperty(inst, key, value)
-    local cached = disappearVisualCache[inst]
-    if not cached then
-        cached = {}
-        disappearVisualCache[inst] = cached
-    end
-    if cached[key] == nil then
-        cached[key] = value
-    end
-end
-
-local function setDisappearVisualState(inst, hide)
-    if not inst or not inst.Parent then
-        return
+local function resolveDisappearController()
+    local playerScripts = player:FindFirstChild("PlayerScripts")
+    if not playerScripts then
+        return nil, "PlayerScripts not found"
     end
 
-    if inst:IsA("BasePart") then
-        if hide then
-            cacheDisappearProperty(inst, "LocalTransparencyModifier", inst.LocalTransparencyModifier)
-            inst.LocalTransparencyModifier = 1
-        else
-            local cached = disappearVisualCache[inst]
-            if cached and cached.LocalTransparencyModifier ~= nil then
-                inst.LocalTransparencyModifier = cached.LocalTransparencyModifier
-            end
-        end
-    elseif inst:IsA("Decal") or inst:IsA("Texture") then
-        if hide then
-            cacheDisappearProperty(inst, "Transparency", inst.Transparency)
-            inst.Transparency = 1
-        else
-            local cached = disappearVisualCache[inst]
-            if cached and cached.Transparency ~= nil then
-                inst.Transparency = cached.Transparency
-            end
-        end
-    elseif inst:IsA("BillboardGui") or inst:IsA("SurfaceGui") then
-        if hide then
-            cacheDisappearProperty(inst, "Enabled", inst.Enabled)
-            inst.Enabled = false
-        else
-            local cached = disappearVisualCache[inst]
-            if cached and cached.Enabled ~= nil then
-                inst.Enabled = cached.Enabled
-            end
-        end
-    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") then
-        if hide then
-            cacheDisappearProperty(inst, "Enabled", inst.Enabled)
-            inst.Enabled = false
-        else
-            local cached = disappearVisualCache[inst]
-            if cached and cached.Enabled ~= nil then
-                inst.Enabled = cached.Enabled
-            end
-        end
-    end
-end
-
-local function setDisappearRecursive(root, hide)
-    if not root then
-        return
+    local mobsClientController = playerScripts:FindFirstChild("MobsClientController")
+    if not mobsClientController then
+        return nil, "MobsClientController not found"
     end
 
-    pcall(function()
-        setDisappearVisualState(root, hide)
-    end)
-
-    for _, desc in ipairs(root:GetDescendants()) do
-        pcall(function()
-            setDisappearVisualState(desc, hide)
-        end)
-    end
-end
-
-local function hasDisappearAncestor(inst)
-    local current = inst
-    while current and current ~= game do
-        if current.Name == "Disappear" then
-            return true
-        end
-        current = current.Parent
-    end
-    return false
-end
-
-local function watchDisappearRoot(root)
-    if not root then
-        return
+    local disappearNode = mobsClientController:FindFirstChild(disappearOriginalName)
+    if disappearNode then
+        return disappearNode
     end
 
-    for _, desc in ipairs(root:GetDescendants()) do
-        if desc.Name == "Disappear" then
-            setDisappearRecursive(desc, true)
-        end
+    if renamedDisappearInstance and renamedDisappearInstance.Parent == mobsClientController then
+        return renamedDisappearInstance
     end
 
-    disappearWatchConnections[#disappearWatchConnections + 1] = root.DescendantAdded:Connect(function(desc)
-        if not hideDisappearEntities then
-            return
-        end
+    local renamedNode = mobsClientController:FindFirstChild(disappearRenamedName)
+    if renamedNode then
+        renamedDisappearInstance = renamedNode
+        return renamedNode
+    end
 
-        if desc.Name == "Disappear" then
-            setDisappearRecursive(desc, true)
-            return
-        end
-
-        if hasDisappearAncestor(desc) then
-            pcall(function()
-                setDisappearVisualState(desc, true)
-            end)
-        end
-    end)
+    return nil, "Disappear root not found"
 end
 
 local function setDisappearHider(enabled)
     hideDisappearEntities = enabled
 
+    local disappearNode, reason = resolveDisappearController()
+    if not disappearNode then
+        log(string.format("Disappear toggle failed: %s", tostring(reason)))
+        return
+    end
+
     if enabled then
-        watchDisappearRoot(Workspace)
-        watchDisappearRoot(player:FindFirstChild("PlayerScripts"))
-        log("Disappear hider enabled (existing + new clones)")
+        if disappearNode.Name == disappearRenamedName then
+            renamedDisappearInstance = disappearNode
+            log("Disappear root already renamed")
+            return
+        end
+
+        local ok, err = pcall(function()
+            disappearNode.Name = disappearRenamedName
+        end)
+        if ok then
+            renamedDisappearInstance = disappearNode
+            log(string.format("Disappear root renamed to '%s'", disappearRenamedName))
+        else
+            log("Failed to rename Disappear root: " .. tostring(err))
+        end
     else
-        for _, conn in ipairs(disappearWatchConnections) do
-            if conn then
-                conn:Disconnect()
-            end
-        end
-        table.clear(disappearWatchConnections)
-
-        for inst in pairs(disappearVisualCache) do
-            pcall(function()
-                setDisappearVisualState(inst, false)
-            end)
+        local nodeToRestore = renamedDisappearInstance
+        if not nodeToRestore or not nodeToRestore.Parent then
+            nodeToRestore = disappearNode
         end
 
-        log("Disappear hider disabled (restored cached visuals)")
+        if not nodeToRestore or nodeToRestore.Name ~= disappearRenamedName then
+            log("Disappear root already restored")
+            return
+        end
+
+        local ok, err = pcall(function()
+            nodeToRestore.Name = disappearOriginalName
+        end)
+        if ok then
+            renamedDisappearInstance = nil
+            log("Disappear root restored to 'Disappear'")
+        else
+            log("Failed to restore Disappear root: " .. tostring(err))
+        end
     end
 end
 
