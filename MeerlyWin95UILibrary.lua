@@ -197,6 +197,27 @@ end
 
 -- Generic drag helper used by main shell, console, and floating windows.
 -- Keeps the interaction lightweight and reusable.
+local function clampFrameToViewport(frame, boundsTarget, padding)
+    if not frame or not boundsTarget then
+        return
+    end
+
+    local inset = padding or 8
+    local parentSize = boundsTarget.AbsoluteSize
+    local frameSize = frame.AbsoluteSize
+
+    if parentSize.X <= 0 or parentSize.Y <= 0 then
+        return
+    end
+
+    local maxX = math.max(inset, parentSize.X - frameSize.X - inset)
+    local maxY = math.max(inset, parentSize.Y - frameSize.Y - inset)
+
+    local clampedX = math.clamp(frame.Position.X.Offset, inset, maxX)
+    local clampedY = math.clamp(frame.Position.Y.Offset, inset, maxY)
+    frame.Position = UDim2.fromOffset(clampedX, clampedY)
+end
+
 local function makeDraggable(dragHandle, target, boundsTarget)
     local dragging = false
     local dragStart
@@ -408,6 +429,41 @@ function MeerlyWin95:_taskbarResize()
     end
 end
 
+function MeerlyWin95:_refreshResponsiveLayout()
+    if not self.screenGui or not self.shell then
+        return
+    end
+
+    local viewport = self.screenGui.AbsoluteSize
+    if viewport.X <= 0 or viewport.Y <= 0 then
+        return
+    end
+
+    local margin = 20
+    local shellW = math.clamp(760, 420, math.max(420, viewport.X - margin))
+    local shellH = math.clamp(520, 300, math.max(300, viewport.Y - margin))
+    self.shell.Size = UDim2.fromOffset(shellW, shellH)
+
+    if not self.state.shellPositionInitialized then
+        self.shell.Position = UDim2.fromOffset(math.floor((viewport.X - shellW) / 2), math.floor((viewport.Y - shellH) / 2))
+        self.state.shellPositionInitialized = true
+    else
+        clampFrameToViewport(self.shell, self.screenGui, 8)
+    end
+
+    local consoleW = math.min(620, math.max(300, viewport.X - 16))
+    self.consoleFrame.Size = UDim2.fromOffset(consoleW, 180)
+
+    if not self.state.consolePositionInitialized then
+        self.consoleFrame.Position = UDim2.fromOffset(math.floor((viewport.X - consoleW) / 2), math.max(8, viewport.Y - 188))
+        self.state.consolePositionInitialized = true
+    else
+        clampFrameToViewport(self.consoleFrame, self.screenGui, 8)
+    end
+
+    self:_taskbarResize()
+end
+
 function MeerlyWin95:_buildUI()
     self.pages = {}
     self.pageOrder = {}
@@ -423,7 +479,7 @@ function MeerlyWin95:_buildUI()
     self.shell = make("Frame", {
         Parent = self.screenGui,
         Size = UDim2.fromOffset(760, 520),
-        Position = UDim2.new(0.5, -380, 0.5, -260),
+        Position = UDim2.fromOffset(20, 20),
         BorderSizePixel = 0,
         BackgroundTransparency = self.settings.uiTransparency,
         ZIndex = 4,
@@ -505,6 +561,10 @@ function MeerlyWin95:_buildUI()
 
     self:_connect(tbLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
         self:_taskbarResize()
+    end)
+
+    self:_connect(self.screenGui:GetPropertyChangedSignal("AbsoluteSize"), function()
+        self:_refreshResponsiveLayout()
     end)
 
     -- Keygate splash: blocks access until key is validated.
@@ -610,7 +670,7 @@ function MeerlyWin95:_buildUI()
     self.consoleFrame = make("Frame", {
         Parent = self.screenGui,
         Size = UDim2.fromOffset(620, 180),
-        Position = UDim2.new(0.5, -310, 1, -188),
+        Position = UDim2.fromOffset(20, 20),
         BorderSizePixel = 0,
         ZIndex = 2,
     })
@@ -656,6 +716,8 @@ function MeerlyWin95:_buildUI()
         self:log("EVENT", "Kill button clicked")
         self:destroy()
     end)
+
+    self:_refreshResponsiveLayout()
 end
 
 function MeerlyWin95:addPage(name, icon)
@@ -1581,6 +1643,9 @@ function MeerlyWin95:_wireCoreBindings()
                 end
             end
 
+            if self.state.visible then
+                self:_refreshResponsiveLayout()
+            end
             self:log("EVENT", "Main UI " .. (self.state.visible and "shown" or "hidden"))
         end
     end)
