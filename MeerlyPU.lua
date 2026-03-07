@@ -1148,6 +1148,53 @@ local function setDisappearHider(enabled)
     end
 end
 
+local function resolveOptionsListButton(buttonName)
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then
+        return nil, "PlayerGui not found"
+    end
+
+    local mainGui = playerGui:FindFirstChild("MainGUI")
+    if not mainGui then
+        return nil, "MainGUI not found"
+    end
+
+    local optionsList = mainGui:FindFirstChild("OptionsList")
+    if not optionsList then
+        return nil, "OptionsList not found"
+    end
+
+    local button = optionsList:FindFirstChild(buttonName)
+    if not button then
+        return nil, buttonName .. " not found"
+    end
+
+    return button
+end
+
+local function getOptionsListButtonVisible(buttonName)
+    local button = resolveOptionsListButton(buttonName)
+    return button and button.Visible or false
+end
+
+local function setOptionsListButtonVisible(buttonName, enabled)
+    local button, reason = resolveOptionsListButton(buttonName)
+    if not button then
+        log(string.format("%s visibility toggle failed: %s", buttonName, tostring(reason)))
+        return
+    end
+
+    local ok, err = pcall(function()
+        button.Visible = enabled
+    end)
+
+    if ok then
+        log(string.format("%s visibility set to %s", buttonName, enabled and "ON" or "OFF"))
+    else
+        log(string.format("Failed to set %s visibility: %s", buttonName, tostring(err)))
+    end
+end
+
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- Utility tab: session safety / quality-of-life actions.
@@ -1185,6 +1232,14 @@ end, "Utility")
 
 makeToggle("Hide Disappear Entities (Test)", hideDisappearEntities, function(v)
     setDisappearHider(v)
+end, "Utility")
+
+makeToggle("Show AutoRaidBtn", getOptionsListButtonVisible("AutoRaidBtn"), function(v)
+    setOptionsListButtonVisible("AutoRaidBtn", v)
+end, "Utility")
+
+makeToggle("Show HideMobsBtn", getOptionsListButtonVisible("HideMobsBtn"), function(v)
+    setOptionsListButtonVisible("HideMobsBtn", v)
 end, "Utility")
 
 makeButton("Rejoin Server", function()
