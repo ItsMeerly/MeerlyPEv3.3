@@ -39,7 +39,7 @@ local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
 
-local hardcodedAccessKey = "MEERLY-ACCESS-2026"
+local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/meerly-keychain"
 
 local fxCullConnection = nil
