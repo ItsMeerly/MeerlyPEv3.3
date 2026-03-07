@@ -46,6 +46,11 @@ local fxCullConnection = nil
 local weaponChildAddedConnection = nil
 local weaponChildRemovedConnection = nil
 local characterAddedConnection = nil
+local lightingChildAddedConnection = nil
+local heartbeatConnection = nil
+local windowFocusedConnection = nil
+local windowFocusReleasedConnection = nil
+local inputBeganConnection = nil
 
 local trackedCharacter = nil
 local trackedWeapons = {}
@@ -291,6 +296,12 @@ end
 -- Why: periodic scanning is cheaper than per-instance listeners across all players,
 -- and is good enough for background visual simplification.
 local function applyOtherPlayersWeaponHiding()
+    for part in pairs(otherPlayerWeaponPartState) do
+        if (not part) or (not part.Parent) then
+            otherPlayerWeaponPartState[part] = nil
+        end
+    end
+
     local hiddenCount = 0
     for _, other in ipairs(Players:GetPlayers()) do
         if other ~= player and other.Character then
@@ -428,10 +439,18 @@ local function rescanCharacterWeapons(silent)
     end
 
     local trackedCount = 0
+    local currentlySeen = {}
     for _, child in ipairs(trackedCharacter:GetChildren()) do
         if isLikelyWeaponContainer(child) then
+            currentlySeen[child] = true
             trackWeapon(child)
             trackedCount += 1
+        end
+    end
+
+    for weapon in pairs(trackedWeapons) do
+        if not currentlySeen[weapon] or weapon.Parent ~= trackedCharacter then
+            untrackWeapon(weapon)
         end
     end
 
@@ -468,7 +487,21 @@ local function bindCharacterForWeapons(character)
         untrackWeapon(child)
     end)
 
-    rescanCharacterWeapons()
+    rescanCharacterWeapons(true)
+end
+
+local function pruneTrackedWeaponStateTables()
+    for part in pairs(trackedWeaponPartState) do
+        if (not part) or (not part.Parent) then
+            trackedWeaponPartState[part] = nil
+        end
+    end
+
+    for instance in pairs(trackedWeaponDamageState) do
+        if (not instance) or (not instance.Parent) then
+            trackedWeaponDamageState[instance] = nil
+        end
+    end
 end
 
 -- WalkSpeed override helper. Some games reset WalkSpeed frequently, so we re-apply on a loop.
@@ -539,7 +572,7 @@ screen.Parent = player:WaitForChild("PlayerGui")
 
 stripBlurEffects()
 
-Lighting.ChildAdded:Connect(function(child)
+lightingChildAddedConnection = Lighting.ChildAdded:Connect(function(child)
     if child:IsA("BlurEffect") then
         child.Enabled = false
         child.Size = 0
@@ -875,6 +908,18 @@ local function makeToggle(labelText, default, callback, tabName)
     makeCorner(button, 5)
 
     local state = default == true
+    local function invokeCallback(nextState)
+        local ok, err = pcall(function()
+            callback(nextState)
+        end)
+        if not ok then
+            warn(string.format("[MeerlyPerf] Toggle callback failed (%s): %s", tostring(labelText), tostring(err)))
+            if log then
+                log(string.format("Toggle error (%s): %s", tostring(labelText), tostring(err)))
+            end
+        end
+    end
+
     local function refresh()
         button.Text = state and "ON" or "OFF"
         button.BackgroundColor3 = state and uiTheme.accent or Color3.fromRGB(70, 70, 82)
@@ -884,18 +929,18 @@ local function makeToggle(labelText, default, callback, tabName)
     button.MouseButton1Click:Connect(function()
         state = not state
         refresh()
-        callback(state)
+        invokeCallback(state)
     end)
 
 
     refresh()
-    callback(state)
+    invokeCallback(state)
 
     return {
         set = function(v)
             state = v == true
             refresh()
-            callback(state)
+            invokeCallback(state)
         end,
         get = function()
             return state
@@ -1344,7 +1389,8 @@ makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
     log(v and "Memory stats enabled" or "Memory stats disabled")
 end, "Memory")
 
-local modeButton = makeButton("Memory Action: Off", function()
+local modeButton
+modeButton = makeButton("Memory Action: Off", function()
     local order = { "Off", "AutoRejoin", "AutoQuit" }
     local idx = table.find(order, memoryGuardMode) or 1
     idx = (idx % #order) + 1
@@ -1383,6 +1429,26 @@ makeButton("KILL SWITCH", function()
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
     end
+    if lightingChildAddedConnection then
+        pcall(function() lightingChildAddedConnection:Disconnect() end)
+        lightingChildAddedConnection = nil
+    end
+    if heartbeatConnection then
+        pcall(function() heartbeatConnection:Disconnect() end)
+        heartbeatConnection = nil
+    end
+    if windowFocusedConnection then
+        pcall(function() windowFocusedConnection:Disconnect() end)
+        windowFocusedConnection = nil
+    end
+    if windowFocusReleasedConnection then
+        pcall(function() windowFocusReleasedConnection:Disconnect() end)
+        windowFocusReleasedConnection = nil
+    end
+    if inputBeganConnection then
+        pcall(function() inputBeganConnection:Disconnect() end)
+        inputBeganConnection = nil
+    end
     if hideDisappearEntities then
         pcall(function()
             setDisappearHider(false)
@@ -1393,14 +1459,14 @@ makeButton("KILL SWITCH", function()
     log("UI destroyed")
 end, "Utility")
 
-UserInputService.WindowFocused:Connect(function()
+windowFocusedConnection = UserInputService.WindowFocused:Connect(function()
     windowFocused = true
     if backgroundMode then
         log("Window focused")
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+inputBeganConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.Semicolon then
         uiVisible = not uiVisible
@@ -1409,7 +1475,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-UserInputService.WindowFocusReleased:Connect(function()
+windowFocusReleasedConnection = UserInputService.WindowFocusReleased:Connect(function()
     windowFocused = false
     if backgroundMode then
         log("Window unfocused (background mode active)")
@@ -1419,7 +1485,7 @@ end)
 -- ---- Background loops/watchers ----
 -- Heartbeat watchdog source timestamp update.
 -- Why: heartbeat gaps are a simple signal for frame stalls/freezes.
-RunService.Heartbeat:Connect(function()
+heartbeatConnection = RunService.Heartbeat:Connect(function()
     local now = os.clock()
     local prev = _G.__MeerlyPerfState.lastHeartbeat or now
     local delta = now - prev
@@ -1528,11 +1594,19 @@ characterAddedConnection = player.CharacterAdded:Connect(function(character)
     bindCharacterForWeapons(character)
 end)
 
--- Weapon rescan worker: periodic correction for missed/irregular spawns.
+-- Weapon maintenance worker: periodic correction for hidden/damage state drift.
+-- Why: some games/scripts recreate or mutate weapon visuals/attributes after equip,
+-- so this pass reapplies active policies and prunes stale cached references.
 task.spawn(function()
     while running do
-        task.wait(3)
-        rescanCharacterWeapons(true)
+        task.wait(0.5)
+        if hideTrackedWeaponParts or weaponDamageOverrideEnabled then
+            rescanCharacterWeapons(true)
+            for weapon in pairs(trackedWeapons) do
+                applyWeaponState(weapon)
+            end
+        end
+        pruneTrackedWeaponStateTables()
     end
 end)
 
