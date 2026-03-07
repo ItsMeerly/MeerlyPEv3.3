@@ -195,6 +195,52 @@ local function make(className, props)
     return inst
 end
 
+-- Generic drag helper used by main shell, console, and floating windows.
+-- Keeps the interaction lightweight and reusable.
+local function makeDraggable(dragHandle, target, boundsTarget)
+    local dragging = false
+    local dragStart
+    local startPos
+
+    local function clampToBounds(pos)
+        if not boundsTarget then
+            return pos
+        end
+
+        local parentSize = boundsTarget.AbsoluteSize
+        local targetSize = target.AbsoluteSize
+        local x = math.clamp(pos.X.Offset, 0, math.max(0, parentSize.X - targetSize.X))
+        local y = math.clamp(pos.Y.Offset, 0, math.max(0, parentSize.Y - targetSize.Y))
+        return UDim2.fromOffset(x, y)
+    end
+
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = target.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    dragHandle.InputChanged:Connect(function(input)
+        if not dragging then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
+            local nextPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            target.Position = clampToBounds(nextPos)
+        end
+    end)
+end
+
 -- Windows 95-ish bevel border helper.
 local function applyBevel(frame, lightColor, darkColor)
     local top = make("Frame", { Parent = frame, BorderSizePixel = 0, BackgroundColor3 = lightColor, Size = UDim2.new(1, 0, 0, 1), Position = UDim2.fromOffset(0, 0), ZIndex = frame.ZIndex + 1 })
@@ -352,9 +398,9 @@ function MeerlyWin95:_taskbarResize()
         return
     end
 
-    local maxHeight = 30
+    local maxHeight = 28
     local barWidth = self.taskbar.AbsoluteSize.X - 10
-    local widthEach = math.max(28, math.floor(barWidth / count) - 4)
+    local widthEach = math.max(36, math.floor(barWidth / count) - 4)
     local size = math.min(maxHeight, widthEach)
 
     for _, b in ipairs(buttons) do
@@ -413,6 +459,7 @@ function MeerlyWin95:_buildUI()
         Text = self.settings.title,
         ZIndex = 7,
     })
+    makeDraggable(self.titleBar, self.shell, self.screenGui)
 
     -- Red kill button: always red regardless of selected theme.
     self.killButton = make("TextButton", {
@@ -580,6 +627,7 @@ function MeerlyWin95:_buildUI()
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 3,
     })
+    makeDraggable(self.consoleHeader, self.consoleFrame, self.screenGui)
 
     self.consoleText = make("TextLabel", {
         Parent = self.consoleFrame,
@@ -615,11 +663,16 @@ function MeerlyWin95:addPage(name, icon)
         return self.pages[name]
     end
 
-    local page = make("Frame", {
+    local page = make("ScrollingFrame", {
         Parent = self.content,
         Size = UDim2.new(1, -8, 1, -8),
         Position = UDim2.fromOffset(4, 4),
         BorderSizePixel = 0,
+        ScrollBarThickness = 6,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ClipsDescendants = true,
         Visible = false,
         ZIndex = 10,
     })
@@ -697,6 +750,7 @@ function MeerlyWin95:addFloatingWindow(title, hideWithMain)
         BorderSizePixel = 0,
         ZIndex = 41,
     })
+    makeDraggable(bar, float, self.screenGui)
 
     local lbl = make("TextLabel", {
         Parent = bar,
@@ -741,7 +795,7 @@ function MeerlyWin95:addFloatingWindow(title, hideWithMain)
 end
 
 function MeerlyWin95:_buildThemePage()
-    local page = self:addPage("Theme", "🎨")
+    local page = self:addPage("Theme", "TH")
 
     local title = make("TextLabel", {
         Parent = page,
@@ -929,7 +983,7 @@ function MeerlyWin95:_loadSnapshot(data)
 end
 
 function MeerlyWin95:_buildConfigPage()
-    local page = self:addPage("Config", "💾")
+    local page = self:addPage("Config", "CF")
 
     local title = make("TextLabel", {
         Parent = page,
@@ -1071,7 +1125,7 @@ function MeerlyWin95:_buildConfigPage()
 end
 
 function MeerlyWin95:_buildConsolePage()
-    local page = self:addPage("Console", "🖥")
+    local page = self:addPage("Console", "LG")
 
     local title = make("TextLabel", {
         Parent = page,
@@ -1143,8 +1197,126 @@ function MeerlyWin95:_safeExecutorAction(name, fn)
     end
 end
 
+function MeerlyWin95:_buildSettingsPage()
+    local page = self:addPage("Settings", "ST")
+
+    local title = make("TextLabel", {
+        Parent = page,
+        Text = "General Settings",
+        Font = Enum.Font.Code,
+        TextSize = 18,
+        Size = UDim2.new(1, -16, 0, 24),
+        Position = UDim2.fromOffset(8, 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local keyInfo = make("TextLabel", {
+        Parent = page,
+        Text = "Main Toggle Key: " .. tostring(self.settings.toggleKey),
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(1, -16, 0, 20),
+        Position = UDim2.fromOffset(8, 38),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local keygateInfo = make("TextLabel", {
+        Parent = page,
+        Text = "Keygate URL: " .. KEY_LINK,
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(1, -16, 0, 40),
+        Position = UDim2.fromOffset(8, 62),
+        BackgroundTransparency = 1,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+    })
+
+    local dumpCfg = make("TextButton", {
+        Parent = page,
+        Text = "Print Active Config Table",
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.fromOffset(210, 24),
+        Position = UDim2.fromOffset(8, 108),
+        BorderSizePixel = 0,
+    })
+    applyBevel(dumpCfg, self.theme.bevelLight, self.theme.bevelDark)
+
+    self:_connect(dumpCfg.MouseButton1Click, function()
+        self:log("DEBUG", "Unified config table emitted to print output")
+        print("[MeerlyWin95][UnifiedConfig]", self:getUnifiedConfig())
+    end)
+
+    table.insert(self.dynamicThemeParts, {
+        apply = function(theme)
+            title.TextColor3 = theme.text
+            keyInfo.TextColor3 = theme.text
+            keygateInfo.TextColor3 = theme.subtle
+            dumpCfg.BackgroundColor3 = theme.window
+            dumpCfg.TextColor3 = theme.text
+        end,
+    })
+end
+
+function MeerlyWin95:_buildPerformancePage()
+    local page = self:addPage("Performance", "PF")
+
+    local title = make("TextLabel", {
+        Parent = page,
+        Text = "Performance Quick Panel",
+        Font = Enum.Font.Code,
+        TextSize = 18,
+        Size = UDim2.new(1, -16, 0, 24),
+        Position = UDim2.fromOffset(8, 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local y = 38
+    local function addButton(label, cb)
+        local b = make("TextButton", {
+            Parent = page,
+            Text = label,
+            Font = Enum.Font.Code,
+            TextSize = 12,
+            Size = UDim2.fromOffset(260, 24),
+            Position = UDim2.fromOffset(8, y),
+            BorderSizePixel = 0,
+        })
+        applyBevel(b, self.theme.bevelLight, self.theme.bevelDark)
+        self:_connect(b.MouseButton1Click, cb)
+        y = y + 28
+        table.insert(self.dynamicThemeParts, {
+            apply = function(theme)
+                b.BackgroundColor3 = theme.window
+                b.TextColor3 = theme.text
+            end,
+        })
+    end
+
+    addButton("Graphics: Super Low", function() self.state.performanceMode = "Super Low"; self:log("EVENT", "Graphics mode set: Super Low") end)
+    addButton("Graphics: Low", function() self.state.performanceMode = "Low"; self:log("EVENT", "Graphics mode set: Low") end)
+    addButton("Graphics: Default", function() self.state.performanceMode = "Default"; self:log("EVENT", "Graphics mode set: Default") end)
+    addButton("Graphics: Extremely High", function() self.state.performanceMode = "Extremely High"; self:log("EVENT", "Graphics mode set: Extremely High") end)
+
+    addButton("FX Culling: Extreme", function() self.state.fxCulling = "Extreme"; self:log("EVENT", "FX Culling set: Extreme") end)
+    addButton("FX Culling: Strong", function() self.state.fxCulling = "Strong"; self:log("EVENT", "FX Culling set: Strong") end)
+    addButton("FX Culling: Medium", function() self.state.fxCulling = "Medium"; self:log("EVENT", "FX Culling set: Medium") end)
+    addButton("FX Culling: Low", function() self.state.fxCulling = "Low"; self:log("EVENT", "FX Culling set: Low") end)
+
+    table.insert(self.dynamicThemeParts, {
+        apply = function(theme)
+            title.TextColor3 = theme.text
+        end,
+    })
+end
+
 function MeerlyWin95:_buildRobloxSettingsPage()
-    local page = self:addPage("RobloxSettings", "⚙")
+    local page = self:addPage("RobloxSettings", "RB")
 
     local title = make("TextLabel", {
         Parent = page,
@@ -1352,6 +1524,8 @@ end
 
 function MeerlyWin95:_buildDefaultPages()
     self:_buildThemePage()
+    self:_buildPerformancePage()
+    self:_buildSettingsPage()
     self:_buildConfigPage()
     self:_buildConsolePage()
     self:_buildRobloxSettingsPage()
