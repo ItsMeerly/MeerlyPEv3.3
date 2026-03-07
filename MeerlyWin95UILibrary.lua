@@ -419,10 +419,15 @@ function MeerlyWin95:_taskbarResize()
         return
     end
 
+    -- Keep all taskbar buttons visible inside the bar width.
     local maxHeight = 28
-    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - 10)
-    local widthEach = math.max(36, math.floor(barWidth / count) - 4)
-    local size = math.min(maxHeight, widthEach)
+    local gap = 4 -- Must match UIListLayout padding.
+    local innerPadding = 10
+    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - innerPadding)
+    local totalGap = gap * math.max(0, count - 1)
+
+    local widthEach = math.floor((barWidth - totalGap) / count)
+    local size = math.max(1, math.min(maxHeight, widthEach))
 
     for _, b in ipairs(buttons) do
         b.Size = UDim2.fromOffset(size, size)
@@ -559,7 +564,7 @@ function MeerlyWin95:_buildUI()
         Parent = self.taskbar,
         FillDirection = Enum.FillDirection.Horizontal,
         Padding = UDim.new(0, 4),
-        HorizontalAlignment = Enum.HorizontalAlignment.Left,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
         VerticalAlignment = Enum.VerticalAlignment.Center,
         SortOrder = Enum.SortOrder.LayoutOrder,
     })
