@@ -46,6 +46,11 @@ local fxCullConnection = nil
 local weaponChildAddedConnection = nil
 local weaponChildRemovedConnection = nil
 local characterAddedConnection = nil
+local lightingChildAddedConnection = nil
+local heartbeatConnection = nil
+local windowFocusedConnection = nil
+local windowFocusReleasedConnection = nil
+local inputBeganConnection = nil
 
 local trackedCharacter = nil
 local trackedWeapons = {}
@@ -291,6 +296,12 @@ end
 -- Why: periodic scanning is cheaper than per-instance listeners across all players,
 -- and is good enough for background visual simplification.
 local function applyOtherPlayersWeaponHiding()
+    for part in pairs(otherPlayerWeaponPartState) do
+        if (not part) or (not part.Parent) then
+            otherPlayerWeaponPartState[part] = nil
+        end
+    end
+
     local hiddenCount = 0
     for _, other in ipairs(Players:GetPlayers()) do
         if other ~= player and other.Character then
@@ -428,10 +439,18 @@ local function rescanCharacterWeapons(silent)
     end
 
     local trackedCount = 0
+    local currentlySeen = {}
     for _, child in ipairs(trackedCharacter:GetChildren()) do
         if isLikelyWeaponContainer(child) then
+            currentlySeen[child] = true
             trackWeapon(child)
             trackedCount += 1
+        end
+    end
+
+    for weapon in pairs(trackedWeapons) do
+        if not currentlySeen[weapon] or weapon.Parent ~= trackedCharacter then
+            untrackWeapon(weapon)
         end
     end
 
@@ -468,7 +487,22 @@ local function bindCharacterForWeapons(character)
         untrackWeapon(child)
     end)
 
-    rescanCharacterWeapons()
+    if hideTrackedWeaponParts or weaponDamageOverrideEnabled then
+        rescanCharacterWeapons()
+    end
+end
+
+local function runSelfWeaponPass(reason)
+    if not trackedCharacter then
+        return
+    end
+    rescanCharacterWeapons(true)
+    for weapon in pairs(trackedWeapons) do
+        applyWeaponState(weapon)
+    end
+    if reason then
+        log(reason)
+    end
 end
 
 -- WalkSpeed override helper. Some games reset WalkSpeed frequently, so we re-apply on a loop.
@@ -539,7 +573,7 @@ screen.Parent = player:WaitForChild("PlayerGui")
 
 stripBlurEffects()
 
-Lighting.ChildAdded:Connect(function(child)
+lightingChildAddedConnection = Lighting.ChildAdded:Connect(function(child)
     if child:IsA("BlurEffect") then
         child.Enabled = false
         child.Size = 0
@@ -1268,18 +1302,12 @@ end, "Performance")
 -- Weapons tab: local and other-player weapon visual/attribute controls.
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
+    runSelfWeaponPass(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
 end, "Weapons")
 
 makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
     weaponDamageOverrideEnabled = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
+    runSelfWeaponPass(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
 end, "Weapons")
 
 makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
@@ -1287,9 +1315,7 @@ makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
     if v then
         weaponDamageOverride = v
         if weaponDamageOverrideEnabled then
-            for weapon in pairs(trackedWeapons) do
-                applyWeaponState(weapon)
-            end
+            runSelfWeaponPass(nil)
             log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
         end
     end
@@ -1315,7 +1341,7 @@ makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSecon
 end, "Weapons")
 
 makeButton("Rescan Weapons", function()
-    rescanCharacterWeapons()
+    runSelfWeaponPass("Weapon rescan complete")
 end, "Weapons")
 
 -- Player tab: local humanoid movement overrides.
@@ -1383,6 +1409,26 @@ makeButton("KILL SWITCH", function()
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
     end
+    if lightingChildAddedConnection then
+        pcall(function() lightingChildAddedConnection:Disconnect() end)
+        lightingChildAddedConnection = nil
+    end
+    if heartbeatConnection then
+        pcall(function() heartbeatConnection:Disconnect() end)
+        heartbeatConnection = nil
+    end
+    if windowFocusedConnection then
+        pcall(function() windowFocusedConnection:Disconnect() end)
+        windowFocusedConnection = nil
+    end
+    if windowFocusReleasedConnection then
+        pcall(function() windowFocusReleasedConnection:Disconnect() end)
+        windowFocusReleasedConnection = nil
+    end
+    if inputBeganConnection then
+        pcall(function() inputBeganConnection:Disconnect() end)
+        inputBeganConnection = nil
+    end
     if hideDisappearEntities then
         pcall(function()
             setDisappearHider(false)
@@ -1393,14 +1439,14 @@ makeButton("KILL SWITCH", function()
     log("UI destroyed")
 end, "Utility")
 
-UserInputService.WindowFocused:Connect(function()
+windowFocusedConnection = UserInputService.WindowFocused:Connect(function()
     windowFocused = true
     if backgroundMode then
         log("Window focused")
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+inputBeganConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.Semicolon then
         uiVisible = not uiVisible
@@ -1409,7 +1455,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-UserInputService.WindowFocusReleased:Connect(function()
+windowFocusReleasedConnection = UserInputService.WindowFocusReleased:Connect(function()
     windowFocused = false
     if backgroundMode then
         log("Window unfocused (background mode active)")
@@ -1419,7 +1465,7 @@ end)
 -- ---- Background loops/watchers ----
 -- Heartbeat watchdog source timestamp update.
 -- Why: heartbeat gaps are a simple signal for frame stalls/freezes.
-RunService.Heartbeat:Connect(function()
+heartbeatConnection = RunService.Heartbeat:Connect(function()
     local now = os.clock()
     local prev = _G.__MeerlyPerfState.lastHeartbeat or now
     local delta = now - prev
@@ -1526,14 +1572,6 @@ end
 characterAddedConnection = player.CharacterAdded:Connect(function(character)
     task.wait(0.15)
     bindCharacterForWeapons(character)
-end)
-
--- Weapon rescan worker: periodic correction for missed/irregular spawns.
-task.spawn(function()
-    while running do
-        task.wait(3)
-        rescanCharacterWeapons(true)
-    end
 end)
 
 -- Other-player hide worker: intentionally slow cadence to minimize overhead.
