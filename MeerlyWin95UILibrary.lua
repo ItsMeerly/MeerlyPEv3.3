@@ -407,8 +407,13 @@ function MeerlyWin95:_applyTheme()
 end
 
 function MeerlyWin95:_taskbarResize()
+    local host = self.taskbarButtonsHost or self.taskbar
+    if not host then
+        return
+    end
+
     local buttons = {}
-    for _, c in ipairs(self.taskbar:GetChildren()) do
+    for _, c in ipairs(host:GetChildren()) do
         if c:IsA("TextButton") and c.Name == "PageButton" then
             table.insert(buttons, c)
         end
@@ -419,20 +424,20 @@ function MeerlyWin95:_taskbarResize()
         return
     end
 
-    -- Keep all taskbar buttons visible inside the bar width.
     local maxHeight = 28
     local minHeight = 14
-    local gap = 4 -- Must match UIListLayout padding.
-    local innerPadding = 10
+    local gap = 4
+    local innerPadding = 8
 
-    -- AbsoluteSize can report 0 very early; use window width as fallback.
-    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - innerPadding)
-    if barWidth <= 0 and self.window then
-        barWidth = math.max(0, self.window.AbsoluteSize.X - 24)
+    local hostWidth = math.max(0, host.AbsoluteSize.X - innerPadding)
+    if hostWidth <= 0 and self.taskbar then
+        hostWidth = math.max(0, self.taskbar.AbsoluteSize.X - 16)
+    end
+    if hostWidth <= 0 and self.window then
+        hostWidth = math.max(0, self.window.AbsoluteSize.X - 24)
     end
 
-    if barWidth <= 0 then
-        -- Try again next heartbeat/frame rather than collapsing icons to 1px forever.
+    if hostWidth <= 0 then
         task.defer(function()
             if self.state and self.state.alive then
                 self:_taskbarResize()
@@ -442,7 +447,7 @@ function MeerlyWin95:_taskbarResize()
     end
 
     local totalGap = gap * math.max(0, count - 1)
-    local widthEach = math.floor((barWidth - totalGap) / count)
+    local widthEach = math.floor((hostWidth - totalGap) / count)
     local size = math.max(minHeight, math.min(maxHeight, widthEach))
 
     for _, b in ipairs(buttons) do
@@ -580,12 +585,23 @@ function MeerlyWin95:_buildUI()
         Size = UDim2.new(1, -8, 0, 34),
         Position = UDim2.new(0, 4, 1, -38),
         BorderSizePixel = 0,
+        ClipsDescendants = true,
         ZIndex = 40,
     })
     applyBevel(self.taskbar, self.theme.bevelLight, self.theme.bevelDark)
 
-    local tbLayout = make("UIListLayout", {
+    -- Dedicated host rebuilt for taskbar buttons to avoid border/bevel overlap issues.
+    self.taskbarButtonsHost = make("Frame", {
         Parent = self.taskbar,
+        Size = UDim2.new(1, -8, 1, -6),
+        Position = UDim2.fromOffset(4, 3),
+        BorderSizePixel = 0,
+        BackgroundTransparency = 1,
+        ZIndex = 41,
+    })
+
+    local tbLayout = make("UIListLayout", {
+        Parent = self.taskbarButtonsHost,
         FillDirection = Enum.FillDirection.Horizontal,
         Padding = UDim.new(0, 4),
         HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -594,6 +610,9 @@ function MeerlyWin95:_buildUI()
     })
 
     self:_connect(tbLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+        self:_taskbarResize()
+    end)
+    self:_connect(self.taskbarButtonsHost:GetPropertyChangedSignal("AbsoluteSize"), function()
         self:_taskbarResize()
     end)
     self:_connect(self.taskbar:GetPropertyChangedSignal("AbsoluteSize"), function()
@@ -799,7 +818,7 @@ function MeerlyWin95:addPage(name, icon)
 
     local button = make("TextButton", {
         Name = "PageButton",
-        Parent = self.taskbar,
+        Parent = self.taskbarButtonsHost,
         Text = icon or "■",
         Font = Enum.Font.Code,
         TextSize = 18,
