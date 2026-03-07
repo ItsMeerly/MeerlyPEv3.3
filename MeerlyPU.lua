@@ -39,6 +39,9 @@ local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
 
+local hardcodedAccessKey = "MEERLY-ACCESS-2026"
+local keychainUrl = "https://work.ink/meerly-keychain"
+
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
 local weaponChildRemovedConnection = nil
@@ -610,6 +613,139 @@ log = function(msg)
     logBox.Text = line
     print("[MeerlyPerf]", msg)
 end
+
+local keyAccepted = false
+
+local function setMainUiUnlocked(unlocked)
+    keyAccepted = unlocked == true
+    tabBar.Visible = keyAccepted
+    tabPagesRoot.Visible = keyAccepted
+    logBox.Visible = keyAccepted
+    title.Text = keyAccepted and "Performance / Stability" or "Key System"
+end
+
+setMainUiUnlocked(false)
+
+local keyGate = Instance.new("Frame")
+keyGate.Parent = window
+keyGate.Size = UDim2.new(1, -20, 1, -108)
+keyGate.Position = UDim2.fromOffset(10, 50)
+keyGate.BackgroundColor3 = uiTheme.panel
+keyGate.BorderSizePixel = 0
+makeCorner(keyGate, 8)
+makeStroke(keyGate)
+
+local keyGateTitle = Instance.new("TextLabel")
+keyGateTitle.Parent = keyGate
+keyGateTitle.Size = UDim2.new(1, -20, 0, 36)
+keyGateTitle.Position = UDim2.fromOffset(10, 14)
+keyGateTitle.BackgroundTransparency = 1
+keyGateTitle.Font = Enum.Font.GothamBold
+keyGateTitle.TextSize = 18
+keyGateTitle.TextColor3 = uiTheme.text
+keyGateTitle.TextXAlignment = Enum.TextXAlignment.Left
+keyGateTitle.Text = "Enter Access Key"
+
+local keyGateInfo = Instance.new("TextLabel")
+keyGateInfo.Parent = keyGate
+keyGateInfo.Size = UDim2.new(1, -20, 0, 52)
+keyGateInfo.Position = UDim2.fromOffset(10, 50)
+keyGateInfo.BackgroundTransparency = 1
+keyGateInfo.Font = Enum.Font.Gotham
+keyGateInfo.TextSize = 13
+keyGateInfo.TextWrapped = true
+keyGateInfo.TextColor3 = uiTheme.subtle
+keyGateInfo.TextXAlignment = Enum.TextXAlignment.Left
+keyGateInfo.TextYAlignment = Enum.TextYAlignment.Top
+keyGateInfo.Text = "Open the work.ink keychain link, complete it, then paste your key below."
+
+local keyLinkButton = Instance.new("TextButton")
+keyLinkButton.Parent = keyGate
+keyLinkButton.Size = UDim2.new(1, -20, 0, 34)
+keyLinkButton.Position = UDim2.fromOffset(10, 116)
+keyLinkButton.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
+keyLinkButton.BorderSizePixel = 0
+keyLinkButton.Font = Enum.Font.GothamBold
+keyLinkButton.TextSize = 12
+keyLinkButton.TextColor3 = uiTheme.text
+keyLinkButton.Text = "Copy work.ink keychain link"
+makeCorner(keyLinkButton, 6)
+makeStroke(keyLinkButton)
+
+local keyInput = Instance.new("TextBox")
+keyInput.Parent = keyGate
+keyInput.Size = UDim2.new(1, -20, 0, 34)
+keyInput.Position = UDim2.fromOffset(10, 162)
+keyInput.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+keyInput.BorderSizePixel = 0
+keyInput.Font = Enum.Font.Gotham
+keyInput.TextSize = 13
+keyInput.TextColor3 = uiTheme.text
+keyInput.PlaceholderText = "Enter key here..."
+keyInput.Text = ""
+keyInput.ClearTextOnFocus = false
+makeCorner(keyInput, 6)
+
+local keySubmit = Instance.new("TextButton")
+keySubmit.Parent = keyGate
+keySubmit.Size = UDim2.new(1, -20, 0, 34)
+keySubmit.Position = UDim2.fromOffset(10, 208)
+keySubmit.BackgroundColor3 = uiTheme.accent
+keySubmit.BorderSizePixel = 0
+keySubmit.Font = Enum.Font.GothamBold
+keySubmit.TextSize = 12
+keySubmit.TextColor3 = Color3.fromRGB(10, 10, 12)
+keySubmit.Text = "Unlock Menu"
+makeCorner(keySubmit, 6)
+
+local keyStatus = Instance.new("TextLabel")
+keyStatus.Parent = keyGate
+keyStatus.Size = UDim2.new(1, -20, 0, 44)
+keyStatus.Position = UDim2.fromOffset(10, 252)
+keyStatus.BackgroundTransparency = 1
+keyStatus.Font = Enum.Font.Code
+keyStatus.TextSize = 12
+keyStatus.TextWrapped = true
+keyStatus.TextColor3 = uiTheme.subtle
+keyStatus.TextXAlignment = Enum.TextXAlignment.Left
+keyStatus.TextYAlignment = Enum.TextYAlignment.Top
+keyStatus.Text = "Locked: menu tabs are hidden until key validation succeeds."
+
+keyLinkButton.MouseButton1Click:Connect(function()
+    local copied = false
+    if setclipboard then
+        pcall(function()
+            setclipboard(keychainUrl)
+            copied = true
+        end)
+    end
+
+    if copied then
+        keyStatus.Text = "Link copied to clipboard: " .. keychainUrl
+    else
+        keyStatus.Text = "Open this keychain URL manually: " .. keychainUrl
+    end
+end)
+
+local function tryUnlockWithKey()
+    local enteredKey = keyInput.Text
+    if enteredKey == hardcodedAccessKey then
+        setMainUiUnlocked(true)
+        keyGate.Visible = false
+        keyStatus.Text = "Access granted."
+        log("Key accepted. Main menu unlocked")
+    else
+        keyStatus.Text = "Invalid key. Please retry via the work.ink keychain."
+        log("Invalid key entry")
+    end
+end
+
+keySubmit.MouseButton1Click:Connect(tryUnlockWithKey)
+keyInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        tryUnlockWithKey()
+    end
+end)
 
 local tabPages = {}
 local tabButtons = {}
