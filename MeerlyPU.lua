@@ -487,21 +487,20 @@ local function bindCharacterForWeapons(character)
         untrackWeapon(child)
     end)
 
-    if hideTrackedWeaponParts or weaponDamageOverrideEnabled then
-        rescanCharacterWeapons()
-    end
+    rescanCharacterWeapons(true)
 end
 
-local function runSelfWeaponPass(reason)
-    if not trackedCharacter then
-        return
+local function pruneTrackedWeaponStateTables()
+    for part in pairs(trackedWeaponPartState) do
+        if (not part) or (not part.Parent) then
+            trackedWeaponPartState[part] = nil
+        end
     end
-    rescanCharacterWeapons(true)
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    if reason then
-        log(reason)
+
+    for instance in pairs(trackedWeaponDamageState) do
+        if (not instance) or (not instance.Parent) then
+            trackedWeaponDamageState[instance] = nil
+        end
     end
 end
 
@@ -1572,6 +1571,22 @@ end
 characterAddedConnection = player.CharacterAdded:Connect(function(character)
     task.wait(0.15)
     bindCharacterForWeapons(character)
+end)
+
+-- Weapon maintenance worker: periodic correction for hidden/damage state drift.
+-- Why: some games/scripts recreate or mutate weapon visuals/attributes after equip,
+-- so this pass reapplies active policies and prunes stale cached references.
+task.spawn(function()
+    while running do
+        task.wait(0.5)
+        if hideTrackedWeaponParts or weaponDamageOverrideEnabled then
+            rescanCharacterWeapons(true)
+            for weapon in pairs(trackedWeapons) do
+                applyWeaponState(weapon)
+            end
+        end
+        pruneTrackedWeaponStateTables()
+    end
 end)
 
 -- Other-player hide worker: intentionally slow cadence to minimize overhead.
