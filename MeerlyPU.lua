@@ -564,7 +564,7 @@ end
 
 -- ---- Main UI construction ----
 local screen = Instance.new("ScreenGui")
-screen.Name = "MeerlyPE_PerfStability_UI"
+screen.Name = "Meerly_Unititled_Melee_RNG"
 screen.ResetOnSpawn = false
 screen.IgnoreGuiInset = true
 screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -658,7 +658,7 @@ local function setMainUiUnlocked(unlocked)
     tabBar.Visible = keyAccepted
     tabPagesRoot.Visible = keyAccepted
     logBox.Visible = keyAccepted
-    title.Text = keyAccepted and "Performance / Stability" or "Key System"
+    title.Text = keyAccepted and "Meerly Untitled Melee RNG - ';' hide/open" or "Key System"
 end
 
 setMainUiUnlocked(false)
@@ -847,7 +847,7 @@ createTab("Utility")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "Performance", "Weapons", "Player", "Memory", "Utility", "Teleports" }
+local tabNames = { "Weapons", "Player", "Utility", "Performance", "Memory", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -1042,7 +1042,7 @@ local function clearTabRows(tabName)
 end
 
 local memoryGui = Instance.new("ScreenGui")
-memoryGui.Name = "MeerlyPE_PerfStability_Memory"
+memoryGui.Name = "Meerly_Untitled_Melee_RNG"
 memoryGui.ResetOnSpawn = false
 memoryGui.IgnoreGuiInset = true
 memoryGui.Enabled = false
@@ -1677,4 +1677,4 @@ task.spawn(function()
     end
 end)
 
-log("Performance / Stability UI loaded")
+log("Meerly Untitled Melee RNG Script Loaded")
