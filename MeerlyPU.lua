@@ -16,6 +16,8 @@ local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Stats = game:GetService("Stats")
 local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 
@@ -33,6 +35,10 @@ local fpsCapEnabled = false
 local targetFPS = 60
 local lowGraphicsEnabled = false
 local streamingOptimized = false
+local aggressiveFxCullEnabled = false
+local weaponVisualsDisabled = false
+
+local fxCullConnection = nil
 
 local backgroundMode = false
 local windowFocused = true
@@ -47,6 +53,8 @@ local memoryGuardMode = "Off" -- Off | AutoRejoin | AutoQuit
 local memoryGuardCapGB = 10
 local memoryGuardCooldown = 30
 local lastMemoryGuardAction = 0
+
+local log
 
 local uiTheme = {
     bg = Color3.fromRGB(18, 18, 24),
@@ -107,6 +115,7 @@ end
 local function applyVisuals(disable)
     Lighting.GlobalShadows = not disable
     Lighting.FogEnd = disable and 1e6 or 100000
+    pcall(function() settings().Rendering.QualityLevel = disable and Enum.QualityLevel.Level01 or Enum.QualityLevel.Automatic end)
     for _, obj in ipairs(Lighting:GetChildren()) do
         if obj:IsA("BlurEffect") then
             obj.Enabled = false
@@ -114,6 +123,79 @@ local function applyVisuals(disable)
         elseif obj:IsA("PostEffect") then
             obj.Enabled = not disable
         end
+    end
+end
+
+local function disableFxObject(obj)
+    if obj:IsA("ParticleEmitter") then
+        obj.Enabled = false
+        obj.Rate = 0
+    elseif obj:IsA("Trail") or obj:IsA("Beam") then
+        obj.Enabled = false
+    elseif obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+        obj.Enabled = false
+    elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+        obj.Enabled = false
+    end
+end
+
+local function applyAggressiveFxCull(enabled)
+    if enabled then
+        if fxCullConnection then
+            fxCullConnection:Disconnect()
+        end
+
+        local disabledCount = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+                or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")
+                or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                disableFxObject(obj)
+                disabledCount += 1
+            end
+        end
+
+        fxCullConnection = Workspace.DescendantAdded:Connect(function(obj)
+            disableFxObject(obj)
+        end)
+
+        log(string.format("Aggressive FX cull enabled (%d effects disabled)", disabledCount))
+    else
+        if fxCullConnection then
+            fxCullConnection:Disconnect()
+            fxCullConnection = nil
+        end
+        log("Aggressive FX cull disabled (existing disabled effects stay off)")
+    end
+end
+
+local function fireToggleWeaponVisibility(disableVisuals)
+    local event = ReplicatedStorage:FindFirstChild("ToggleWeaponVisibility", true)
+    if not event then
+        log("ToggleWeaponVisibility event not found")
+        return
+    end
+
+    if not event:IsA("RemoteEvent") then
+        log("ToggleWeaponVisibility exists but is not a RemoteEvent")
+        return
+    end
+
+    local fired = false
+    fired = pcall(function()
+        event:FireServer(not disableVisuals)
+    end)
+
+    if not fired then
+        fired = pcall(function()
+            event:FireServer(disableVisuals)
+        end)
+    end
+
+    if fired then
+        log(disableVisuals and "Weapon visuals disabled" or "Weapon visuals enabled")
+    else
+        log("Failed to fire ToggleWeaponVisibility")
     end
 end
 
@@ -201,7 +283,7 @@ logBox.Text = "[System] Ready"
 makeCorner(logBox, 6)
 makeStroke(logBox)
 
-local function log(msg)
+log = function(msg)
     local line = string.format("[%s] %s", os.date("%H:%M:%S"), tostring(msg))
     logBox.Text = line
     print("[MeerlyPerf]", msg)
@@ -428,6 +510,16 @@ makeToggle("Streaming Optimization", streamingOptimized, function(v)
     end
 end)
 
+makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
+    aggressiveFxCullEnabled = v
+    applyAggressiveFxCull(v)
+end)
+
+makeToggle("Disable Weapon Visuals", weaponVisualsDisabled, function(v)
+    weaponVisualsDisabled = v
+    fireToggleWeaponVisibility(v)
+end)
+
 makeToggle("Background Survival Mode", backgroundMode, function(v)
     backgroundMode = v
     log(v and "Background mode enabled" or "Background mode disabled")
@@ -488,6 +580,10 @@ makeButton("KILL SWITCH", function()
     destroyRequested = true
     running = false
     pcall(function() safeSetFPS(0) end)
+    if fxCullConnection then
+        pcall(function() fxCullConnection:Disconnect() end)
+        fxCullConnection = nil
+    end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
     log("UI destroyed")
