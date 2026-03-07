@@ -8,6 +8,7 @@
       - Memory stats + memory guard
 ]]
 
+-- Roblox services used across performance, UI, and player-entity controls.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
@@ -44,16 +45,23 @@ local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
 
+-- Enemy death effects can spam a BasePart named "Disappear" into Workspace.
+-- We keep this on by default and use both event-based + fast-pass scanning to catch every spawn.
+local autoHideDisappearEnabled = true
+local disappearFastPassSeconds = 0.2
+
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
 local weaponChildRemovedConnection = nil
 local characterAddedConnection = nil
+local disappearAddedConnection = nil
 
 local trackedCharacter = nil
 local trackedWeapons = {}
 local trackedWeaponPartState = {}
 local trackedWeaponDamageState = {}
 local otherPlayerWeaponPartState = {}
+local disappearPartState = {}
 
 local backgroundMode = false
 local windowFocused = true
@@ -71,6 +79,7 @@ local lastMemoryGuardAction = 0
 
 local log
 
+-- Centralized logger reference. It is assigned after UI creation so helper functions can call it safely.
 local uiTheme = {
     bg = Color3.fromRGB(18, 18, 24),
     panel = Color3.fromRGB(25, 25, 33),
@@ -80,6 +89,9 @@ local uiTheme = {
     stroke = Color3.fromRGB(45, 45, 55),
 }
 
+-- ---- Memory helpers ----
+-- safeTotalMemMb/luaMemMb/getCombinedMemoryGb are intentionally wrapped with pcall
+-- so unsupported executor APIs do not break the rest of the UI.
 local function safeTotalMemMb()
     local total
     pcall(function()
@@ -118,6 +130,8 @@ local function getCombinedMemoryGb()
     return combinedMb / 1024, luaMb / 1024, (totalMb and totalMb / 1024 or nil), (engineOnlyMb and engineOnlyMb / 1024 or nil)
 end
 
+-- ---- Rendering helpers ----
+-- Rendering helper block controls expensive post-processing and effect visibility.
 local function stripBlurEffects()
     for _, obj in ipairs(Lighting:GetChildren()) do
         if obj:IsA("BlurEffect") then
@@ -141,6 +155,7 @@ local function applyVisuals(disable)
     end
 end
 
+-- Disables known expensive FX objects that commonly spike frame time in effect-heavy fights.
 local function disableFxObject(obj)
     if obj:IsA("ParticleEmitter") then
         obj.Enabled = false
@@ -288,10 +303,67 @@ local function applyOtherPlayersWeaponHiding()
     return hiddenCount
 end
 
+-- Fast utility used by the Disappear-part system. We hide locally so this is client-safe and low risk.
+local function setDisappearPartHidden(part, hide)
+    local state = disappearPartState[part]
+    if not state then
+        state = { localTransparencyModifier = part.LocalTransparencyModifier, canCollide = part.CanCollide }
+        disappearPartState[part] = state
+    end
+
+    if hide then
+        part.LocalTransparencyModifier = 1
+        part.CanCollide = false
+    else
+        part.LocalTransparencyModifier = state.localTransparencyModifier or 0
+        part.CanCollide = state.canCollide
+    end
+end
+
+-- This function is intentionally tiny because it may run at high frequency.
+-- It handles both direct BasePart spawns named "Disappear" and containers that include one.
+local function processDisappearCandidate(instance)
+    if not autoHideDisappearEnabled then
+        return
+    end
+
+    if instance:IsA("BasePart") and instance.Name == "Disappear" then
+        setDisappearPartHidden(instance, true)
+        return
+    end
+
+    if not instance:IsA("BasePart") then
+        local d = instance:FindFirstChild("Disappear", true)
+        if d and d:IsA("BasePart") then
+            setDisappearPartHidden(d, true)
+        end
+    end
+end
+
+-- Periodic fast scan catches edge cases where parts are renamed after spawn,
+-- moved in bulk, or created before listeners are attached.
+local function fastScanDisappearParts()
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "Disappear" then
+            setDisappearPartHidden(d, autoHideDisappearEnabled)
+        end
+    end
+
+    if not autoHideDisappearEnabled then
+        for part in pairs(disappearPartState) do
+            if part and part.Parent then
+                setDisappearPartHidden(part, false)
+            end
+        end
+        disappearPartState = {}
+    end
+end
+
 local function isLikelyWeaponContainer(obj)
     return isLikelyWeaponContainerForCharacter(trackedCharacter, obj)
 end
 
+-- Applies local visual/collision state to weapon parts for the local character only.
 local function applyWeaponPartState(part)
     local state = trackedWeaponPartState[part]
     if not state then
@@ -312,6 +384,7 @@ local function applyWeaponPartState(part)
     end
 end
 
+-- Applies/restores Damage attribute overrides while preserving original values for clean rollback.
 local function applyDamageState(instance)
     if weaponDamageOverrideEnabled then
         local state = trackedWeaponDamageState[instance]
@@ -393,6 +466,7 @@ local function rescanCharacterWeapons(silent)
     end
 end
 
+-- Rebinds weapon tracking whenever the local character changes (respawn/team swap).
 local function bindCharacterForWeapons(character)
     trackedCharacter = character
     trackedWeapons = {}
@@ -421,6 +495,7 @@ local function bindCharacterForWeapons(character)
     rescanCharacterWeapons()
 end
 
+-- WalkSpeed override helper. Some games reset WalkSpeed frequently, so we re-apply on a loop.
 local function applyWalkSpeed()
     local character = player.Character
     if not character then return end
@@ -469,6 +544,7 @@ local function makeStroke(obj)
     s.Parent = obj
 end
 
+-- ---- Main UI construction ----
 local screen = Instance.new("ScreenGui")
 screen.Name = "MeerlyPE_PerfStability_UI"
 screen.ResetOnSpawn = false
@@ -555,6 +631,7 @@ local function newRow(height)
     return row
 end
 
+-- Reusable toggle factory for on/off controls in the performance panel.
 local function makeToggle(labelText, default, callback)
     local row = newRow(34)
 
@@ -606,6 +683,7 @@ local function makeToggle(labelText, default, callback)
     }
 end
 
+-- Reusable numeric/text input factory.
 local function makeInput(labelText, defaultText, onCommit)
     local row = newRow(34)
 
@@ -643,6 +721,7 @@ local function makeInput(labelText, defaultText, onCommit)
     return box
 end
 
+-- Reusable action-button factory.
 local function makeButton(text, onClick)
     local row = newRow(34)
     local btn = Instance.new("TextButton")
@@ -690,6 +769,7 @@ memoryText.TextSize = 13
 memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
+-- ---- Feature wiring (UI -> behavior) ----
 makeToggle("Anti-AFK (presses Space every 10m)", _G.__MeerlyPerfState.antiAfkEnabled, function(v)
     _G.__MeerlyPerfState.antiAfkEnabled = v
     log(v and "Anti-AFK enabled" or "Anti-AFK disabled")
@@ -755,6 +835,12 @@ makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
     applyAggressiveFxCull(v)
 end)
 
+makeToggle("Auto-hide Disappear Parts", autoHideDisappearEnabled, function(v)
+    autoHideDisappearEnabled = v
+    fastScanDisappearParts()
+    log(v and "Auto-hide Disappear enabled" or "Auto-hide Disappear disabled")
+end)
+
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
     for weapon in pairs(trackedWeapons) do
@@ -797,6 +883,14 @@ makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, fu
     else
         log("Other-player weapon hide disabled")
     end
+end)
+
+makeInput("Disappear Fast Pass (0.1-2s)", tostring(disappearFastPassSeconds), function(text)
+    local v = tonumber(text)
+    if v and v >= 0.1 and v <= 2 then
+        disappearFastPassSeconds = v
+    end
+    return tostring(disappearFastPassSeconds)
 end)
 
 makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
@@ -880,6 +974,7 @@ makeButton("Rejoin Server", function()
     end)
 end)
 
+-- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
 makeButton("KILL SWITCH", function()
     if destroyRequested then return end
     destroyRequested = true
@@ -900,6 +995,10 @@ makeButton("KILL SWITCH", function()
     if characterAddedConnection then
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
+    end
+    if disappearAddedConnection then
+        pcall(function() disappearAddedConnection:Disconnect() end)
+        disappearAddedConnection = nil
     end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
@@ -929,6 +1028,7 @@ UserInputService.WindowFocusReleased:Connect(function()
     end
 end)
 
+-- ---- Background loops/watchers ----
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
     local prev = _G.__MeerlyPerfState.lastHeartbeat or now
@@ -1023,6 +1123,7 @@ task.spawn(function()
     end
 end)
 
+-- ---- Character lifecycle bootstrapping ----
 if player.Character then
     bindCharacterForWeapons(player.Character)
 end
@@ -1031,6 +1132,14 @@ characterAddedConnection = player.CharacterAdded:Connect(function(character)
     task.wait(0.15)
     bindCharacterForWeapons(character)
 end)
+
+-- Event path for immediate response on newly spawned Disappear parts.
+disappearAddedConnection = Workspace.DescendantAdded:Connect(function(instance)
+    processDisappearCandidate(instance)
+end)
+
+-- Initial catch-up scan for already-existing Disappear parts.
+fastScanDisappearParts()
 
 task.spawn(function()
     while running do
@@ -1054,6 +1163,15 @@ task.spawn(function()
         if walkSpeedOverrideEnabled then
             applyWalkSpeed()
         end
+    end
+end)
+
+-- Very fast pass for high-density enemy areas where many Disappear parts spawn continuously.
+-- Keeping this separate from other scans prevents misses without making weapon scans heavier.
+task.spawn(function()
+    while running do
+        task.wait(disappearFastPassSeconds)
+        fastScanDisappearParts()
     end
 end)
 
