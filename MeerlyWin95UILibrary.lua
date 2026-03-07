@@ -424,17 +424,18 @@ function MeerlyWin95:_taskbarResize()
         return
     end
 
+    table.sort(buttons, function(a, b)
+        return (a.LayoutOrder or 0) < (b.LayoutOrder or 0)
+    end)
+
     local maxHeight = 28
     local minHeight = 14
     local gap = 4
-    local innerPadding = 8
+    local insetX = 4
 
-    local hostWidth = math.max(0, host.AbsoluteSize.X - innerPadding)
-    if hostWidth <= 0 and self.taskbar then
-        hostWidth = math.max(0, self.taskbar.AbsoluteSize.X - 16)
-    end
+    local hostWidth = math.max(0, host.AbsoluteSize.X - (insetX * 2))
     if hostWidth <= 0 and self.window then
-        hostWidth = math.max(0, self.window.AbsoluteSize.X - 24)
+        hostWidth = math.max(0, self.window.AbsoluteSize.X - 28)
     end
 
     if hostWidth <= 0 then
@@ -450,9 +451,16 @@ function MeerlyWin95:_taskbarResize()
     local widthEach = math.floor((hostWidth - totalGap) / count)
     local size = math.max(minHeight, math.min(maxHeight, widthEach))
 
+    local totalWidth = (size * count) + totalGap
+    local startX = math.floor((host.AbsoluteSize.X - totalWidth) / 2)
+    local y = math.max(0, math.floor((host.AbsoluteSize.Y - size) / 2))
+
+    local x = startX
     for _, b in ipairs(buttons) do
         b.Size = UDim2.fromOffset(size, size)
+        b.Position = UDim2.fromOffset(x, y)
         b.TextSize = math.max(10, math.min(18, size - 6))
+        x = x + size + gap
     end
 end
 
@@ -600,18 +608,6 @@ function MeerlyWin95:_buildUI()
         ZIndex = 41,
     })
 
-    local tbLayout = make("UIListLayout", {
-        Parent = self.taskbarButtonsHost,
-        FillDirection = Enum.FillDirection.Horizontal,
-        Padding = UDim.new(0, 4),
-        HorizontalAlignment = Enum.HorizontalAlignment.Center,
-        VerticalAlignment = Enum.VerticalAlignment.Center,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-    })
-
-    self:_connect(tbLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
-        self:_taskbarResize()
-    end)
     self:_connect(self.taskbarButtonsHost:GetPropertyChangedSignal("AbsoluteSize"), function()
         self:_taskbarResize()
     end)
@@ -997,7 +993,7 @@ function MeerlyWin95:_buildThemePage()
         Text = "Transparency",
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(220, 22),
+        Size = UDim2.new(1, -94, 0, 22),
         Position = UDim2.fromOffset(8, y + 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1009,7 +1005,7 @@ function MeerlyWin95:_buildThemePage()
         Font = Enum.Font.Code,
         TextSize = 13,
         Size = UDim2.fromOffset(70, 22),
-        Position = UDim2.fromOffset(232, y + 8),
+        Position = UDim2.new(1, -78, 0, y + 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
@@ -1040,7 +1036,7 @@ function MeerlyWin95:_buildThemePage()
         Text = "Blur",
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(220, 22),
+        Size = UDim2.new(1, -94, 0, 22),
         Position = UDim2.fromOffset(8, y + 56),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1052,7 +1048,7 @@ function MeerlyWin95:_buildThemePage()
         Font = Enum.Font.Code,
         TextSize = 13,
         Size = UDim2.fromOffset(70, 22),
-        Position = UDim2.fromOffset(232, y + 56),
+        Position = UDim2.new(1, -78, 0, y + 56),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
