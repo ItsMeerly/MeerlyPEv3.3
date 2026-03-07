@@ -1301,18 +1301,12 @@ end, "Performance")
 -- Weapons tab: local and other-player weapon visual/attribute controls.
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
+    runSelfWeaponPass(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
 end, "Weapons")
 
 makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
     weaponDamageOverrideEnabled = v
-    for weapon in pairs(trackedWeapons) do
-        applyWeaponState(weapon)
-    end
-    log(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
+    runSelfWeaponPass(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
 end, "Weapons")
 
 makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
@@ -1320,9 +1314,7 @@ makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
     if v then
         weaponDamageOverride = v
         if weaponDamageOverrideEnabled then
-            for weapon in pairs(trackedWeapons) do
-                applyWeaponState(weapon)
-            end
+            runSelfWeaponPass(nil)
             log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
         end
     end
@@ -1348,7 +1340,7 @@ makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSecon
 end, "Weapons")
 
 makeButton("Rescan Weapons", function()
-    rescanCharacterWeapons()
+    runSelfWeaponPass("Weapon rescan complete")
 end, "Weapons")
 
 -- Player tab: local humanoid movement overrides.
