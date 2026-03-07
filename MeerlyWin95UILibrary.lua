@@ -420,7 +420,7 @@ function MeerlyWin95:_taskbarResize()
     end
 
     local maxHeight = 28
-    local barWidth = self.taskbar.AbsoluteSize.X - 10
+    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - 10)
     local widthEach = math.max(36, math.floor(barWidth / count) - 4)
     local size = math.min(maxHeight, widthEach)
 
@@ -431,6 +431,11 @@ end
 
 function MeerlyWin95:_refreshResponsiveLayout()
     if not self.screenGui or not self.shell then
+        return
+    end
+
+    -- Can be called very early by size-change events; guard partial construction.
+    if not self.taskbar or not self.consoleFrame then
         return
     end
 
@@ -561,10 +566,6 @@ function MeerlyWin95:_buildUI()
 
     self:_connect(tbLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
         self:_taskbarResize()
-    end)
-
-    self:_connect(self.screenGui:GetPropertyChangedSignal("AbsoluteSize"), function()
-        self:_refreshResponsiveLayout()
     end)
 
     -- Keygate splash: blocks access until key is validated.
@@ -715,6 +716,11 @@ function MeerlyWin95:_buildUI()
     self:_connect(self.killButton.MouseButton1Click, function()
         self:log("EVENT", "Kill button clicked")
         self:destroy()
+    end)
+
+    -- Bind resize handling only after all core widgets exist.
+    self:_connect(self.screenGui:GetPropertyChangedSignal("AbsoluteSize"), function()
+        self:_refreshResponsiveLayout()
     end)
 
     self:_refreshResponsiveLayout()
