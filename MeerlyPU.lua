@@ -12,7 +12,6 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local Stats = game:GetService("Stats")
 local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 
@@ -82,60 +81,6 @@ local uiTheme = {
 -- so unsupported executor APIs do not break the rest of the UI.
 
 
-local favoritesFolder = "Meerly_UM_RNG"
-local favoritesFile = favoritesFolder .. "/MUNRNG_Settings"
-local favoriteKeys = {}
-
-local function canUseFileApi()
-    return typeof(isfolder) == "function" and typeof(makefolder) == "function"
-        and typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(readfile) == "function"
-end
-
-local function loadFavorites()
-    if not canUseFileApi() then
-        return
-    end
-
-    local ok, err = pcall(function()
-        if not isfolder(favoritesFolder) then
-            makefolder(favoritesFolder)
-        end
-
-        if isfile(favoritesFile) then
-            local raw = readfile(favoritesFile)
-            local decoded = HttpService:JSONDecode(raw)
-            if typeof(decoded) == "table" then
-                favoriteKeys = decoded
-            end
-        else
-            writefile(favoritesFile, HttpService:JSONEncode(favoriteKeys))
-        end
-    end)
-
-    if not ok and log then
-        log("Favorites load failed: " .. tostring(err))
-    end
-end
-
-local function saveFavorites()
-    if not canUseFileApi() then
-        return
-    end
-
-    local ok, err = pcall(function()
-        if not isfolder(favoritesFolder) then
-            makefolder(favoritesFolder)
-        end
-        writefile(favoritesFile, HttpService:JSONEncode(favoriteKeys))
-    end)
-
-    if not ok and log then
-        log("Favorites save failed: " .. tostring(err))
-    end
-end
--- Returns engine-reported total memory in MB when available.
--- Why: executor/environment differences can throw here, so we guard with pcall
--- and treat missing values as non-fatal to keep the UI responsive.
 local function safeTotalMemMb()
     local total
     pcall(function()
@@ -622,14 +567,21 @@ tabBar.Size = UDim2.new(1, -20, 0, 30)
 tabBar.Position = UDim2.fromOffset(10, 44)
 tabBar.BackgroundColor3 = uiTheme.panel
 tabBar.BorderSizePixel = 0
+tabBar.ClipsDescendants = true
 makeCorner(tabBar, 6)
 makeStroke(tabBar)
 
 local tabLayout = Instance.new("UIListLayout")
 tabLayout.Parent = tabBar
 tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 6)
+tabLayout.Padding = UDim.new(0, 4)
 tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local tabPadding = Instance.new("UIPadding")
+tabPadding.Parent = tabBar
+tabPadding.PaddingLeft = UDim.new(0, 4)
+tabPadding.PaddingRight = UDim.new(0, 4)
 
 local tabPagesRoot = Instance.new("Frame")
 tabPagesRoot.Parent = window
@@ -661,22 +613,9 @@ end
 
 local tabPages = {}
 local tabButtons = {}
-local currentTabName = "Favourites"
+local currentTabName = "Performance"
 local activeList = nil
-local favoriteEntryByKey = {}
-local favoritesList = nil
 
-local function isFavorite(key)
-    return favoriteKeys[key] == true
-end
-
-local function setFavorite(key, value)
-    favoriteKeys[key] = value and true or nil
-    saveFavorites()
-end
-
--- Activates one tab page and updates tab button styling.
--- Why: single source of truth avoids duplicated selection logic across buttons.
 local function switchTab(name)
     if not tabPages[name] then return end
     currentTabName = name
@@ -690,8 +629,6 @@ local function switchTab(name)
     activeList = tabPages[name]
 end
 
--- Creates both tab button and tab content page.
--- Why: keeps tab registration + UI wiring in one factory for consistency.
 local function createTab(name)
     local page = Instance.new("ScrollingFrame")
     page.Name = name .. "Page"
@@ -713,8 +650,6 @@ local function createTab(name)
 
     local btn = Instance.new("TextButton")
     btn.Parent = tabBar
-    btn.Size = UDim2.fromOffset(92, 22)
-    btn.Position = UDim2.fromOffset(4, 4)
     btn.BorderSizePixel = 0
     btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
     btn.Font = Enum.Font.GothamBold
@@ -731,16 +666,35 @@ local function createTab(name)
     return page
 end
 
-favoritesList = createTab("Favourites")
 createTab("Performance")
 createTab("Weapons")
 createTab("Player")
 createTab("Memory")
 createTab("Utility")
 
-loadFavorites()
+-- Keep tab buttons contained within bar width regardless of window size.
+local tabNames = { "Performance", "Weapons", "Player", "Memory", "Utility" }
+local function updateTabButtonSizes()
+    local paddingPx = tabLayout.Padding.Offset
+    local barWidth = tabBar.AbsoluteSize.X
+    if barWidth <= 0 then
+        barWidth = 410
+    end
 
-switchTab("Favourites")
+    local available = barWidth - tabPadding.PaddingLeft.Offset - tabPadding.PaddingRight.Offset - ((#tabNames - 1) * paddingPx)
+    local widthPer = math.max(54, math.floor(available / #tabNames))
+
+    for _, n in ipairs(tabNames) do
+        if tabButtons[n] then
+            tabButtons[n].Size = UDim2.fromOffset(widthPer, 22)
+        end
+    end
+end
+
+updateTabButtonSizes()
+tabBar:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateTabButtonSizes)
+
+switchTab("Performance")
 
 local function newRow(height, tabName)
     local parentList = tabPages[tabName or currentTabName] or activeList
@@ -754,98 +708,10 @@ local function newRow(height, tabName)
     return row
 end
 
-local function refreshFavoriteEntryLabel(key)
-    local entry = favoriteEntryByKey[key]
-    if entry and entry.button and entry.tabName then
-        entry.button.Text = entry.labelText .. "  [" .. entry.tabName .. "]"
-    end
-end
 
--- Mirrors a favorited setting into the Favourites tab as a quick jump action.
--- Why: favourites should act like shortcuts, not duplicate stateful controls.
-local function ensureFavoriteEntry(key, labelText, tabName)
-    if not isFavorite(key) then
-        if favoriteEntryByKey[key] and favoriteEntryByKey[key].row then
-            favoriteEntryByKey[key].row:Destroy()
-        end
-        favoriteEntryByKey[key] = nil
-        return
-    end
-
-    local entry = favoriteEntryByKey[key]
-    if not entry then
-        local row = newRow(34, "Favourites")
-        local btn = Instance.new("TextButton")
-        btn.Parent = row
-        btn.Size = UDim2.new(1, -8, 1, -8)
-        btn.Position = UDim2.fromOffset(4, 4)
-        btn.BorderSizePixel = 0
-        btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 12
-        btn.TextColor3 = uiTheme.text
-        makeCorner(btn, 5)
-
-        entry = { row = row, button = btn, key = key, labelText = labelText, tabName = tabName }
-        favoriteEntryByKey[key] = entry
-
-        btn.MouseButton1Click:Connect(function()
-            switchTab(tabName)
-        end)
-    else
-        entry.labelText = labelText
-        entry.tabName = tabName
-    end
-
-    refreshFavoriteEntryLabel(key)
-end
-
--- Adds star toggle (☆/★) to a setting row and persists selection to disk.
--- Why: keeps favoriting lightweight and local to each setting control.
-local function attachFavoriteButton(row, key, labelText, tabName)
-    if tabName == "Favourites" then
-        return
-    end
-
-    local favBtn = Instance.new("TextButton")
-    favBtn.Parent = row
-    favBtn.Size = UDim2.fromOffset(24, 24)
-    favBtn.Position = UDim2.new(1, -28, 0, 5)
-    favBtn.BorderSizePixel = 0
-    favBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 66)
-    favBtn.Font = Enum.Font.GothamBold
-    favBtn.TextSize = 14
-    favBtn.TextColor3 = uiTheme.text
-    makeCorner(favBtn, 5)
-
-    local function refreshStar()
-        favBtn.Text = isFavorite(key) and "★" or "☆"
-        favBtn.TextColor3 = isFavorite(key) and Color3.fromRGB(255, 220, 120) or uiTheme.text
-        ensureFavoriteEntry(key, labelText, tabName)
-    end
-
-    favBtn.MouseButton1Click:Connect(function()
-        setFavorite(key, not isFavorite(key))
-        refreshStar()
-        log((isFavorite(key) and "Added to" or "Removed from") .. " favourites: " .. labelText)
-    end)
-
-    refreshStar()
-end
-
--- Generates stable key used for favorites persistence.
--- Why: key needs to survive UI rebuilds and remain human-predictable.
-local function makeSettingKey(tabName, labelText)
-    return string.lower((tabName or "misc") .. "::" .. labelText):gsub("%s+", "_")
-end
-
--- Generic toggle row factory with favorite support.
--- What: renders label + ON/OFF button, invokes callback on state changes.
--- Why: centralized control creation keeps tab UI behavior uniform.
 local function makeToggle(labelText, default, callback, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
-    local key = makeSettingKey(tabName, labelText)
 
     local label = Instance.new("TextLabel")
     label.Parent = row
@@ -880,7 +746,6 @@ local function makeToggle(labelText, default, callback, tabName)
         callback(state)
     end)
 
-    attachFavoriteButton(row, key, labelText, tabName)
 
     refresh()
     callback(state)
@@ -897,13 +762,12 @@ local function makeToggle(labelText, default, callback, tabName)
     }
 end
 
--- Generic input row factory with favorite support.
+-- Generic input row factory.
 -- What: commits value on focus loss, allowing validation/coercion in onCommit.
 -- Why: avoids duplicated textbox plumbing for each numeric setting.
 local function makeInput(labelText, defaultText, onCommit, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
-    local key = makeSettingKey(tabName, labelText)
 
     local label = Instance.new("TextLabel")
     label.Parent = row
@@ -936,17 +800,15 @@ local function makeInput(labelText, defaultText, onCommit, tabName)
         end
     end)
 
-    attachFavoriteButton(row, key, labelText, tabName)
 
     return box
 end
 
--- Generic action button row factory with favorite support.
+-- Generic action button row factory.
 -- Why: one pathway for action rows makes spacing/layout consistent everywhere.
 local function makeButton(text, onClick, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
-    local key = makeSettingKey(tabName, text)
     local btn = Instance.new("TextButton")
     btn.Parent = row
     btn.Size = UDim2.new(0.88, -8, 1, -8)
@@ -960,7 +822,6 @@ local function makeButton(text, onClick, tabName)
     makeCorner(btn, 5)
     btn.MouseButton1Click:Connect(onClick)
 
-    attachFavoriteButton(row, key, text, tabName)
 
     return btn
 end
