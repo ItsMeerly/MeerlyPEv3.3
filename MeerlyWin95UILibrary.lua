@@ -479,11 +479,17 @@ function MeerlyWin95:_buildUI()
     self.pageOrder = {}
     self.dynamicThemeParts = {}
 
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+    local existingGui = playerGui:FindFirstChild("MeerlyWin95Lib")
+    if existingGui then
+        existingGui:Destroy()
+    end
+
     self.screenGui = make("ScreenGui", {
         Name = "MeerlyWin95Lib",
         ResetOnSpawn = false,
         ZIndexBehavior = Enum.ZIndexBehavior.Global,
-        Parent = LocalPlayer:WaitForChild("PlayerGui")
+        Parent = playerGui
     })
 
     self.shell = make("Frame", {
@@ -502,6 +508,7 @@ function MeerlyWin95:_buildUI()
         Position = UDim2.fromOffset(5, 5),
         BorderSizePixel = 0,
         BackgroundTransparency = self.settings.uiTransparency,
+        ClipsDescendants = true,
         ZIndex = 5,
     })
     applyBevel(self.window, self.theme.bevelLight, self.theme.bevelDark)
@@ -750,6 +757,17 @@ function MeerlyWin95:addPage(name, icon)
         ZIndex = 10,
     })
     applyBevel(page, self.theme.bevelLight, self.theme.bevelDark)
+    -- Ensure page widgets are rendered above the page surface.
+    local function elevateDescendantZIndex(guiObj)
+        if guiObj:IsA("GuiObject") and guiObj.ZIndex < (page.ZIndex + 1) then
+            guiObj.ZIndex = page.ZIndex + 1
+        end
+    end
+
+    for _, descendant in ipairs(page:GetDescendants()) do
+        elevateDescendantZIndex(descendant)
+    end
+    self:_connect(page.DescendantAdded, elevateDescendantZIndex)
 
     local pagePadding = make("UIPadding", {
         Parent = page,
