@@ -347,19 +347,52 @@ function MeerlyWin95:log(level, message)
 end
 
 function MeerlyWin95:_renderConsole()
-    if not self.consoleText then
+    -- Render to embedded console page list when available.
+    if self.consoleList then
+        for _, child in ipairs(self.consoleList:GetChildren()) do
+            if child:IsA("TextLabel") then
+                child:Destroy()
+            end
+        end
+
+        local shown = 0
+        for _, row in ipairs(self.state.logs) do
+            if self.state.logFilter[row.level] then
+                local line = make("TextLabel", {
+                    Parent = self.consoleList,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -8, 0, 18),
+                    Font = Enum.Font.Code,
+                    TextSize = 13,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextYAlignment = Enum.TextYAlignment.Center,
+                    Text = row.text,
+                    TextColor3 = LEVEL_COLORS[row.level] or self.theme.text,
+                    ZIndex = 14,
+                })
+                shown += 1
+            end
+        end
+
+        if shown == 0 then
+            make("TextLabel", {
+                Parent = self.consoleList,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -8, 0, 18),
+                Font = Enum.Font.Code,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                Text = "(no console entries for current filters)",
+                TextColor3 = self.theme.subtle,
+                ZIndex = 14,
+            })
+        end
+
+        self.consoleList.CanvasPosition = Vector2.new(0, math.max(0, self.consoleLayout.AbsoluteContentSize.Y - self.consoleList.AbsoluteSize.Y))
         return
     end
 
-    local lines = {}
-    for _, row in ipairs(self.state.logs) do
-        if self.state.logFilter[row.level] then
-            table.insert(lines, row.text)
-        end
-    end
-
-    self.consoleText.Text = table.concat(lines, "\n")
-    self.consoleText.TextColor3 = self.theme.text
 end
 
 function MeerlyWin95:_applyTheme()
@@ -470,7 +503,7 @@ function MeerlyWin95:_refreshResponsiveLayout()
     end
 
     -- Can be called very early by size-change events; guard partial construction.
-    if not self.taskbar or not self.consoleFrame then
+    if not self.taskbar then
         return
     end
 
@@ -491,15 +524,6 @@ function MeerlyWin95:_refreshResponsiveLayout()
         clampFrameToViewport(self.shell, self.screenGui, 8)
     end
 
-    local consoleW = math.min(620, math.max(300, viewport.X - 16))
-    self.consoleFrame.Size = UDim2.fromOffset(consoleW, 180)
-
-    if not self.state.consolePositionInitialized then
-        self.consoleFrame.Position = UDim2.fromOffset(math.floor((viewport.X - consoleW) / 2), math.max(8, viewport.Y - 188))
-        self.state.consolePositionInitialized = true
-    else
-        clampFrameToViewport(self.consoleFrame, self.screenGui, 8)
-    end
 
     self:_taskbarResize()
 end
@@ -594,7 +618,7 @@ function MeerlyWin95:_buildUI()
         Position = UDim2.new(0, 4, 1, -38),
         BorderSizePixel = 0,
         ClipsDescendants = true,
-        ZIndex = 40,
+        ZIndex = 80,
     })
     applyBevel(self.taskbar, self.theme.bevelLight, self.theme.bevelDark)
 
@@ -605,7 +629,7 @@ function MeerlyWin95:_buildUI()
         Position = UDim2.fromOffset(4, 3),
         BorderSizePixel = 0,
         BackgroundTransparency = 1,
-        ZIndex = 41,
+        ZIndex = 81,
     })
 
     self:_connect(self.taskbarButtonsHost:GetPropertyChangedSignal("AbsoluteSize"), function()
@@ -714,52 +738,6 @@ function MeerlyWin95:_buildUI()
         end,
     })
 
-    -- Main console dock (global logs)
-    self.consoleFrame = make("Frame", {
-        Parent = self.screenGui,
-        Size = UDim2.fromOffset(620, 180),
-        Position = UDim2.fromOffset(20, 20),
-        BorderSizePixel = 0,
-        ZIndex = 2,
-    })
-    applyBevel(self.consoleFrame, self.theme.bevelLight, self.theme.bevelDark)
-
-    self.consoleHeader = make("TextLabel", {
-        Parent = self.consoleFrame,
-        Text = "System Console",
-        Font = Enum.Font.Code,
-        TextSize = 14,
-        Size = UDim2.new(1, -10, 0, 24),
-        Position = UDim2.fromOffset(5, 4),
-        BackgroundTransparency = 1,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 3,
-    })
-    makeDraggable(self.consoleHeader, self.consoleFrame, self.screenGui)
-
-    self.consoleText = make("TextLabel", {
-        Parent = self.consoleFrame,
-        Text = "",
-        Font = Enum.Font.Code,
-        TextSize = 13,
-        RichText = false,
-        TextWrapped = false,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        Size = UDim2.new(1, -10, 1, -34),
-        Position = UDim2.fromOffset(5, 28),
-        BackgroundTransparency = 1,
-        ZIndex = 3,
-    })
-
-    table.insert(self.dynamicThemeParts, {
-        apply = function(theme)
-            self.consoleFrame.BackgroundColor3 = theme.panel
-            self.consoleHeader.TextColor3 = theme.text
-            self.consoleText.TextColor3 = theme.text
-        end,
-    })
-
     self:_connect(self.killButton.MouseButton1Click, function()
         self:log("EVENT", "Kill button clicked")
         self:destroy()
@@ -784,6 +762,7 @@ function MeerlyWin95:addPage(name, icon)
         Position = UDim2.fromOffset(4, 4),
         BorderSizePixel = 0,
         ScrollBarThickness = 6,
+        ScrollBarInset = Enum.ScrollBarInset.ScrollBar,
         CanvasSize = UDim2.new(0, 0, 0, 0),
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -791,7 +770,6 @@ function MeerlyWin95:addPage(name, icon)
         Visible = false,
         ZIndex = 10,
     })
-    applyBevel(page, self.theme.bevelLight, self.theme.bevelDark)
     -- Ensure page widgets are rendered above the page surface.
     local function elevateDescendantZIndex(guiObj)
         if guiObj:IsA("GuiObject") and guiObj.ZIndex < (page.ZIndex + 1) then
@@ -809,7 +787,7 @@ function MeerlyWin95:addPage(name, icon)
         PaddingTop = UDim.new(0, 8),
         PaddingBottom = UDim.new(0, 8),
         PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 14),
     })
 
     local button = make("TextButton", {
@@ -820,7 +798,7 @@ function MeerlyWin95:addPage(name, icon)
         TextSize = 18,
         LayoutOrder = #self.pageOrder + 1,
         BorderSizePixel = 0,
-        ZIndex = 41,
+        ZIndex = 82,
     })
     applyBevel(button, self.theme.bevelLight, self.theme.bevelDark)
 
@@ -1348,7 +1326,7 @@ function MeerlyWin95:_buildConsolePage()
 
     local title = make("TextLabel", {
         Parent = page,
-        Text = "Console Filters",
+        Text = "Console",
         Font = Enum.Font.Code,
         TextSize = 18,
         Size = UDim2.new(1, -16, 0, 24),
@@ -1358,13 +1336,15 @@ function MeerlyWin95:_buildConsolePage()
     })
 
     local x = 8
-    for level, color in pairs(LEVEL_COLORS) do
+    local orderedLevels = { "INFO", "WARN", "ERROR", "DEBUG", "EVENT" }
+    for _, level in ipairs(orderedLevels) do
+        local color = LEVEL_COLORS[level]
         local btn = make("TextButton", {
             Parent = page,
             Text = level,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.fromOffset(80, 24),
+            Size = UDim2.fromOffset(84, 24),
             Position = UDim2.fromOffset(x, 38),
             BorderSizePixel = 0,
             BackgroundColor3 = color,
@@ -1375,10 +1355,11 @@ function MeerlyWin95:_buildConsolePage()
         self:_connect(btn.MouseButton1Click, function()
             self.state.logFilter[level] = not self.state.logFilter[level]
             btn.Text = level .. (self.state.logFilter[level] and " ✓" or " ✗")
+            btn.BackgroundTransparency = self.state.logFilter[level] and 0 or 0.45
             self:_renderConsole()
         end)
 
-        x = x + 84
+        x = x + 88
     end
 
     local clear = make("TextButton", {
@@ -1386,11 +1367,31 @@ function MeerlyWin95:_buildConsolePage()
         Text = "Clear Logs",
         Font = Enum.Font.Code,
         TextSize = 13,
-        Size = UDim2.fromOffset(100, 24),
+        Size = UDim2.fromOffset(110, 24),
         Position = UDim2.fromOffset(8, 70),
         BorderSizePixel = 0,
     })
     applyBevel(clear, self.theme.bevelLight, self.theme.bevelDark)
+
+    self.consoleList = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(1, -16, 1, -110),
+        Position = UDim2.fromOffset(8, 100),
+        BorderSizePixel = 0,
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 6,
+        ScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ZIndex = 13,
+    })
+    self.consoleLayout = make("UIListLayout", {
+        Parent = self.consoleList,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2),
+    })
 
     self:_connect(clear.MouseButton1Click, function()
         self.state.logs = {}
@@ -1405,6 +1406,8 @@ function MeerlyWin95:_buildConsolePage()
             clear.TextColor3 = theme.text
         end,
     })
+
+    self:_renderConsole()
 end
 
 function MeerlyWin95:_safeExecutorAction(name, fn)
@@ -1488,13 +1491,43 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     })
 
     local y = 38
+
+    local function addSection(sectionTitle)
+        local lbl = make("TextLabel", {
+            Parent = page,
+            Text = sectionTitle,
+            Font = Enum.Font.Code,
+            TextSize = 14,
+            Size = UDim2.new(1, -16, 0, 20),
+            Position = UDim2.fromOffset(8, y),
+            BackgroundTransparency = 1,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        })
+        y = y + 20
+
+        local line = make("Frame", {
+            Parent = page,
+            Size = UDim2.new(1, -16, 0, 1),
+            Position = UDim2.fromOffset(8, y),
+            BorderSizePixel = 0,
+        })
+        y = y + 8
+
+        table.insert(self.dynamicThemeParts, {
+            apply = function(theme)
+                lbl.TextColor3 = theme.accent
+                line.BackgroundColor3 = theme.stroke
+            end,
+        })
+    end
+
     local function addToggle(label, initial, callback)
         local btn = make("TextButton", {
             Parent = page,
             Text = label .. ": " .. (initial and "ON" or "OFF"),
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(0, 260, 0, 24),
+            Size = UDim2.new(1, -16, 0, 24),
             Position = UDim2.fromOffset(8, y),
             BorderSizePixel = 0,
         })
@@ -1521,7 +1554,7 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = label,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(0, 260, 0, 24),
+            Size = UDim2.new(1, -16, 0, 24),
             Position = UDim2.fromOffset(8, y),
             BorderSizePixel = 0,
         })
@@ -1543,7 +1576,7 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = label,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.fromOffset(260, 20),
+            Size = UDim2.new(1, -16, 0, 20),
             Position = UDim2.fromOffset(8, y),
             BackgroundTransparency = 1,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -1555,7 +1588,7 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = tostring(defaultValue),
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.fromOffset(120, 24),
+            Size = UDim2.fromOffset(140, 24),
             Position = UDim2.fromOffset(8, y),
             BorderSizePixel = 0,
             ClearTextOnFocus = false,
@@ -1578,57 +1611,50 @@ function MeerlyWin95:_buildRobloxSettingsPage()
         return box
     end
 
-    -- Quick Settings
+    addSection("Quick Settings")
     addToggle("Zoom Unlock", self.state.zoomUnlock, function(v)
         self.state.zoomUnlock = v
         self:_safeExecutorAction("Zoom Unlock", function()
             LocalPlayer.CameraMaxZoomDistance = v and 1000 or 128
         end)
     end)
-
     addToggle("FPS Counter", self.state.fpsCounter, function(v)
         self.state.fpsCounter = v
         self:log("EVENT", "FPS Counter " .. (v and "enabled" or "disabled"))
     end)
-
     addButton("Rejoin Server", function()
         self:_safeExecutorAction("Rejoin Server", function()
             TeleportService:Teleport(game.PlaceId, LocalPlayer)
         end)
     end)
 
-    -- Performance Settings
+    addSection("Performance Settings")
     addButton("Graphics: Super Low", function() self.state.performanceMode = "Super Low"; self:log("EVENT", "Graphics mode set: Super Low") end)
     addButton("Graphics: Low", function() self.state.performanceMode = "Low"; self:log("EVENT", "Graphics mode set: Low") end)
     addButton("Graphics: Default", function() self.state.performanceMode = "Default"; self:log("EVENT", "Graphics mode set: Default") end)
     addButton("Graphics: Extremely High", function() self.state.performanceMode = "Extremely High"; self:log("EVENT", "Graphics mode set: Extremely High") end)
-
     addButton("FX Culling: Extreme", function() self.state.fxCulling = "Extreme"; self:log("EVENT", "FX Culling set: Extreme") end)
     addButton("FX Culling: Strong", function() self.state.fxCulling = "Strong"; self:log("EVENT", "FX Culling set: Strong") end)
     addButton("FX Culling: Medium", function() self.state.fxCulling = "Medium"; self:log("EVENT", "FX Culling set: Medium") end)
     addButton("FX Culling: Low", function() self.state.fxCulling = "Low"; self:log("EVENT", "FX Culling set: Low") end)
-
     addToggle("Streaming Optimisations", self.state.streamOptimized, function(v)
         self.state.streamOptimized = v
         self:log("EVENT", "Streaming Optimisations " .. (v and "enabled" or "disabled"))
     end)
-
     addToggle("Background Survival Mode", self.state.backgroundSurvival, function(v)
         self.state.backgroundSurvival = v
         self:log("EVENT", "Background Survival Mode " .. (v and "enabled" or "disabled"))
     end)
 
-    -- AFK Settings
+    addSection("AFK Settings")
     addToggle("Anti-AFK (10s space loop)", self.state.antiAfk, function(v)
         self.state.antiAfk = v
         self:log("EVENT", "Anti-AFK " .. (v and "enabled" or "disabled"))
     end)
-
     addToggle("Watchdog", self.state.watchdog, function(v)
         self.state.watchdog = v
         self:log("EVENT", "Watchdog " .. (v and "enabled" or "disabled"))
     end)
-
     addInput("FPS Cap (10-240)", self.state.fpsCap, function(text)
         local n = tonumber(text)
         if n then
@@ -1642,11 +1668,9 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             end)
         end
     end)
-
     addButton("Memory Guard: Off", function() self.state.memGuardMode = "Off"; self:log("EVENT", "Memory Guard Off") end)
     addButton("Memory Guard: AutoRejoin", function() self.state.memGuardMode = "AutoRejoin"; self:log("EVENT", "Memory Guard AutoRejoin") end)
     addButton("Memory Guard: AutoQuit", function() self.state.memGuardMode = "AutoQuit"; self:log("EVENT", "Memory Guard AutoQuit") end)
-
     addInput("Memory Guard Cap (GB)", self.state.memGuardGb, function(text)
         local n = tonumber(text)
         if n then
@@ -1654,7 +1678,6 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             self:log("EVENT", "Memory Guard cap set: " .. self.state.memGuardGb .. " GB")
         end
     end)
-
     addToggle("Disable 3D Rendering", self.state.disable3D, function(v)
         self.state.disable3D = v
         self:_safeExecutorAction("Disable 3D", function()
@@ -1665,7 +1688,6 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             end
         end)
     end)
-
     addButton("AFK Camera (move away)", function()
         self:_safeExecutorAction("AFK Camera", function()
             local cam = workspace.CurrentCamera
@@ -1682,7 +1704,6 @@ end
 
 function MeerlyWin95:_buildDefaultPages()
     self:_buildThemePage()
-    self:_buildPerformancePage()
     self:_buildConfigPage()
     self:_buildConsolePage()
     self:_buildRobloxSettingsPage()
@@ -1731,7 +1752,6 @@ function MeerlyWin95:_wireCoreBindings()
         if input.KeyCode == self.settings.toggleKey then
             self.state.visible = not self.state.visible
             self.shell.Visible = self.state.visible
-            self.consoleFrame.Visible = self.state.visible
 
             for _, fw in ipairs(self.state.floatingWindows) do
                 if fw.hideWithMain then
