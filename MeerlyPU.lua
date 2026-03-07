@@ -38,6 +38,11 @@ local aggressiveFxCullEnabled = false
 local hideTrackedWeaponParts = false
 local weaponDamageOverrideEnabled = false
 local weaponDamageOverride = 25
+local hideOtherPlayersWeapons = false
+local otherPlayersHidePassSeconds = 10
+local walkSpeedOverrideEnabled = false
+local walkSpeedValue = 16
+local originalWalkSpeed = nil
 
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
@@ -48,6 +53,7 @@ local trackedCharacter = nil
 local trackedWeapons = {}
 local trackedWeaponPartState = {}
 local trackedWeaponDamageState = {}
+local otherPlayerWeaponPartState = {}
 
 local backgroundMode = false
 local windowFocused = true
@@ -210,8 +216,8 @@ local characterNonWeaponNames = {
     ["Health"] = true,
 }
 
-local function isLikelyWeaponContainer(obj)
-    if not trackedCharacter or obj.Parent ~= trackedCharacter then
+local function isLikelyWeaponContainerForCharacter(character, obj)
+    if not character or obj.Parent ~= character then
         return false
     end
     if characterNonWeaponNames[obj.Name] then
@@ -232,11 +238,58 @@ local function isLikelyWeaponContainer(obj)
         hasPart = obj:FindFirstChildWhichIsA("BasePart", true) ~= nil
     end
 
-    if not hasPart then
-        return false
+    return hasPart
+end
+
+local function setPartHiddenLocal(part, hide, stateTable)
+    local state = stateTable[part]
+    if not state then
+        state = { localTransparencyModifier = part.LocalTransparencyModifier }
+        stateTable[part] = state
     end
 
-    return true
+    if hide then
+        part.LocalTransparencyModifier = 1
+    else
+        part.LocalTransparencyModifier = state.localTransparencyModifier or 0
+    end
+end
+
+local function applyOtherPlayersWeaponHiding()
+    local hiddenCount = 0
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= player and other.Character then
+            for _, child in ipairs(other.Character:GetChildren()) do
+                if isLikelyWeaponContainerForCharacter(other.Character, child) then
+                    if child:IsA("BasePart") then
+                        setPartHiddenLocal(child, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
+                        hiddenCount += 1
+                    end
+                    for _, descendant in ipairs(child:GetDescendants()) do
+                        if descendant:IsA("BasePart") then
+                            setPartHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
+                            hiddenCount += 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not hideOtherPlayersWeapons then
+        for part in pairs(otherPlayerWeaponPartState) do
+            if part and part.Parent then
+                setPartHiddenLocal(part, false, otherPlayerWeaponPartState)
+            end
+        end
+        otherPlayerWeaponPartState = {}
+    end
+
+    return hiddenCount
+end
+
+local function isLikelyWeaponContainer(obj)
+    return isLikelyWeaponContainerForCharacter(trackedCharacter, obj)
 end
 
 local function applyWeaponPartState(part)
@@ -345,6 +398,7 @@ local function bindCharacterForWeapons(character)
     trackedWeapons = {}
     trackedWeaponPartState = {}
     trackedWeaponDamageState = {}
+    originalWalkSpeed = nil
 
     if weaponChildAddedConnection then
         weaponChildAddedConnection:Disconnect()
@@ -365,6 +419,24 @@ local function bindCharacterForWeapons(character)
     end)
 
     rescanCharacterWeapons()
+end
+
+local function applyWalkSpeed()
+    local character = player.Character
+    if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    if originalWalkSpeed == nil then
+        originalWalkSpeed = humanoid.WalkSpeed
+    end
+
+    if walkSpeedOverrideEnabled then
+        humanoid.WalkSpeed = walkSpeedValue
+    elseif originalWalkSpeed ~= nil then
+        humanoid.WalkSpeed = originalWalkSpeed
+    end
 end
 
 local function safeSetFPS(cap)
@@ -717,6 +789,42 @@ makeButton("Rescan Weapons", function()
     rescanCharacterWeapons()
 end)
 
+makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
+    hideOtherPlayersWeapons = v
+    local hiddenCount = applyOtherPlayersWeaponHiding()
+    if v then
+        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
+    else
+        log("Other-player weapon hide disabled")
+    end
+end)
+
+makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
+    local v = tonumber(text)
+    if v and v >= 3 and v <= 60 then
+        otherPlayersHidePassSeconds = math.floor(v)
+    end
+    return tostring(otherPlayersHidePassSeconds)
+end)
+
+makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
+    walkSpeedOverrideEnabled = v
+    applyWalkSpeed()
+    log(v and ("WalkSpeed override enabled: " .. tostring(walkSpeedValue)) or "WalkSpeed override disabled")
+end)
+
+makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
+    local v = tonumber(text)
+    if v and v >= 1 and v <= 250 then
+        walkSpeedValue = v
+        if walkSpeedOverrideEnabled then
+            applyWalkSpeed()
+            log("WalkSpeed updated: " .. tostring(walkSpeedValue))
+        end
+    end
+    return tostring(walkSpeedValue)
+end)
+
 makeToggle("Background Survival Mode", backgroundMode, function(v)
     backgroundMode = v
     log(v and "Background mode enabled" or "Background mode disabled")
@@ -928,6 +1036,24 @@ task.spawn(function()
     while running do
         task.wait(3)
         rescanCharacterWeapons(true)
+    end
+end)
+
+task.spawn(function()
+    while running do
+        task.wait(otherPlayersHidePassSeconds)
+        if hideOtherPlayersWeapons then
+            applyOtherPlayersWeaponHiding()
+        end
+    end
+end)
+
+task.spawn(function()
+    while running do
+        task.wait(0.75)
+        if walkSpeedOverrideEnabled then
+            applyWalkSpeed()
+        end
     end
 end)
 
