@@ -795,7 +795,7 @@ function MeerlyWin95:addPage(name, icon)
         Position = UDim2.fromOffset(4, 4),
         BorderSizePixel = 0,
         ScrollBarThickness = 6,
-        ScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+        ScrollBarInset = Enum.ScrollBarInset.Always,
         CanvasSize = UDim2.new(0, 0, 0, 0),
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -820,7 +820,7 @@ function MeerlyWin95:addPage(name, icon)
         PaddingTop = UDim.new(0, 8),
         PaddingBottom = UDim.new(0, 8),
         PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 14),
+        PaddingRight = UDim.new(0, 20),
     })
 
     local button = make("TextButton", {
@@ -939,7 +939,7 @@ function MeerlyWin95:_buildThemePage()
         Text = "Theme Manager",
         Font = Enum.Font.Code,
         TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 26),
+        Size = UDim2.new(1, -24, 0, 26),
         Position = UDim2.fromOffset(8, 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -949,7 +949,7 @@ function MeerlyWin95:_buildThemePage()
     local function addThemeRow(themeDef, index)
         local row = make("Frame", {
             Parent = page,
-            Size = UDim2.new(1, -16, 0, 30),
+            Size = UDim2.new(1, -24, 0, 30),
             Position = UDim2.fromOffset(8, y),
             BorderSizePixel = 0,
         })
@@ -1023,7 +1023,7 @@ function MeerlyWin95:_buildThemePage()
 
     local transTrack = make("Frame", {
         Parent = page,
-        Size = UDim2.new(1, -16, 0, 18),
+        Size = UDim2.new(1, -24, 0, 18),
         Position = UDim2.fromOffset(8, y + 30),
         BorderSizePixel = 0,
     })
@@ -1066,7 +1066,7 @@ function MeerlyWin95:_buildThemePage()
 
     local blurTrack = make("Frame", {
         Parent = page,
-        Size = UDim2.new(1, -16, 0, 18),
+        Size = UDim2.new(1, -24, 0, 18),
         Position = UDim2.fromOffset(8, y + 78),
         BorderSizePixel = 0,
     })
@@ -1220,7 +1220,7 @@ function MeerlyWin95:_buildConfigPage()
         Text = "Unified Configuration Slots",
         Font = Enum.Font.Code,
         TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 24),
+        Size = UDim2.new(1, -24, 0, 24),
         Position = UDim2.fromOffset(8, 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1230,7 +1230,7 @@ function MeerlyWin95:_buildConfigPage()
     for slot = 1, 5 do
         local row = make("Frame", {
             Parent = page,
-            Size = UDim2.new(1, -16, 0, 34),
+            Size = UDim2.new(1, -24, 0, 34),
             Position = UDim2.fromOffset(8, y),
             BorderSizePixel = 0,
         })
@@ -1362,7 +1362,7 @@ function MeerlyWin95:_buildConsolePage()
         Text = "Console",
         Font = Enum.Font.Code,
         TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 24),
+        Size = UDim2.new(1, -24, 0, 24),
         Position = UDim2.fromOffset(8, 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1408,7 +1408,7 @@ function MeerlyWin95:_buildConsolePage()
 
     self.consoleList = make("ScrollingFrame", {
         Parent = page,
-        Size = UDim2.new(1, -16, 1, -110),
+        Size = UDim2.new(1, -24, 1, -110),
         Position = UDim2.fromOffset(8, 100),
         BorderSizePixel = 0,
         BackgroundTransparency = 1,
@@ -1464,7 +1464,7 @@ function MeerlyWin95:_buildPerformancePage()
         Text = "Performance Quick Panel",
         Font = Enum.Font.Code,
         TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 24),
+        Size = UDim2.new(1, -24, 0, 24),
         Position = UDim2.fromOffset(8, 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1512,13 +1512,16 @@ end
 function MeerlyWin95:_buildRobloxSettingsPage()
     local page = self:addPage("Settings", "ST")
 
+    local contentInsetX = 8
+    local controlWidthOffset = -24
+
     local title = make("TextLabel", {
         Parent = page,
         Text = "Roblox Settings",
         Font = Enum.Font.Code,
         TextSize = 18,
-        Size = UDim2.new(1, -16, 0, 24),
-        Position = UDim2.fromOffset(8, 8),
+        Size = UDim2.new(1, controlWidthOffset, 0, 24),
+        Position = UDim2.fromOffset(contentInsetX, 8),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
@@ -1531,8 +1534,8 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = sectionTitle,
             Font = Enum.Font.Code,
             TextSize = 14,
-            Size = UDim2.new(1, -16, 0, 20),
-            Position = UDim2.fromOffset(8, y),
+            Size = UDim2.new(1, controlWidthOffset, 0, 20),
+            Position = UDim2.fromOffset(contentInsetX, y),
             BackgroundTransparency = 1,
             TextXAlignment = Enum.TextXAlignment.Left,
         })
@@ -1540,8 +1543,8 @@ function MeerlyWin95:_buildRobloxSettingsPage()
 
         local line = make("Frame", {
             Parent = page,
-            Size = UDim2.new(1, -16, 0, 1),
-            Position = UDim2.fromOffset(8, y),
+            Size = UDim2.new(1, controlWidthOffset, 0, 1),
+            Position = UDim2.fromOffset(contentInsetX, y),
             BorderSizePixel = 0,
         })
         y = y + 8
@@ -1560,8 +1563,8 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = label .. ": " .. (initial and "ON" or "OFF"),
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(1, -16, 0, 24),
-            Position = UDim2.fromOffset(8, y),
+            Size = UDim2.new(1, controlWidthOffset, 0, 24),
+            Position = UDim2.fromOffset(contentInsetX, y),
             BorderSizePixel = 0,
         })
         applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
@@ -1587,8 +1590,8 @@ function MeerlyWin95:_buildRobloxSettingsPage()
             Text = label,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(1, -16, 0, 24),
-            Position = UDim2.fromOffset(8, y),
+            Size = UDim2.new(1, controlWidthOffset, 0, 24),
+            Position = UDim2.fromOffset(contentInsetX, y),
             BorderSizePixel = 0,
         })
         applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
@@ -1603,45 +1606,162 @@ function MeerlyWin95:_buildRobloxSettingsPage()
         return btn
     end
 
-    local function addInput(label, defaultValue, callback)
+    local function addCycleSwitch(label, options, initialValue, callback)
+        local index = 1
+        for i, option in ipairs(options) do
+            if option == initialValue then
+                index = i
+                break
+            end
+        end
+
+        local btn = make("TextButton", {
+            Parent = page,
+            Text = label .. ": " .. tostring(options[index]),
+            Font = Enum.Font.Code,
+            TextSize = 12,
+            Size = UDim2.new(1, controlWidthOffset, 0, 24),
+            Position = UDim2.fromOffset(contentInsetX, y),
+            BorderSizePixel = 0,
+        })
+        applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
+
+        self:_connect(btn.MouseButton1Click, function()
+            index = (index % #options) + 1
+            local value = options[index]
+            btn.Text = label .. ": " .. tostring(value)
+            callback(value)
+        end)
+
+        y = y + 28
+        table.insert(self.dynamicThemeParts, {
+            apply = function(theme)
+                btn.BackgroundColor3 = theme.window
+                btn.TextColor3 = theme.text
+            end,
+        })
+
+        return btn
+    end
+
+    local function addSlider(label, minValue, maxValue, step, getter, setter, formatter)
+        formatter = formatter or function(v)
+            return tostring(v)
+        end
+
         local lbl = make("TextLabel", {
             Parent = page,
             Text = label,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(1, -16, 0, 20),
-            Position = UDim2.fromOffset(8, y),
+            Size = UDim2.new(1, controlWidthOffset, 0, 20),
+            Position = UDim2.fromOffset(contentInsetX, y),
             BackgroundTransparency = 1,
             TextXAlignment = Enum.TextXAlignment.Left,
         })
         y = y + 20
 
-        local box = make("TextBox", {
+        local valueLabel = make("TextLabel", {
             Parent = page,
-            Text = tostring(defaultValue),
+            Text = "",
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.fromOffset(140, 24),
-            Position = UDim2.fromOffset(8, y),
-            BorderSizePixel = 0,
-            ClearTextOnFocus = false,
+            Size = UDim2.fromOffset(110, 20),
+            Position = UDim2.new(1, -(contentInsetX + 110), 0, y - 20),
+            BackgroundTransparency = 1,
+            TextXAlignment = Enum.TextXAlignment.Right,
         })
-        applyBevel(box, self.theme.bevelLight, self.theme.bevelDark)
 
-        self:_connect(box.FocusLost, function()
-            callback(box.Text)
+        local track = make("Frame", {
+            Parent = page,
+            Size = UDim2.new(1, controlWidthOffset, 0, 18),
+            Position = UDim2.fromOffset(contentInsetX, y),
+            BorderSizePixel = 0,
+        })
+        applyBevel(track, self.theme.bevelLight, self.theme.bevelDark)
+
+        local fill = make("Frame", {
+            Parent = track,
+            Size = UDim2.new(0, 0, 1, 0),
+            BorderSizePixel = 0,
+        })
+
+        local knob = make("Frame", {
+            Parent = track,
+            Size = UDim2.fromOffset(8, 18),
+            Position = UDim2.fromOffset(0, 0),
+            BorderSizePixel = 0,
+        })
+
+        local function quantize(value)
+            local stepped = math.floor(((value - minValue) / step) + 0.5) * step + minValue
+            return math.clamp(stepped, minValue, maxValue)
+        end
+
+        local function render(value)
+            local alpha = (value - minValue) / math.max(1e-6, (maxValue - minValue))
+            local width = math.max(1, track.AbsoluteSize.X)
+            local knobX = math.floor((width - knob.AbsoluteSize.X) * alpha)
+            fill.Size = UDim2.new(alpha, 0, 1, 0)
+            knob.Position = UDim2.fromOffset(knobX, 0)
+            valueLabel.Text = formatter(value)
+        end
+
+        local function commit(value, fireEvent)
+            local quantized = quantize(value)
+            setter(quantized, fireEvent)
+            render(quantized)
+        end
+
+        local dragging = false
+        local function fromPosition(posX)
+            local width = math.max(1, track.AbsoluteSize.X)
+            local alpha = math.clamp((posX - track.AbsolutePosition.X) / width, 0, 1)
+            local raw = minValue + ((maxValue - minValue) * alpha)
+            commit(raw, false)
+        end
+
+        self:_connect(track.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                fromPosition(input.Position.X)
+            end
         end)
 
-        y = y + 30
+        self:_connect(track.InputEnded, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                if dragging then
+                    dragging = false
+                    commit(getter(), true)
+                end
+            end
+        end)
+
+        self:_connect(UserInputService.InputChanged, function(input)
+            if not dragging then
+                return
+            end
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                fromPosition(input.Position.X)
+            end
+        end)
+
+        y = y + 26
         table.insert(self.dynamicThemeParts, {
             apply = function(theme)
                 lbl.TextColor3 = theme.text
-                box.BackgroundColor3 = theme.window
-                box.TextColor3 = theme.text
+                valueLabel.TextColor3 = theme.text
+                track.BackgroundColor3 = theme.window
+                fill.BackgroundColor3 = theme.accent
+                knob.BackgroundColor3 = theme.text
             end,
         })
 
-        return box
+        task.defer(function()
+            commit(getter(), false)
+        end)
+
+        return track
     end
 
     addSection("Quick Settings")
@@ -1662,14 +1782,14 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     end)
 
     addSection("Performance Settings")
-    addButton("Graphics: Super Low", function() self.state.performanceMode = "Super Low"; self:log("EVENT", "Graphics mode set: Super Low") end)
-    addButton("Graphics: Low", function() self.state.performanceMode = "Low"; self:log("EVENT", "Graphics mode set: Low") end)
-    addButton("Graphics: Default", function() self.state.performanceMode = "Default"; self:log("EVENT", "Graphics mode set: Default") end)
-    addButton("Graphics: Extremely High", function() self.state.performanceMode = "Extremely High"; self:log("EVENT", "Graphics mode set: Extremely High") end)
-    addButton("FX Culling: Extreme", function() self.state.fxCulling = "Extreme"; self:log("EVENT", "FX Culling set: Extreme") end)
-    addButton("FX Culling: Strong", function() self.state.fxCulling = "Strong"; self:log("EVENT", "FX Culling set: Strong") end)
-    addButton("FX Culling: Medium", function() self.state.fxCulling = "Medium"; self:log("EVENT", "FX Culling set: Medium") end)
-    addButton("FX Culling: Low", function() self.state.fxCulling = "Low"; self:log("EVENT", "FX Culling set: Low") end)
+    addCycleSwitch("Graphics", { "Super Low", "Low", "Default", "Extremely High" }, self.state.performanceMode, function(v)
+        self.state.performanceMode = v
+        self:log("EVENT", "Graphics mode set: " .. v)
+    end)
+    addCycleSwitch("FX Culling", { "Low", "Medium", "Strong", "Extreme" }, self.state.fxCulling, function(v)
+        self.state.fxCulling = v
+        self:log("EVENT", "FX Culling set: " .. v)
+    end)
     addToggle("Streaming Optimisations", self.state.streamOptimized, function(v)
         self.state.streamOptimized = v
         self:log("EVENT", "Streaming Optimisations " .. (v and "enabled" or "disabled"))
@@ -1688,10 +1808,12 @@ function MeerlyWin95:_buildRobloxSettingsPage()
         self.state.watchdog = v
         self:log("EVENT", "Watchdog " .. (v and "enabled" or "disabled"))
     end)
-    addInput("FPS Cap (10-240)", self.state.fpsCap, function(text)
-        local n = tonumber(text)
-        if n then
-            self.state.fpsCap = math.clamp(math.floor(n), 10, 240)
+
+    addSlider("FPS Cap", 30, 240, 1, function()
+        return self.state.fpsCap
+    end, function(value, committed)
+        self.state.fpsCap = math.clamp(math.floor(value + 0.5), 30, 240)
+        if committed then
             self:_safeExecutorAction("FPS Cap", function()
                 if setfpscap then
                     setfpscap(self.state.fpsCap)
@@ -1700,17 +1822,27 @@ function MeerlyWin95:_buildRobloxSettingsPage()
                 end
             end)
         end
+    end, function(value)
+        return string.format("%d", value)
     end)
-    addButton("Memory Guard: Off", function() self.state.memGuardMode = "Off"; self:log("EVENT", "Memory Guard Off") end)
-    addButton("Memory Guard: AutoRejoin", function() self.state.memGuardMode = "AutoRejoin"; self:log("EVENT", "Memory Guard AutoRejoin") end)
-    addButton("Memory Guard: AutoQuit", function() self.state.memGuardMode = "AutoQuit"; self:log("EVENT", "Memory Guard AutoQuit") end)
-    addInput("Memory Guard Cap (GB)", self.state.memGuardGb, function(text)
-        local n = tonumber(text)
-        if n then
-            self.state.memGuardGb = math.max(1, n)
-            self:log("EVENT", "Memory Guard cap set: " .. self.state.memGuardGb .. " GB")
+
+    addCycleSwitch("Memory Guard", { "Off", "AutoRejoin", "AutoQuit" }, self.state.memGuardMode, function(v)
+        self.state.memGuardMode = v
+        self:log("EVENT", "Memory Guard " .. v)
+    end)
+
+    addSlider("Memory Guard Cap (GB)", 6, 16, 0.5, function()
+        return self.state.memGuardGb
+    end, function(value, committed)
+        local rounded = math.floor((value * 2) + 0.5) / 2
+        self.state.memGuardGb = math.clamp(rounded, 6, 16)
+        if committed then
+            self:log("EVENT", string.format("Memory Guard cap set: %.1f GB", self.state.memGuardGb))
         end
+    end, function(value)
+        return string.format("%.1f", value)
     end)
+
     addToggle("Disable 3D Rendering", self.state.disable3D, function(v)
         self.state.disable3D = v
         self:_safeExecutorAction("Disable 3D", function()
