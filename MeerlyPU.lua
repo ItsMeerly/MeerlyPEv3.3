@@ -908,6 +908,18 @@ local function makeToggle(labelText, default, callback, tabName)
     makeCorner(button, 5)
 
     local state = default == true
+    local function invokeCallback(nextState)
+        local ok, err = pcall(function()
+            callback(nextState)
+        end)
+        if not ok then
+            warn(string.format("[MeerlyPerf] Toggle callback failed (%s): %s", tostring(labelText), tostring(err)))
+            if log then
+                log(string.format("Toggle error (%s): %s", tostring(labelText), tostring(err)))
+            end
+        end
+    end
+
     local function refresh()
         button.Text = state and "ON" or "OFF"
         button.BackgroundColor3 = state and uiTheme.accent or Color3.fromRGB(70, 70, 82)
@@ -917,18 +929,18 @@ local function makeToggle(labelText, default, callback, tabName)
     button.MouseButton1Click:Connect(function()
         state = not state
         refresh()
-        callback(state)
+        invokeCallback(state)
     end)
 
 
     refresh()
-    callback(state)
+    invokeCallback(state)
 
     return {
         set = function(v)
             state = v == true
             refresh()
-            callback(state)
+            invokeCallback(state)
         end,
         get = function()
             return state
@@ -1369,7 +1381,8 @@ makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
     log(v and "Memory stats enabled" or "Memory stats disabled")
 end, "Memory")
 
-local modeButton = makeButton("Memory Action: Off", function()
+local modeButton
+modeButton = makeButton("Memory Action: Off", function()
     local order = { "Off", "AutoRejoin", "AutoQuit" }
     local idx = table.find(order, memoryGuardMode) or 1
     idx = (idx % #order) + 1
