@@ -421,16 +421,33 @@ function MeerlyWin95:_taskbarResize()
 
     -- Keep all taskbar buttons visible inside the bar width.
     local maxHeight = 28
+    local minHeight = 14
     local gap = 4 -- Must match UIListLayout padding.
     local innerPadding = 10
-    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - innerPadding)
-    local totalGap = gap * math.max(0, count - 1)
 
+    -- AbsoluteSize can report 0 very early; use window width as fallback.
+    local barWidth = math.max(0, self.taskbar.AbsoluteSize.X - innerPadding)
+    if barWidth <= 0 and self.window then
+        barWidth = math.max(0, self.window.AbsoluteSize.X - 24)
+    end
+
+    if barWidth <= 0 then
+        -- Try again next heartbeat/frame rather than collapsing icons to 1px forever.
+        task.defer(function()
+            if self.state and self.state.alive then
+                self:_taskbarResize()
+            end
+        end)
+        return
+    end
+
+    local totalGap = gap * math.max(0, count - 1)
     local widthEach = math.floor((barWidth - totalGap) / count)
-    local size = math.max(1, math.min(maxHeight, widthEach))
+    local size = math.max(minHeight, math.min(maxHeight, widthEach))
 
     for _, b in ipairs(buttons) do
         b.Size = UDim2.fromOffset(size, size)
+        b.TextSize = math.max(10, math.min(18, size - 6))
     end
 end
 
@@ -1686,6 +1703,7 @@ function MeerlyWin95:_buildDefaultPages()
     end)
 
     self:selectPage("Theme")
+    self:_taskbarResize()
 end
 
 function MeerlyWin95:_wireCoreBindings()
