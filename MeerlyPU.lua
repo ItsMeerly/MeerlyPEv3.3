@@ -57,6 +57,9 @@ local backgroundMode = false
 local windowFocused = true
 local disable3D = false
 local muteSounds = false
+local hideDisappearEntities = false
+local disappearVisualCache = setmetatable({}, { __mode = "k" })
+local disappearWatchConnections = {}
 
 local heartbeatLagThreshold = 1.5
 local watchdogThreshold = 4
@@ -1022,6 +1025,146 @@ memoryText.TextSize = 13
 memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
+local function cacheDisappearProperty(inst, key, value)
+    local cached = disappearVisualCache[inst]
+    if not cached then
+        cached = {}
+        disappearVisualCache[inst] = cached
+    end
+    if cached[key] == nil then
+        cached[key] = value
+    end
+end
+
+local function setDisappearVisualState(inst, hide)
+    if not inst or not inst.Parent then
+        return
+    end
+
+    if inst:IsA("BasePart") then
+        if hide then
+            cacheDisappearProperty(inst, "LocalTransparencyModifier", inst.LocalTransparencyModifier)
+            inst.LocalTransparencyModifier = 1
+        else
+            local cached = disappearVisualCache[inst]
+            if cached and cached.LocalTransparencyModifier ~= nil then
+                inst.LocalTransparencyModifier = cached.LocalTransparencyModifier
+            end
+        end
+    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+        if hide then
+            cacheDisappearProperty(inst, "Transparency", inst.Transparency)
+            inst.Transparency = 1
+        else
+            local cached = disappearVisualCache[inst]
+            if cached and cached.Transparency ~= nil then
+                inst.Transparency = cached.Transparency
+            end
+        end
+    elseif inst:IsA("BillboardGui") or inst:IsA("SurfaceGui") then
+        if hide then
+            cacheDisappearProperty(inst, "Enabled", inst.Enabled)
+            inst.Enabled = false
+        else
+            local cached = disappearVisualCache[inst]
+            if cached and cached.Enabled ~= nil then
+                inst.Enabled = cached.Enabled
+            end
+        end
+    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") then
+        if hide then
+            cacheDisappearProperty(inst, "Enabled", inst.Enabled)
+            inst.Enabled = false
+        else
+            local cached = disappearVisualCache[inst]
+            if cached and cached.Enabled ~= nil then
+                inst.Enabled = cached.Enabled
+            end
+        end
+    end
+end
+
+local function setDisappearRecursive(root, hide)
+    if not root then
+        return
+    end
+
+    pcall(function()
+        setDisappearVisualState(root, hide)
+    end)
+
+    for _, desc in ipairs(root:GetDescendants()) do
+        pcall(function()
+            setDisappearVisualState(desc, hide)
+        end)
+    end
+end
+
+local function hasDisappearAncestor(inst)
+    local current = inst
+    while current and current ~= game do
+        if current.Name == "Disappear" then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
+end
+
+local function watchDisappearRoot(root)
+    if not root then
+        return
+    end
+
+    for _, desc in ipairs(root:GetDescendants()) do
+        if desc.Name == "Disappear" then
+            setDisappearRecursive(desc, true)
+        end
+    end
+
+    disappearWatchConnections[#disappearWatchConnections + 1] = root.DescendantAdded:Connect(function(desc)
+        if not hideDisappearEntities then
+            return
+        end
+
+        if desc.Name == "Disappear" then
+            setDisappearRecursive(desc, true)
+            return
+        end
+
+        if hasDisappearAncestor(desc) then
+            pcall(function()
+                setDisappearVisualState(desc, true)
+            end)
+        end
+    end)
+end
+
+local function setDisappearHider(enabled)
+    hideDisappearEntities = enabled
+
+    if enabled then
+        watchDisappearRoot(Workspace)
+        watchDisappearRoot(player:FindFirstChild("PlayerScripts"))
+        log("Disappear hider enabled (existing + new clones)")
+    else
+        for _, conn in ipairs(disappearWatchConnections) do
+            if conn then
+                conn:Disconnect()
+            end
+        end
+        table.clear(disappearWatchConnections)
+
+        for inst in pairs(disappearVisualCache) do
+            pcall(function()
+                setDisappearVisualState(inst, false)
+            end)
+        end
+
+        log("Disappear hider disabled (restored cached visuals)")
+    end
+end
+
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- Utility tab: session safety / quality-of-life actions.
@@ -1055,6 +1198,10 @@ makeToggle("Disable 3D Rendering", disable3D, function(v)
     else
         log("3D render toggle unsupported")
     end
+end, "Utility")
+
+makeToggle("Hide Disappear Entities (Test)", hideDisappearEntities, function(v)
+    setDisappearHider(v)
 end, "Utility")
 
 makeButton("Rejoin Server", function()
@@ -1297,6 +1444,11 @@ makeButton("KILL SWITCH", function()
     if characterAddedConnection then
         pcall(function() characterAddedConnection:Disconnect() end)
         characterAddedConnection = nil
+    end
+    if hideDisappearEntities then
+        pcall(function()
+            setDisappearHider(false)
+        end)
     end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
