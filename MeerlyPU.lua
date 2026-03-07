@@ -40,7 +40,7 @@ local walkSpeedValue = 16
 local originalWalkSpeed = nil
 
 local hardcodedAccessKey = "ForLoveWithLove"
-local keychainUrl = "https://work.ink/meerly-keychain"
+local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
 
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
