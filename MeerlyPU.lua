@@ -21,6 +21,14 @@ _G.__MeerlyPerfState = _G.__MeerlyPerfState or {
     lastHeartbeat = os.clock(),
 }
 
+_G.__MeerlyPURuntime = _G.__MeerlyPURuntime or {}
+
+if typeof(_G.__MeerlyPURuntime.shutdown) == "function" then
+    pcall(function()
+        _G.__MeerlyPURuntime.shutdown("reloaded")
+    end)
+end
+
 local running = true
 local destroyRequested = false
 local uiVisible = true
@@ -52,11 +60,15 @@ local windowFocusedConnection = nil
 local windowFocusReleasedConnection = nil
 local inputBeganConnection = nil
 
+local function makeWeakKeyTable()
+    return setmetatable({}, { __mode = "k" })
+end
+
 local trackedCharacter = nil
-local trackedWeapons = {}
-local trackedWeaponPartState = {}
-local trackedWeaponDamageState = {}
-local otherPlayerWeaponPartState = {}
+local trackedWeapons = makeWeakKeyTable()
+local trackedWeaponPartState = makeWeakKeyTable()
+local trackedWeaponDamageState = makeWeakKeyTable()
+local otherPlayerWeaponPartState = makeWeakKeyTable()
 
 local backgroundMode = false
 local windowFocused = true
@@ -75,6 +87,8 @@ local memoryGuardMode = "Off" -- Off | AutoRejoin | AutoQuit
 local memoryGuardCapGB = 10
 local memoryGuardCooldown = 30
 local lastMemoryGuardAction = 0
+local lastGcSweep = 0
+local gcSweepInterval = 30
 
 local log
 
@@ -328,7 +342,7 @@ local function applyOtherPlayersWeaponHiding()
                 setPartHiddenLocal(part, false, otherPlayerWeaponPartState)
             end
         end
-        otherPlayerWeaponPartState = {}
+        otherPlayerWeaponPartState = makeWeakKeyTable()
     end
 
     return hiddenCount
@@ -464,9 +478,9 @@ end
 -- Why: respawns swap the character instance, so old connections/state must be reset.
 local function bindCharacterForWeapons(character)
     trackedCharacter = character
-    trackedWeapons = {}
-    trackedWeaponPartState = {}
-    trackedWeaponDamageState = {}
+    trackedWeapons = makeWeakKeyTable()
+    trackedWeaponPartState = makeWeakKeyTable()
+    trackedWeaponDamageState = makeWeakKeyTable()
     originalWalkSpeed = nil
 
     if weaponChildAddedConnection then
@@ -502,6 +516,17 @@ local function pruneTrackedWeaponStateTables()
             trackedWeaponDamageState[instance] = nil
         end
     end
+end
+
+local function runMemorySweep(now)
+    if now - lastGcSweep < gcSweepInterval then
+        return
+    end
+
+    lastGcSweep = now
+    pcall(function()
+        collectgarbage("collect")
+    end)
 end
 
 -- WalkSpeed override helper. Some games reset WalkSpeed frequently, so we re-apply on a loop.
@@ -1454,8 +1479,15 @@ makeInput("Memory Cap (GB)", tostring(memoryGuardCapGB), function(text)
     return tostring(memoryGuardCapGB)
 end, "Memory")
 
--- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
-makeButton("KILL SWITCH", function()
+makeInput("GC Sweep Seconds (10-120)", tostring(gcSweepInterval), function(text)
+    local v = tonumber(text)
+    if v and v >= 10 and v <= 120 then
+        gcSweepInterval = math.floor(v)
+    end
+    return tostring(gcSweepInterval)
+end, "Memory")
+
+local function requestShutdown(reason)
     if destroyRequested then return end
     destroyRequested = true
     running = false
@@ -1503,7 +1535,22 @@ makeButton("KILL SWITCH", function()
     end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
-    log("UI destroyed")
+
+    _G.__MeerlyPURuntime = {}
+    pcall(function()
+        collectgarbage("collect")
+    end)
+
+    if reason ~= "reloaded" then
+        log("UI destroyed")
+    end
+end
+
+_G.__MeerlyPURuntime.shutdown = requestShutdown
+
+-- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
+makeButton("KILL SWITCH", function()
+    requestShutdown("killswitch")
 end, "Utility")
 
 windowFocusedConnection = UserInputService.WindowFocused:Connect(function()
@@ -1606,6 +1653,7 @@ task.spawn(function()
         task.wait(5)
         local now = os.clock()
         local combinedGb = getCombinedMemoryGb()
+        runMemorySweep(now)
 
         if memoryGuardMode ~= "Off" and combinedGb >= memoryGuardCapGB and (now - lastMemoryGuardAction) >= memoryGuardCooldown then
             lastMemoryGuardAction = now
