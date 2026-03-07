@@ -16,6 +16,7 @@ local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Stats = game:GetService("Stats")
 local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 
@@ -33,6 +34,26 @@ local fpsCapEnabled = false
 local targetFPS = 60
 local lowGraphicsEnabled = false
 local streamingOptimized = false
+local aggressiveFxCullEnabled = false
+local hideTrackedWeaponParts = false
+local weaponDamageOverrideEnabled = false
+local weaponDamageOverride = 25
+local hideOtherPlayersWeapons = false
+local otherPlayersHidePassSeconds = 10
+local walkSpeedOverrideEnabled = false
+local walkSpeedValue = 16
+local originalWalkSpeed = nil
+
+local fxCullConnection = nil
+local weaponChildAddedConnection = nil
+local weaponChildRemovedConnection = nil
+local characterAddedConnection = nil
+
+local trackedCharacter = nil
+local trackedWeapons = {}
+local trackedWeaponPartState = {}
+local trackedWeaponDamageState = {}
+local otherPlayerWeaponPartState = {}
 
 local backgroundMode = false
 local windowFocused = true
@@ -47,6 +68,8 @@ local memoryGuardMode = "Off" -- Off | AutoRejoin | AutoQuit
 local memoryGuardCapGB = 10
 local memoryGuardCooldown = 30
 local lastMemoryGuardAction = 0
+
+local log
 
 local uiTheme = {
     bg = Color3.fromRGB(18, 18, 24),
@@ -107,6 +130,7 @@ end
 local function applyVisuals(disable)
     Lighting.GlobalShadows = not disable
     Lighting.FogEnd = disable and 1e6 or 100000
+    pcall(function() settings().Rendering.QualityLevel = disable and Enum.QualityLevel.Level01 or Enum.QualityLevel.Automatic end)
     for _, obj in ipairs(Lighting:GetChildren()) do
         if obj:IsA("BlurEffect") then
             obj.Enabled = false
@@ -114,6 +138,304 @@ local function applyVisuals(disable)
         elseif obj:IsA("PostEffect") then
             obj.Enabled = not disable
         end
+    end
+end
+
+local function disableFxObject(obj)
+    if obj:IsA("ParticleEmitter") then
+        obj.Enabled = false
+        obj.Rate = 0
+    elseif obj:IsA("Trail") or obj:IsA("Beam") then
+        obj.Enabled = false
+    elseif obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+        obj.Enabled = false
+    elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+        obj.Enabled = false
+    end
+end
+
+local function applyAggressiveFxCull(enabled)
+    if enabled then
+        if fxCullConnection then
+            fxCullConnection:Disconnect()
+        end
+
+        local disabledCount = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+                or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")
+                or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                disableFxObject(obj)
+                disabledCount += 1
+            end
+        end
+
+        fxCullConnection = Workspace.DescendantAdded:Connect(function(obj)
+            disableFxObject(obj)
+        end)
+
+        log(string.format("Aggressive FX cull enabled (%d effects disabled)", disabledCount))
+    else
+        if fxCullConnection then
+            fxCullConnection:Disconnect()
+            fxCullConnection = nil
+        end
+        log("Aggressive FX cull disabled (existing disabled effects stay off)")
+    end
+end
+
+local characterNonWeaponNames = {
+    ["Animate"] = true,
+    ["Humanoid"] = true,
+    ["HumanoidRootPart"] = true,
+    ["Head"] = true,
+    ["Torso"] = true,
+    ["UpperTorso"] = true,
+    ["LowerTorso"] = true,
+    ["Left Arm"] = true,
+    ["Right Arm"] = true,
+    ["Left Leg"] = true,
+    ["Right Leg"] = true,
+    ["LeftHand"] = true,
+    ["RightHand"] = true,
+    ["LeftFoot"] = true,
+    ["RightFoot"] = true,
+    ["LeftLowerArm"] = true,
+    ["RightLowerArm"] = true,
+    ["LeftUpperArm"] = true,
+    ["RightUpperArm"] = true,
+    ["LeftLowerLeg"] = true,
+    ["RightLowerLeg"] = true,
+    ["LeftUpperLeg"] = true,
+    ["RightUpperLeg"] = true,
+    ["Body Colors"] = true,
+    ["BodyColors"] = true,
+    ["Shirt"] = true,
+    ["Pants"] = true,
+    ["Shirt Graphic"] = true,
+    ["Health"] = true,
+}
+
+local function isLikelyWeaponContainerForCharacter(character, obj)
+    if not character or obj.Parent ~= character then
+        return false
+    end
+    if characterNonWeaponNames[obj.Name] then
+        return false
+    end
+    if obj:IsA("Accessory") or obj:IsA("Clothing") or obj:IsA("BodyColors") then
+        return false
+    end
+    if obj:IsA("Tool") then
+        return true
+    end
+    if typeof(obj:GetAttribute("Damage")) == "number" then
+        return true
+    end
+
+    local hasPart = obj:IsA("BasePart")
+    if not hasPart then
+        hasPart = obj:FindFirstChildWhichIsA("BasePart", true) ~= nil
+    end
+
+    return hasPart
+end
+
+local function setPartHiddenLocal(part, hide, stateTable)
+    local state = stateTable[part]
+    if not state then
+        state = { localTransparencyModifier = part.LocalTransparencyModifier }
+        stateTable[part] = state
+    end
+
+    if hide then
+        part.LocalTransparencyModifier = 1
+    else
+        part.LocalTransparencyModifier = state.localTransparencyModifier or 0
+    end
+end
+
+local function applyOtherPlayersWeaponHiding()
+    local hiddenCount = 0
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= player and other.Character then
+            for _, child in ipairs(other.Character:GetChildren()) do
+                if isLikelyWeaponContainerForCharacter(other.Character, child) then
+                    if child:IsA("BasePart") then
+                        setPartHiddenLocal(child, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
+                        hiddenCount += 1
+                    end
+                    for _, descendant in ipairs(child:GetDescendants()) do
+                        if descendant:IsA("BasePart") then
+                            setPartHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
+                            hiddenCount += 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not hideOtherPlayersWeapons then
+        for part in pairs(otherPlayerWeaponPartState) do
+            if part and part.Parent then
+                setPartHiddenLocal(part, false, otherPlayerWeaponPartState)
+            end
+        end
+        otherPlayerWeaponPartState = {}
+    end
+
+    return hiddenCount
+end
+
+local function isLikelyWeaponContainer(obj)
+    return isLikelyWeaponContainerForCharacter(trackedCharacter, obj)
+end
+
+local function applyWeaponPartState(part)
+    local state = trackedWeaponPartState[part]
+    if not state then
+        state = {
+            transparency = part.Transparency,
+            canCollide = part.CanCollide,
+        }
+        trackedWeaponPartState[part] = state
+    end
+
+    if hideTrackedWeaponParts then
+        part.LocalTransparencyModifier = 1
+        part.CanCollide = false
+    else
+        part.LocalTransparencyModifier = 0
+        part.Transparency = state.transparency
+        part.CanCollide = state.canCollide
+    end
+end
+
+local function applyDamageState(instance)
+    if weaponDamageOverrideEnabled then
+        local state = trackedWeaponDamageState[instance]
+        if state == nil then
+            state = instance:GetAttribute("Damage")
+            trackedWeaponDamageState[instance] = state
+        end
+        instance:SetAttribute("Damage", weaponDamageOverride)
+    else
+        if trackedWeaponDamageState[instance] ~= nil then
+            instance:SetAttribute("Damage", trackedWeaponDamageState[instance])
+        end
+    end
+end
+
+local function applyWeaponState(container)
+    if container:IsA("BasePart") then
+        applyWeaponPartState(container)
+    end
+
+    if container:GetAttribute("Damage") ~= nil then
+        applyDamageState(container)
+    end
+
+    for _, descendant in ipairs(container:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            applyWeaponPartState(descendant)
+        end
+        if descendant:GetAttribute("Damage") ~= nil then
+            applyDamageState(descendant)
+        end
+    end
+end
+
+local function trackWeapon(container)
+    if trackedWeapons[container] then
+        applyWeaponState(container)
+        return
+    end
+
+    trackedWeapons[container] = true
+    applyWeaponState(container)
+    log("Tracked weapon: " .. container.Name)
+end
+
+local function untrackWeapon(container)
+    if not trackedWeapons[container] then
+        return
+    end
+
+    trackedWeapons[container] = nil
+
+    if container:IsA("BasePart") then
+        trackedWeaponPartState[container] = nil
+        trackedWeaponDamageState[container] = nil
+    end
+
+    for _, descendant in ipairs(container:GetDescendants()) do
+        trackedWeaponPartState[descendant] = nil
+        trackedWeaponDamageState[descendant] = nil
+    end
+end
+
+local function rescanCharacterWeapons(silent)
+    if not trackedCharacter then
+        return
+    end
+
+    local trackedCount = 0
+    for _, child in ipairs(trackedCharacter:GetChildren()) do
+        if isLikelyWeaponContainer(child) then
+            trackWeapon(child)
+            trackedCount += 1
+        end
+    end
+
+    if not silent then
+        log(string.format("Weapon scan complete: %d tracked", trackedCount))
+    end
+end
+
+local function bindCharacterForWeapons(character)
+    trackedCharacter = character
+    trackedWeapons = {}
+    trackedWeaponPartState = {}
+    trackedWeaponDamageState = {}
+    originalWalkSpeed = nil
+
+    if weaponChildAddedConnection then
+        weaponChildAddedConnection:Disconnect()
+    end
+    if weaponChildRemovedConnection then
+        weaponChildRemovedConnection:Disconnect()
+    end
+
+    weaponChildAddedConnection = character.ChildAdded:Connect(function(child)
+        if isLikelyWeaponContainer(child) then
+            task.wait()
+            trackWeapon(child)
+        end
+    end)
+
+    weaponChildRemovedConnection = character.ChildRemoved:Connect(function(child)
+        untrackWeapon(child)
+    end)
+
+    rescanCharacterWeapons()
+end
+
+local function applyWalkSpeed()
+    local character = player.Character
+    if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    if originalWalkSpeed == nil then
+        originalWalkSpeed = humanoid.WalkSpeed
+    end
+
+    if walkSpeedOverrideEnabled then
+        humanoid.WalkSpeed = walkSpeedValue
+    elseif originalWalkSpeed ~= nil then
+        humanoid.WalkSpeed = originalWalkSpeed
     end
 end
 
@@ -201,7 +523,7 @@ logBox.Text = "[System] Ready"
 makeCorner(logBox, 6)
 makeStroke(logBox)
 
-local function log(msg)
+log = function(msg)
     local line = string.format("[%s] %s", os.date("%H:%M:%S"), tostring(msg))
     logBox.Text = line
     print("[MeerlyPerf]", msg)
@@ -428,6 +750,81 @@ makeToggle("Streaming Optimization", streamingOptimized, function(v)
     end
 end)
 
+makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
+    aggressiveFxCullEnabled = v
+    applyAggressiveFxCull(v)
+end)
+
+makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
+    hideTrackedWeaponParts = v
+    for weapon in pairs(trackedWeapons) do
+        applyWeaponState(weapon)
+    end
+    log(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
+end)
+
+makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
+    weaponDamageOverrideEnabled = v
+    for weapon in pairs(trackedWeapons) do
+        applyWeaponState(weapon)
+    end
+    log(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
+end)
+
+makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
+    local v = tonumber(text)
+    if v then
+        weaponDamageOverride = v
+        if weaponDamageOverrideEnabled then
+            for weapon in pairs(trackedWeapons) do
+                applyWeaponState(weapon)
+            end
+            log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
+        end
+    end
+    return tostring(weaponDamageOverride)
+end)
+
+makeButton("Rescan Weapons", function()
+    rescanCharacterWeapons()
+end)
+
+makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
+    hideOtherPlayersWeapons = v
+    local hiddenCount = applyOtherPlayersWeaponHiding()
+    if v then
+        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
+    else
+        log("Other-player weapon hide disabled")
+    end
+end)
+
+makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
+    local v = tonumber(text)
+    if v and v >= 3 and v <= 60 then
+        otherPlayersHidePassSeconds = math.floor(v)
+    end
+    return tostring(otherPlayersHidePassSeconds)
+end)
+
+makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
+    walkSpeedOverrideEnabled = v
+    applyWalkSpeed()
+    log(v and ("WalkSpeed override enabled: " .. tostring(walkSpeedValue)) or "WalkSpeed override disabled")
+end)
+
+makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
+    local v = tonumber(text)
+    if v and v >= 1 and v <= 250 then
+        walkSpeedValue = v
+        if walkSpeedOverrideEnabled then
+            applyWalkSpeed()
+            log("WalkSpeed updated: " .. tostring(walkSpeedValue))
+        end
+    end
+    return tostring(walkSpeedValue)
+end)
+
 makeToggle("Background Survival Mode", backgroundMode, function(v)
     backgroundMode = v
     log(v and "Background mode enabled" or "Background mode disabled")
@@ -488,6 +885,22 @@ makeButton("KILL SWITCH", function()
     destroyRequested = true
     running = false
     pcall(function() safeSetFPS(0) end)
+    if fxCullConnection then
+        pcall(function() fxCullConnection:Disconnect() end)
+        fxCullConnection = nil
+    end
+    if weaponChildAddedConnection then
+        pcall(function() weaponChildAddedConnection:Disconnect() end)
+        weaponChildAddedConnection = nil
+    end
+    if weaponChildRemovedConnection then
+        pcall(function() weaponChildRemovedConnection:Disconnect() end)
+        weaponChildRemovedConnection = nil
+    end
+    if characterAddedConnection then
+        pcall(function() characterAddedConnection:Disconnect() end)
+        characterAddedConnection = nil
+    end
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
     log("UI destroyed")
@@ -606,6 +1019,40 @@ task.spawn(function()
             elseif memoryGuardMode == "AutoQuit" then
                 pcall(function() player:Kick("AutoQuit: memory cap exceeded") end)
             end
+        end
+    end
+end)
+
+if player.Character then
+    bindCharacterForWeapons(player.Character)
+end
+
+characterAddedConnection = player.CharacterAdded:Connect(function(character)
+    task.wait(0.15)
+    bindCharacterForWeapons(character)
+end)
+
+task.spawn(function()
+    while running do
+        task.wait(3)
+        rescanCharacterWeapons(true)
+    end
+end)
+
+task.spawn(function()
+    while running do
+        task.wait(otherPlayersHidePassSeconds)
+        if hideOtherPlayersWeapons then
+            applyOtherPlayersWeaponHiding()
+        end
+    end
+end)
+
+task.spawn(function()
+    while running do
+        task.wait(0.75)
+        if walkSpeedOverrideEnabled then
+            applyWalkSpeed()
         end
     end
 end)
