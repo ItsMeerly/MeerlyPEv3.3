@@ -807,9 +807,10 @@ createTab("Weapons")
 createTab("Player")
 createTab("Memory")
 createTab("Utility")
+createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "Performance", "Weapons", "Player", "Memory", "Utility" }
+local tabNames = { "Performance", "Weapons", "Player", "Memory", "Utility", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -962,6 +963,35 @@ local function makeButton(text, onClick, tabName)
     return btn
 end
 
+local function makeSectionLabel(text, tabName)
+    local row = newRow(30, tabName)
+    row.BackgroundTransparency = 1
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(1, -8, 1, 0)
+    label.Position = UDim2.fromOffset(8, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 12
+    label.TextColor3 = uiTheme.subtle
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = text
+    return label
+end
+
+local function clearTabRows(tabName)
+    local page = tabPages[tabName]
+    if not page then
+        return
+    end
+    for _, child in ipairs(page:GetChildren()) do
+        if not child:IsA("UIListLayout") then
+            child:Destroy()
+        end
+    end
+end
+
 local memoryGui = Instance.new("ScreenGui")
 memoryGui.Name = "MeerlyPE_PerfStability_Memory"
 memoryGui.ResetOnSpawn = false
@@ -1042,6 +1072,63 @@ makeButton("Rejoin Server", function()
         end
     end)
 end, "Utility")
+
+local function teleportToWorldSpawn(spawnObject)
+    local character = player.Character or player.CharacterAdded:Wait()
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then
+        log("Teleport failed: HumanoidRootPart not found")
+        return
+    end
+
+    local targetCFrame
+    if spawnObject:IsA("BasePart") then
+        targetCFrame = spawnObject.CFrame
+    elseif spawnObject:IsA("Model") then
+        targetCFrame = spawnObject:GetPivot()
+    end
+
+    if not targetCFrame then
+        log("Teleport failed: unsupported spawn object type")
+        return
+    end
+
+    rootPart.CFrame = targetCFrame + Vector3.new(0, 4, 0)
+end
+
+local function populateTeleportsTab()
+    clearTabRows("Teleports")
+    makeSectionLabel("World Teleports (workspace.Areas.<world>.SPAWNS.SPAWN)", "Teleports")
+    makeButton("Refresh World Spawns", function()
+        populateTeleportsTab()
+        log("World spawn list refreshed")
+    end, "Teleports")
+
+    local areasFolder = Workspace:FindFirstChild("Areas")
+    if not areasFolder then
+        makeSectionLabel("workspace.Areas not found.", "Teleports")
+        return
+    end
+
+    local spawnCount = 0
+    for _, worldFolder in ipairs(areasFolder:GetChildren()) do
+        local spawnsFolder = worldFolder:FindFirstChild("SPAWNS")
+        local spawnObject = spawnsFolder and spawnsFolder:FindFirstChild("SPAWN")
+        if spawnObject then
+            spawnCount += 1
+            makeButton("Teleport: " .. worldFolder.Name, function()
+                teleportToWorldSpawn(spawnObject)
+                log("Teleported to world spawn: " .. worldFolder.Name)
+            end, "Teleports")
+        end
+    end
+
+    if spawnCount == 0 then
+        makeSectionLabel("No world spawn entries found.", "Teleports")
+    end
+end
+
+populateTeleportsTab()
 
 -- Performance tab: rendering and frame-time controls.
 makeToggle("FPS Cap", fpsCapEnabled, function(v)
