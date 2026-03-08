@@ -22,7 +22,7 @@ local CONFIG = {
     LibraryRawUrl = "https://raw.githubusercontent.com/ItsMeerly/MeerlyScriptHub/refs/heads/main/MeerlyWin95UILibrary.lua",
     -- Optional: when true, also probes common raw GitHub URLs for the library file.
     UseDefaultRawFallbacks = true,
-    AccessKey = "1234",
+    AccessKey = "JoinOathGuildToday!",
     AccessLink = "https://work.ink/2kaV/meerlype-key123",
     Title = "Meerly Win95 + PE Automation/Calculators",
     ToggleKey = Enum.KeyCode.Semicolon,
