@@ -151,8 +151,21 @@ local function loadWin95Library()
 
     assert(source, "Failed to load Win95 library source. Tried: " .. table.concat(tried, ", "))
 
-    source = source:gsub('local HARDCODED_KEY = ".-"', 'local HARDCODED_KEY = "' .. escapeLuaString(CONFIG.AccessKey) .. '"')
-    source = source:gsub('local KEY_LINK = ".-"', 'local KEY_LINK = "' .. escapeLuaString(CONFIG.AccessLink) .. '"')
+    local accessKeyEscaped = escapeLuaString(CONFIG.AccessKey)
+    local accessLinkEscaped = escapeLuaString(CONFIG.AccessLink)
+
+    local keyPattern = 'local%s+HARDCODED_KEY%s*=%s*"[^"]*"'
+    local linkPattern = 'local%s+KEY_LINK%s*=%s*"[^"]*"'
+
+    local keyReplacements
+    source, keyReplacements = source:gsub(keyPattern, 'local HARDCODED_KEY = "' .. accessKeyEscaped .. '"', 1)
+
+    local linkReplacements
+    source, linkReplacements = source:gsub(linkPattern, 'local KEY_LINK = "' .. accessLinkEscaped .. '"', 1)
+
+    assert(keyReplacements > 0, "Failed to patch HARDCODED_KEY in Win95 library source")
+    assert(linkReplacements > 0, "Failed to patch KEY_LINK in Win95 library source")
+
     source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
 
     local chunk = assert(loadstring(source), "Failed to compile Win95 library")
