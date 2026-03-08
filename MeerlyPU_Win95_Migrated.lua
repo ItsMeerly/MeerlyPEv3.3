@@ -151,15 +151,54 @@ local function loadWin95Library()
 
     assert(source, "Failed to load Win95 library source. Tried: " .. table.concat(tried, ", "))
 
-    source = source:gsub(
-        'local HARDCODED_KEY = ".-"',
-        'local HARDCODED_KEY = "' .. escapeLuaString(CONFIG.AccessKey) .. '"'
-    )
+    local escapedKey = escapeLuaString(CONFIG.AccessKey)
+    local escapedLink = escapeLuaString(CONFIG.AccessLink)
 
-    source = source:gsub(
-        'local KEY_LINK = ".-"',
-        'local KEY_LINK = "' .. escapeLuaString(CONFIG.AccessLink) .. '"'
-    )
+    local keyPatched = false
+    local linkPatched = false
+
+    local keyPatterns = {
+        'local%s+HARDCODED_KEY%s*=%s*".-"',
+        "local%s+HARDCODED_KEY%s*=%s*'.-'",
+    }
+
+    for _, pattern in ipairs(keyPatterns) do
+        local replaced
+        source, replaced = source:gsub(pattern, 'local HARDCODED_KEY = "' .. escapedKey .. '"', 1)
+        if replaced > 0 then
+            keyPatched = true
+            break
+        end
+    end
+
+    if not keyPatched then
+        local replaced
+        source, replaced = source:gsub('MEERLY%-ACCESS%-KEY', escapedKey, 1)
+        keyPatched = replaced > 0
+    end
+
+    local linkPatterns = {
+        'local%s+KEY_LINK%s*=%s*".-"',
+        "local%s+KEY_LINK%s*=%s*'.-'",
+    }
+
+    for _, pattern in ipairs(linkPatterns) do
+        local replaced
+        source, replaced = source:gsub(pattern, 'local KEY_LINK = "' .. escapedLink .. '"', 1)
+        if replaced > 0 then
+            linkPatched = true
+            break
+        end
+    end
+
+    if not linkPatched then
+        local replaced
+        source, replaced = source:gsub('https://example%.com/get%-key', escapedLink, 1)
+        linkPatched = replaced > 0
+    end
+
+    assert(keyPatched, "Failed to patch HARDCODED_KEY in Win95 library source")
+    assert(linkPatched, "Failed to patch KEY_LINK in Win95 library source")
 
     source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
 
