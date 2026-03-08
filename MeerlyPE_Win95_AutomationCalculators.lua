@@ -18,11 +18,11 @@ local player = Players.LocalPlayer
 local CONFIG = {
     LibraryPath = "MeerlyWin95UILibrary.lua",
     -- Optional remote fallback. Example:
-    LibraryRawUrl = "https://raw.githubusercontent.com/ItsMeerly/MeerlyScriptHub/refs/heads/main/MeerlyWin95UILibrary.lua",
-    -- LibraryRawUrl = nil,
+    -- LibraryRawUrl = "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/MeerlyWin95UILibrary.lua",
+    LibraryRawUrl = nil,
     AccessKey = "1234",
     AccessLink = "https://work.ink/2kaV/meerlype-key123",
-    Title = "MeerlyPE Win95",
+    Title = "Meerly Win95 + PE Automation/Calculators",
     ToggleKey = Enum.KeyCode.Semicolon,
 }
 
@@ -109,6 +109,10 @@ local function loadWin95Library()
         'local KEY_LINK = "' .. escapeLuaString(CONFIG.AccessLink) .. '"'
     )
 
+    -- Some client builds reject ScrollingFrame.ScrollBarInset; strip this property
+    -- from the loaded source to avoid noisy runtime warnings.
+    source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
+
     local chunk = assert(loadstring(source), "Failed to compile Win95 library")
     return chunk()
 end
@@ -159,16 +163,128 @@ end
 -- ============================================================
 -- Win95 page helpers
 -- ============================================================
-local function nextStackY(holder)
-    holder._y = holder._y or 8
-    return holder._y
+local PageStackState = setmetatable({}, { __mode = "k" })
+local PageOwners = setmetatable({}, { __mode = "k" })
+
+local function bindDynamicTheme(ui, applyFn)
+    if not ui or type(applyFn) ~= "function" then
+        return
+    end
+    applyFn(ui.theme)
+    table.insert(ui.dynamicThemeParts, {
+        apply = function(theme)
+            applyFn(theme)
+        end,
+    })
 end
 
-local function advanceStackY(holder, amount)
-    holder._y = (holder._y or 8) + amount
+local function findPageOwner(obj)
+    local node = obj
+    while node do
+        local owner = PageOwners[node]
+        if owner then
+            return owner
+        end
+        node = node.Parent
+    end
+    return nil
+end
+
+local function addSimpleBevel(frame)
+    local top = Instance.new("Frame")
+    top.Name = "BevelTop"
+    top.Parent = frame
+    top.BackgroundTransparency = 0
+    top.BorderSizePixel = 0
+    top.Position = UDim2.fromOffset(0, 0)
+    top.Size = UDim2.new(1, 0, 0, 1)
+    top.ZIndex = frame.ZIndex + 1
+
+    local left = Instance.new("Frame")
+    left.Name = "BevelLeft"
+    left.Parent = frame
+    left.BackgroundTransparency = 0
+    left.BorderSizePixel = 0
+    left.Position = UDim2.fromOffset(0, 0)
+    left.Size = UDim2.new(0, 1, 1, 0)
+    left.ZIndex = frame.ZIndex + 1
+
+    local bottom = Instance.new("Frame")
+    bottom.Name = "BevelBottom"
+    bottom.Parent = frame
+    bottom.BackgroundTransparency = 0
+    bottom.BorderSizePixel = 0
+    bottom.Position = UDim2.new(0, 0, 1, -1)
+    bottom.Size = UDim2.new(1, 0, 0, 1)
+    bottom.ZIndex = frame.ZIndex + 1
+
+    local right = Instance.new("Frame")
+    right.Name = "BevelRight"
+    right.Parent = frame
+    right.BackgroundTransparency = 0
+    right.BorderSizePixel = 0
+    right.Position = UDim2.new(1, -1, 0, 0)
+    right.Size = UDim2.new(0, 1, 1, 0)
+    right.ZIndex = frame.ZIndex + 1
+
+    local ui = findPageOwner(frame)
+    bindDynamicTheme(ui, function(theme)
+        top.BackgroundColor3 = theme.bevelLight
+        left.BackgroundColor3 = theme.bevelLight
+        bottom.BackgroundColor3 = theme.bevelDark
+        right.BackgroundColor3 = theme.bevelDark
+    end)
+end
+
+local function setToggleVisual(btn, enabled)
+    local ui = findPageOwner(btn)
+    if not ui then
+        return
+    end
+    if enabled then
+        btn.BackgroundColor3 = ui.theme.accent
+        btn.TextColor3 = ui.theme.text
+    else
+        btn.BackgroundColor3 = ui.theme.window
+        btn.TextColor3 = ui.theme.text
+    end
+end
+
+local function getPageState(page)
+    local state = PageStackState[page]
+    if not state then
+        state = {
+            baseY = 8,
+            blocks = {},
+        }
+        PageStackState[page] = state
+    end
+    return state
+end
+
+local function nextStackY(page)
+    return getPageState(page).baseY
+end
+
+local function advanceStackY(page, amount)
+    local state = getPageState(page)
+    state.baseY = state.baseY + amount
+end
+
+local function registerStackBlock(page, block)
+    table.insert(getPageState(page).blocks, block)
+end
+
+local function reflowStackPage(page)
+    local state = getPageState(page)
+    local y = state.baseY
+    for _, block in ipairs(state.blocks) do
+        y += block(y)
+    end
 end
 
 local function addHeader(page, text)
+    local ui = findPageOwner(page)
     local lbl = Instance.new("TextLabel")
     lbl.Parent = page
     lbl.BackgroundTransparency = 1
@@ -178,12 +294,15 @@ local function addHeader(page, text)
     lbl.Text = text
     lbl.Size = UDim2.new(1, -24, 0, 24)
     lbl.Position = UDim2.fromOffset(8, nextStackY(page))
-    lbl.TextColor3 = Color3.fromRGB(230, 230, 230)
+    bindDynamicTheme(ui, function(theme)
+        lbl.TextColor3 = theme.text
+    end)
     advanceStackY(page, 30)
     return lbl
 end
 
 local function addAccordion(page, title, defaultOpen)
+    local ui = findPageOwner(page)
     local header = Instance.new("TextButton")
     header.Parent = page
     header.AutoButtonColor = false
@@ -225,25 +344,33 @@ local function addAccordion(page, title, defaultOpen)
     header.MouseButton1Click:Connect(function()
         open = not open
         refresh()
-        page._reflow()
+        reflowStackPage(page)
     end)
 
     layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         refresh()
-        page._reflow()
+        reflowStackPage(page)
     end)
 
-    page._registerBlock(function(y)
+    registerStackBlock(page, function(y)
         header.Position = UDim2.fromOffset(8, y)
         body.Position = UDim2.fromOffset(8, y + 26)
         return 26 + body.Size.Y.Offset + 8
     end)
 
     refresh()
+    addSimpleBevel(header)
+    addSimpleBevel(body)
+    bindDynamicTheme(ui, function(theme)
+        header.BackgroundColor3 = theme.window
+        header.TextColor3 = theme.text
+        body.BackgroundColor3 = theme.panel
+    end)
     return body
 end
 
 local function addButton(parent, text, callback)
+    local ui = findPageOwner(parent)
     local b = Instance.new("TextButton")
     b.Parent = parent
     b.Size = UDim2.new(1, 0, 0, 24)
@@ -254,6 +381,11 @@ local function addButton(parent, text, callback)
     b.Text = text
     b.TextColor3 = Color3.fromRGB(230, 230, 230)
     b.MouseButton1Click:Connect(callback)
+    addSimpleBevel(b)
+    bindDynamicTheme(ui, function(theme)
+        b.BackgroundColor3 = theme.window
+        b.TextColor3 = theme.text
+    end)
     return b
 end
 
@@ -274,6 +406,7 @@ local function addSmallRow(parent)
 end
 
 local function addSmallButton(parent, text)
+    local ui = findPageOwner(parent)
     local b = Instance.new("TextButton")
     b.Parent = parent
     b.Size = UDim2.new(0.333, -3, 1, 0)
@@ -283,10 +416,16 @@ local function addSmallButton(parent, text)
     b.TextSize = 12
     b.Text = text
     b.TextColor3 = Color3.fromRGB(230, 230, 230)
+    addSimpleBevel(b)
+    bindDynamicTheme(ui, function(theme)
+        b.BackgroundColor3 = theme.window
+        b.TextColor3 = theme.text
+    end)
     return b
 end
 
 local function addTextbox(parent, labelText, defaultText)
+    local ui = findPageOwner(parent)
     local wrap = Instance.new("Frame")
     wrap.Parent = parent
     wrap.Size = UDim2.new(1, 0, 0, 24)
@@ -313,10 +452,17 @@ local function addTextbox(parent, labelText, defaultText)
     tb.Font = Enum.Font.Code
     tb.TextSize = 12
     tb.TextColor3 = Color3.fromRGB(240, 240, 240)
+    addSimpleBevel(tb)
+    bindDynamicTheme(ui, function(theme)
+        label.TextColor3 = theme.text
+        tb.BackgroundColor3 = theme.panel
+        tb.TextColor3 = theme.text
+    end)
     return tb
 end
 
 local function addLabel(parent, text)
+    local ui = findPageOwner(parent)
     local lbl = Instance.new("TextLabel")
     lbl.Parent = parent
     lbl.BackgroundTransparency = 1
@@ -327,11 +473,14 @@ local function addLabel(parent, text)
     lbl.TextYAlignment = Enum.TextYAlignment.Top
     lbl.Size = UDim2.new(1, 0, 0, 32)
     lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    bindDynamicTheme(ui, function(theme)
+        lbl.TextColor3 = theme.subtle
+    end)
     return lbl
 end
 
 local function addSection(parent, text)
+    local ui = findPageOwner(parent)
     local lbl = Instance.new("TextLabel")
     lbl.Parent = parent
     lbl.BackgroundTransparency = 1
@@ -340,11 +489,14 @@ local function addSection(parent, text)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Size = UDim2.new(1, 0, 0, 20)
     lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(160, 210, 255)
+    bindDynamicTheme(ui, function(theme)
+        lbl.TextColor3 = theme.accent
+    end)
     return lbl
 end
 
 local function addResultLabel(parent, text)
+    local ui = findPageOwner(parent)
     local lbl = Instance.new("TextLabel")
     lbl.Parent = parent
     lbl.BackgroundTransparency = 1
@@ -353,30 +505,26 @@ local function addResultLabel(parent, text)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Size = UDim2.new(1, 0, 0, 24)
     lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    bindDynamicTheme(ui, function(theme)
+        lbl.TextColor3 = theme.subtle
+    end)
     return lbl
 end
 
-local function wireStackPage(page)
-    page._blocks = {}
-    page._registerBlock = function(block)
-        table.insert(page._blocks, block)
-    end
-
-    page._reflow = function()
-        local y = nextStackY(page)
-        for _, block in ipairs(page._blocks) do
-            y += block(y)
-        end
-    end
+local function wireStackPage(page, ui)
+    local state = getPageState(page)
+    state.baseY = 8
+    state.blocks = {}
+    PageOwners[page] = ui
 end
+
 
 -- ============================================================
 -- Injected PE Automation page
 -- ============================================================
 function MeerlyWin95:_buildPEAutomationPage()
     local page = self:addPage("Automation", "AU")
-    wireStackPage(page)
+    wireStackPage(page, self)
     addHeader(page, "Automation")
 
     self.state.peAutomation = self.state.peAutomation or {
@@ -396,6 +544,26 @@ function MeerlyWin95:_buildPEAutomationPage()
     }
 
     local st = self.state.peAutomation
+
+    self:registerStatisticProvider("Skill Activations", function()
+        local total = math.max(0, math.floor(tonumber(self.state.statisticsData.totalSkillActivations) or 0))
+        local tier = "None"
+        if total >= 50000 then tier = "Master"
+        elseif total >= 20000 then tier = "Platinum"
+        elseif total >= 10000 then tier = "Diamond"
+        elseif total >= 5000 then tier = "Gold"
+        elseif total >= 1000 then tier = "Silver"
+        elseif total >= 200 then tier = "Bronze"
+        end
+
+        return {
+            primary = tostring(total),
+            detail = "Bronze 200 | Silver 1k | Gold 5k | Diamond 10k | Platinum 20k | Master 50k",
+            order = 19,
+            tier = tier,
+        }
+    end)
+
     local staggerOrder = { "Off", "Relaxed", "Safe" }
     local staggerLabels = { Off = "10s", Relaxed = "6s", Safe = "4s" }
 
@@ -428,7 +596,7 @@ function MeerlyWin95:_buildPEAutomationPage()
         local function refresh()
             local enabled = st.skillEnabled[k]
             b.Text = k .. ": " .. (enabled and "ON" or "OFF")
-            b.BackgroundColor3 = enabled and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(b, enabled)
         end
         refresh()
         b.MouseButton1Click:Connect(function()
@@ -459,7 +627,7 @@ function MeerlyWin95:_buildPEAutomationPage()
     local function refreshAC()
         if acBtn then
             acBtn.Text = "Auto Clicker: " .. (st.autoClickerEnabled and "ON" or "OFF")
-            acBtn.BackgroundColor3 = st.autoClickerEnabled and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(acBtn, st.autoClickerEnabled)
         end
     end
     acBtn = addButton(clickBody, "Auto Clicker: OFF", function()
@@ -501,7 +669,7 @@ function MeerlyWin95:_buildPEAutomationPage()
         varBox.Text = tostring(st.cooldownVariance)
     end)
 
-    page:_reflow()
+    reflowStackPage(page)
 
     task.spawn(function()
         local staggerIndex = 1
@@ -598,7 +766,7 @@ end
 -- ============================================================
 function MeerlyWin95:_buildPECalculatorsPage()
     local page = self:addPage("Calculators", "CL")
-    wireStackPage(page)
+    wireStackPage(page, self)
     addHeader(page, "Calculators")
 
     local xpBody = addAccordion(page, "XP Calculator (v3)", true)
@@ -725,12 +893,12 @@ function MeerlyWin95:_buildPECalculatorsPage()
 
         local function refreshSkill()
             sbtn.Text = k .. ": " .. (calcSkills[k] and "ON" or "OFF")
-            sbtn.BackgroundColor3 = calcSkills[k] and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(sbtn, calcSkills[k])
         end
 
         local function refreshMult()
             mbtn.Text = skillMultiplier[k] .. "%"
-            mbtn.BackgroundColor3 = (skillMultiplier[k] == 250) and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(mbtn, skillMultiplier[k] == 250)
         end
 
         refreshSkill()
@@ -824,12 +992,12 @@ function MeerlyWin95:_buildPECalculatorsPage()
 
         local function refreshSkill()
             sbtn.Text = k .. ": " .. (bossCalcSkills[k] and "ON" or "OFF")
-            sbtn.BackgroundColor3 = bossCalcSkills[k] and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(sbtn, bossCalcSkills[k])
         end
 
         local function refreshMult()
             mbtn.Text = bossSkillMultiplier[k] .. "%"
-            mbtn.BackgroundColor3 = (bossSkillMultiplier[k] == 250) and Color3.fromRGB(72, 98, 72) or Color3.fromRGB(68, 68, 80)
+            setToggleVisual(mbtn, bossSkillMultiplier[k] == 250)
         end
 
         refreshSkill()
@@ -855,7 +1023,7 @@ function MeerlyWin95:_buildPECalculatorsPage()
     addButton(bossBody, "Recalculate", recalcBoss)
     task.defer(recalcBoss)
 
-    page:_reflow()
+    reflowStackPage(page)
 end
 
 -- Build order injection: new pages BEFORE Settings
