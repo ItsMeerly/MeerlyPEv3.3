@@ -178,14 +178,31 @@ local LEVEL_COLORS = {
 
 local CLICKER_UPGRADES = {
     { id = "Tap", name = "Tap Training", kind = "clickFlat", value = 1, baseCost = 15, growth = 1.22 },
-    { id = "Gen", name = "Generator", kind = "passiveFlat", value = 1, baseCost = 40, growth = 1.28 },
     { id = "Over", name = "Overclock", kind = "clickMult", value = 0.12, baseCost = 110, growth = 1.42 },
-    { id = "Auto", name = "Automation", kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
     { id = "Crit", name = "Crit Routine", kind = "clickMult", value = 0.06, baseCost = 260, growth = 1.36 },
+    { id = "Grip", name = "Grip Strength", kind = "clickFlat", value = 5, baseCost = 740, growth = 1.31 },
+    { id = "Burst", name = "Burst Click", kind = "clickFlat", value = 9, baseCost = 980, growth = 1.30 },
+    { id = "Momentum", name = "Momentum", kind = "clickMult", value = 0.09, baseCost = 1400, growth = 1.35 },
+    { id = "Precision", name = "Precision Grip", kind = "clickFlat", value = 18, baseCost = 2100, growth = 1.32 },
+    { id = "Combo", name = "Combo Surge", kind = "clickMult", value = 0.14, baseCost = 3200, growth = 1.34 },
+
+    { id = "Gen", name = "Generator", kind = "passiveFlat", value = 1, baseCost = 40, growth = 1.28 },
+    { id = "Auto", name = "Automation", kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
     { id = "Core", name = "Power Core", kind = "passiveMult", value = 0.07, baseCost = 320, growth = 1.38 },
     { id = "Drip", name = "Drip Feed", kind = "passiveFlat", value = 3, baseCost = 520, growth = 1.33 },
-    { id = "Grip", name = "Grip Strength", kind = "clickFlat", value = 5, baseCost = 740, growth = 1.31 },
+    { id = "Forge", name = "Forge Lines", kind = "passiveFlat", value = 7, baseCost = 960, growth = 1.30 },
+    { id = "Nexus", name = "Nexus Grid", kind = "passiveMult", value = 0.10, baseCost = 1550, growth = 1.34 },
+    { id = "Refinery", name = "Refinery", kind = "passiveFlat", value = 15, baseCost = 2600, growth = 1.31 },
+    { id = "Singularity", name = "Singularity", kind = "passiveMult", value = 0.16, baseCost = 3900, growth = 1.35 },
 }
+
+local function makeDefaultUpgradeLevels()
+    local levels = {}
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        levels[def.id] = 0
+    end
+    return levels
+end
 
 local ACHIEVEMENT_TIERS = {
     { name = "Master", color = Color3.fromRGB(255, 120, 220) },
@@ -265,6 +282,20 @@ end
 
 local function clickerUpgradeCost(def, level)
     return math.max(1, math.floor((def.baseCost * (def.growth ^ level)) + 0.5))
+end
+
+
+local function angleDeg(dy, dx)
+    local ok, val = pcall(function()
+        if math.atan2 then
+            return math.deg(math.atan2(dy, dx))
+        end
+        return math.deg(math.atan(dy, dx))
+    end)
+    if ok and val then
+        return val
+    end
+    return 0
 end
 
 local function getExecutorGlobal(name)
@@ -424,6 +455,7 @@ function MeerlyWin95.new(options)
         backgroundSurvival = false,
         zoomUnlock = false,
         fpsCounter = false,
+        memoryStatsVisible = true,
         sessionStartClock = os.clock(),
         statsProviders = {},
         afkConnection = nil,
@@ -443,7 +475,7 @@ function MeerlyWin95.new(options)
         clickerShapeProgress = 0,
         clickerShapeMilestone = 25,
         totalClicksOverTime = 0,
-        clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Crit = 0, Core = 0, Drip = 0, Grip = 0 },
+        clickerUpgradeLevels = makeDefaultUpgradeLevels(),
         statisticsData = {
             longestSessionSeconds = 0,
             totalSkillActivations = 0,
@@ -460,6 +492,9 @@ function MeerlyWin95.new(options)
         macroLoopEnabled = false,
         macroRecordConnection = nil,
         macroRecordEndConnection = nil,
+        fpsFrameSamples = {},
+        fpsSampleCursor = 1,
+        fpsLastOverlayUpdate = 0,
     }
 
     self.theme = deepCopy(THEMES[self.state.themeIndex].base)
@@ -708,6 +743,22 @@ function MeerlyWin95:_buildUI()
         Parent = playerGui
     })
 
+    self.fpsOverlayLabel = make("TextLabel", {
+        Parent = self.screenGui,
+        Size = UDim2.fromOffset(220, 54),
+        Position = UDim2.fromOffset(6, 6),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Text = "FPS: --\nAVG: --\n1% LOW: --",
+        Visible = false,
+        ZIndex = 200,
+    })
+    applyBevel(self.fpsOverlayLabel, self.theme.bevelLight, self.theme.bevelDark)
+
     self.shell = make("Frame", {
         Parent = self.screenGui,
         Size = UDim2.fromOffset(760, 520),
@@ -901,6 +952,10 @@ function MeerlyWin95:_buildUI()
             unlock.TextColor3 = theme.text
             status.TextColor3 = theme.text
             self.keyGate.BackgroundColor3 = theme.window
+            if self.fpsOverlayLabel then
+                self.fpsOverlayLabel.BackgroundColor3 = theme.panel
+                self.fpsOverlayLabel.TextColor3 = theme.text
+            end
         end,
     })
 
@@ -1321,6 +1376,7 @@ function MeerlyWin95:_snapshotConfig()
             backgroundSurvival = self.state.backgroundSurvival,
             zoomUnlock = self.state.zoomUnlock,
             fpsCounter = self.state.fpsCounter,
+            memoryStatsVisible = self.state.memoryStatsVisible,
             clickerRunning = self.state.clickerRunning,
             totalClicksOverTime = self.state.totalClicksOverTime,
         },
@@ -1345,6 +1401,10 @@ function MeerlyWin95:_loadSnapshot(data)
 
     self.theme = deepCopy(THEMES[self.state.themeIndex].base)
     self:_applyTheme()
+    if self.state.settingsActions then
+        self.state.settingsActions.updateFpsOverlay(self.state.fpsCounter)
+        self.state.settingsActions.setMemoryStatsVisible(self.state.memoryStatsVisible)
+    end
 end
 
 function MeerlyWin95:_buildConfigPage()
@@ -1715,26 +1775,111 @@ function MeerlyWin95:_buildClickerPage()
         Text = "",
         Font = Enum.Font.Code,
         TextSize = 12,
-        Size = UDim2.new(1, -24, 0, 36),
+        Size = UDim2.new(1, -160, 0, 36),
         Position = UDim2.fromOffset(8, 64),
         BackgroundTransparency = 1,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Top,
     })
 
-    local upgradesHost = make("ScrollingFrame", {
+    local shapeHost = make("Frame", {
         Parent = page,
-        Size = UDim2.new(1, -24, 1, -188),
-        Position = UDim2.fromOffset(8, 104),
+        Size = UDim2.fromOffset(142, 84),
+        Position = UDim2.new(1, -150, 0, 12),
         BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+    })
+    applyBevel(shapeHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    local shapeCanvas = make("Frame", {
+        Parent = shapeHost,
+        Size = UDim2.fromOffset(56, 56),
+        Position = UDim2.fromOffset(6, 14),
         BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    })
+
+    local shapeInfo = make("TextLabel", {
+        Parent = shapeHost,
+        Size = UDim2.new(1, -68, 1, -8),
+        Position = UDim2.fromOffset(64, 4),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Code,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextWrapped = true,
+        Text = "",
+    })
+
+    local shapeEdges = table.create(9)
+    for i = 1, 9 do
+        local edge = make("Frame", {
+            Parent = shapeCanvas,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(2, 2),
+            BorderSizePixel = 0,
+            BackgroundColor3 = self.theme.accent,
+            Visible = false,
+        })
+        shapeEdges[i] = edge
+    end
+
+    local colTitleLeft = make("TextLabel", {
+        Parent = page,
+        Text = "Click Power",
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(0.5, -14, 0, 16),
+        Position = UDim2.fromOffset(8, 104),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local colTitleRight = make("TextLabel", {
+        Parent = page,
+        Text = "Passive /s",
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(0.5, -14, 0, 16),
+        Position = UDim2.new(0.5, 6, 0, 104),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local listHeightOffset = -204
+    local leftHost = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(0.5, -14, 1, listHeightOffset),
+        Position = UDim2.fromOffset(8, 122),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
         ScrollBarThickness = 6,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0),
     })
+    applyBevel(leftHost, self.theme.bevelLight, self.theme.bevelDark)
 
-    local upgradeLayout = make("UIListLayout", {
-        Parent = upgradesHost,
+    local rightHost = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(0.5, -14, 1, listHeightOffset),
+        Position = UDim2.new(0.5, 6, 0, 122),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+        ScrollBarThickness = 6,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+    })
+    applyBevel(rightHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    make("UIListLayout", {
+        Parent = leftHost,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+    })
+    make("UIListLayout", {
+        Parent = rightHost,
         FillDirection = Enum.FillDirection.Vertical,
         SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 4),
@@ -1749,37 +1894,11 @@ function MeerlyWin95:_buildClickerPage()
     })
     applyBevel(footer, self.theme.bevelLight, self.theme.bevelDark)
 
-    local clickBtn = make("TextButton", {
-        Parent = footer,
-        Text = "Click",
-        Font = Enum.Font.Code,
-        TextSize = 12,
-        Size = UDim2.fromOffset(90, 24),
-        Position = UDim2.fromOffset(8, 8),
-        BorderSizePixel = 0,
-    })
+    local clickBtn = make("TextButton", { Parent = footer, Text = "Click", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(8, 8), BorderSizePixel = 0 })
+    local resetBtn = make("TextButton", { Parent = footer, Text = "Reset", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(106, 8), BorderSizePixel = 0 })
+    local saveBtn = make("TextButton", { Parent = footer, Text = "Save", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(204, 8), BorderSizePixel = 0 })
     applyBevel(clickBtn, self.theme.bevelLight, self.theme.bevelDark)
-
-    local resetBtn = make("TextButton", {
-        Parent = footer,
-        Text = "Reset",
-        Font = Enum.Font.Code,
-        TextSize = 12,
-        Size = UDim2.fromOffset(90, 24),
-        Position = UDim2.fromOffset(106, 8),
-        BorderSizePixel = 0,
-    })
     applyBevel(resetBtn, self.theme.bevelLight, self.theme.bevelDark)
-
-    local saveBtn = make("TextButton", {
-        Parent = footer,
-        Text = "Save",
-        Font = Enum.Font.Code,
-        TextSize = 12,
-        Size = UDim2.fromOffset(90, 24),
-        Position = UDim2.fromOffset(204, 8),
-        BorderSizePixel = 0,
-    })
     applyBevel(saveBtn, self.theme.bevelLight, self.theme.bevelDark)
 
     local footerInfo = make("TextLabel", {
@@ -1793,38 +1912,73 @@ function MeerlyWin95:_buildClickerPage()
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
-    local upgradeRows = {}
+    local clickButtons, passiveButtons = {}, {}
+
+    local function drawShape()
+        local n = math.clamp(self.state.clickerShapeVertices, 3, 9)
+        local radius = 24
+        local cx, cy = 28, 28
+        for i = 1, 9 do
+            local edge = shapeEdges[i]
+            if i <= n then
+                local a1 = ((i - 1) / n) * (2 * math.pi) - (math.pi / 2)
+                local a2 = (i / n) * (2 * math.pi) - (math.pi / 2)
+                local x1 = cx + (math.cos(a1) * radius)
+                local y1 = cy + (math.sin(a1) * radius)
+                local x2 = cx + (math.cos(a2) * radius)
+                local y2 = cy + (math.sin(a2) * radius)
+                local dx, dy = x2 - x1, y2 - y1
+                local len = math.sqrt((dx * dx) + (dy * dy))
+                edge.Visible = true
+                edge.Size = UDim2.fromOffset(math.max(2, len), 2)
+                edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                edge.Rotation = angleDeg(dy, dx)
+            else
+                edge.Visible = false
+            end
+        end
+        shapeInfo.Text = string.format("Shape: %d-gon
+Cycle: C%d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
+    end
+
     local function refresh()
         toggle.Text = "Mini Game: " .. (self.state.clickerRunning and "ON" or "OFF")
         status.Text = string.format(
-            "Score: %d | High: %d\nClick Power: %d | Passive: %d/s | Total Clicks Over Time: %d",
+            "Score: %d | High: %d
+Click Power: %d | Passive: %d/s | Total Clicks Over Time: %d",
             self.state.clickerScore,
             self.state.clickerHighScore,
             self.state.clickPower,
             self.state.passiveIncomePerSec,
             self.state.totalClicksOverTime
         )
-        footerInfo.Text = string.format("Shape: %d-gon | Cycle: %d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
+        footerInfo.Text = "Tip: Left upgrades boost click damage, right upgrades boost passive income."
+        drawShape()
 
-        for _, row in ipairs(upgradeRows) do
+        for _, row in ipairs(clickButtons) do
+            local lv = self.state.clickerUpgradeLevels[row.def.id] or 0
+            local cost = clickerUpgradeCost(row.def, lv)
+            row.button.Text = string.format("%s | Lv %d | Cost %d", row.def.name, lv, cost)
+        end
+        for _, row in ipairs(passiveButtons) do
             local lv = self.state.clickerUpgradeLevels[row.def.id] or 0
             local cost = clickerUpgradeCost(row.def, lv)
             row.button.Text = string.format("%s | Lv %d | Cost %d", row.def.name, lv, cost)
         end
     end
 
-    for _, def in ipairs(CLICKER_UPGRADES) do
+    local function makeUpgradeButton(def, host, bucket)
         local btn = make("TextButton", {
-            Parent = upgradesHost,
+            Parent = host,
             Text = def.name,
             Font = Enum.Font.Code,
             TextSize = 12,
-            Size = UDim2.new(1, -8, 0, 24),
+            Size = UDim2.new(1, -10, 0, 24),
             BorderSizePixel = 0,
             BackgroundColor3 = self.theme.window,
         })
         applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
-        table.insert(upgradeRows, { def = def, button = btn })
+        table.insert(bucket, { def = def, button = btn })
         self:_connect(btn.MouseButton1Click, function()
             if not self.state.clickerRunning then
                 return
@@ -1842,6 +1996,14 @@ function MeerlyWin95:_buildClickerPage()
         end)
     end
 
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        if def.kind == "clickFlat" or def.kind == "clickMult" then
+            makeUpgradeButton(def, leftHost, clickButtons)
+        else
+            makeUpgradeButton(def, rightHost, passiveButtons)
+        end
+    end
+
     self:_connect(toggle.MouseButton1Click, function()
         self.state.clickerRunning = not self.state.clickerRunning
         refresh()
@@ -1857,7 +2019,7 @@ function MeerlyWin95:_buildClickerPage()
 
     self:_connect(resetBtn.MouseButton1Click, function()
         self.state.clickerScore = 0
-        self.state.clickerUpgradeLevels = { Tap = 0, Gen = 0, Over = 0, Auto = 0, Crit = 0, Core = 0, Drip = 0, Grip = 0 }
+        self.state.clickerUpgradeLevels = makeDefaultUpgradeLevels()
         self.state.clickerShapeVertices = 3
         self.state.clickerShapeCycle = 0
         self.state.clickerShapeProgress = 0
@@ -1895,6 +2057,12 @@ function MeerlyWin95:_buildClickerPage()
             toggle.BackgroundColor3 = theme.window
             toggle.TextColor3 = theme.text
             status.TextColor3 = theme.text
+            shapeHost.BackgroundColor3 = theme.panel
+            shapeInfo.TextColor3 = theme.subtle
+            colTitleLeft.TextColor3 = theme.accent
+            colTitleRight.TextColor3 = theme.accent
+            leftHost.BackgroundColor3 = theme.panel
+            rightHost.BackgroundColor3 = theme.panel
             footer.BackgroundColor3 = theme.panel
             clickBtn.BackgroundColor3 = theme.window
             clickBtn.TextColor3 = theme.text
@@ -1903,7 +2071,14 @@ function MeerlyWin95:_buildClickerPage()
             saveBtn.BackgroundColor3 = theme.window
             saveBtn.TextColor3 = theme.text
             footerInfo.TextColor3 = theme.subtle
-            for _, row in ipairs(upgradeRows) do
+            for _, edge in ipairs(shapeEdges) do
+                edge.BackgroundColor3 = theme.accent
+            end
+            for _, row in ipairs(clickButtons) do
+                row.button.BackgroundColor3 = theme.window
+                row.button.TextColor3 = theme.text
+            end
+            for _, row in ipairs(passiveButtons) do
                 row.button.BackgroundColor3 = theme.window
                 row.button.TextColor3 = theme.text
             end
@@ -2249,29 +2424,24 @@ function MeerlyWin95:_setupRuntimeStatistics()
 
     self:registerStatisticProvider("Session Time", function()
         local sessionSeconds = math.max(0, math.floor(os.clock() - self.state.sessionStartClock))
+        local tier = getTierByThreshold(sessionSeconds, 2 * 3600, 6 * 3600, 10 * 3600, 14 * 3600, 16 * 3600, 20 * 3600)
         return {
             primary = formatDurationHM(sessionSeconds),
-            detail = string.format("%ds", sessionSeconds),
+            detail = "Bronze 2h | Silver 6h | Gold 10h | Diamond 14h | Platinum 16h | Master 20h",
             order = 1,
+            tier = tier,
         }
     end)
 
     self:registerStatisticProvider("Total Runtime", function()
         local sharedStart = runtime.sharedStartUnix or os.time()
         local totalSeconds = math.max(0, math.floor((tonumber(runtime.totalAccumulatedSeconds) or 0) + (os.time() - sharedStart)))
+        local tier = getTierByThreshold(totalSeconds, 8 * 3600, 24 * 3600, 72 * 3600, 168 * 3600, 336 * 3600, 720 * 3600)
         return {
             primary = formatDurationHM(totalSeconds),
-            detail = string.format("%ds", totalSeconds),
+            detail = "Bronze 8h | Silver 24h | Gold 72h | Diamond 168h | Platinum 336h | Master 720h",
             order = 2,
-        }
-    end)
-
-    self:registerStatisticProvider("Active UI Instances", function()
-        return {
-            primary = tostring(math.max(0, tonumber(runtime.activeInstances) or 0)),
-            detail = "linked runtime sessions",
-            order = 3,
-            tier = "None",
+            tier = tier,
         }
     end)
 
@@ -2302,7 +2472,7 @@ function MeerlyWin95:_setupRuntimeStatistics()
         local tier = getTierByThreshold(total, 10000, 100000, 1000000, 10000000, 50000000, 100000000)
         return {
             primary = tostring(total),
-            detail = "Tracks total manual click power earned over time",
+            detail = "Bronze 10k | Silver 100k | Gold 1m | Diamond 10m | Platinum 50m | Master 100m",
             order = 22,
             tier = tier,
         }
@@ -2385,10 +2555,9 @@ function MeerlyWin95:_renderStatisticsPage()
         local hasDetail = row.detail ~= ""
         local container = make("Frame", {
             Parent = self.statisticsList,
-            Size = UDim2.new(1, -8, 0, hasDetail and 48 or 30),
+            Size = UDim2.new(1, -8, 0, 58),
             BorderSizePixel = 0,
             BackgroundColor3 = self.theme.panel,
-            BackgroundTransparency = 0,
             ZIndex = 13,
         })
         local tierBorder = make("Frame", {
@@ -2400,11 +2569,19 @@ function MeerlyWin95:_renderStatisticsPage()
             ZIndex = 14,
         })
 
+        make("Frame", {
+            Parent = container,
+            Size = UDim2.new(0, 3, 1, 0),
+            BorderSizePixel = 0,
+            BackgroundColor3 = getTierColorByName(row.tier),
+            ZIndex = 14,
+        })
+
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0.5, -4, 1, 0),
-            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -16, 0, 18),
+            Position = UDim2.fromOffset(8, 2),
             Font = Enum.Font.Code,
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -2417,8 +2594,22 @@ function MeerlyWin95:_renderStatisticsPage()
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0.5, -6, 1, 0),
-            Position = UDim2.new(0.5, 0, 0, 0),
+            Size = UDim2.new(1, -16, 0, 16),
+            Position = UDim2.fromOffset(8, 20),
+            Font = Enum.Font.Code,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Text = row.detail,
+            ZIndex = 14,
+            TextColor3 = self.theme.subtle,
+        })
+
+        make("TextLabel", {
+            Parent = container,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -16, 0, 18),
+            Position = UDim2.fromOffset(8, 38),
             Font = Enum.Font.Code,
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Right,
@@ -2427,22 +2618,6 @@ function MeerlyWin95:_renderStatisticsPage()
             ZIndex = 14,
             TextColor3 = self.theme.accent,
         })
-
-        if row.detail ~= "" then
-            make("TextLabel", {
-                Parent = container,
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -12, 0, 12),
-                Position = UDim2.fromOffset(6, 20),
-                Font = Enum.Font.Code,
-                TextSize = 11,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Text = row.detail,
-                ZIndex = 14,
-                TextColor3 = self.theme.subtle,
-            })
-        end
-
     end
 end
 
@@ -2517,25 +2692,29 @@ end
 function MeerlyWin95:_initializeRobloxSettingsRuntime()
     local function applyPerformanceMode(mode)
         self:_safeExecutorAction("Graphics " .. tostring(mode), function()
-            local quality = {
-                ["Super Low"] = Enum.QualityLevel.Level01,
-                ["Low"] = Enum.QualityLevel.Level03,
-                ["Default"] = Enum.QualityLevel.Automatic,
-                ["Extremely High"] = Enum.QualityLevel.Level10,
+            local qualityLevels = {
+                ["Super Low"] = Enum.SavedQualitySetting.QualityLevel1,
+                ["Low"] = Enum.SavedQualitySetting.QualityLevel3,
+                ["Default"] = Enum.SavedQualitySetting.Automatic,
+                ["Extremely High"] = Enum.SavedQualitySetting.QualityLevel10,
             }
-            local target = quality[mode] or Enum.QualityLevel.Automatic
-            pcall(function()
-                settings().Rendering.QualityLevel = target
-            end)
+            local target = qualityLevels[mode] or Enum.SavedQualitySetting.Automatic
+            local userGameSettings = UserSettings():GetService("UserGameSettings")
 
-            local disableVisuals = (mode == "Super Low" or mode == "Low")
-            Lighting.GlobalShadows = not disableVisuals
-            Lighting.FogEnd = disableVisuals and 1e6 or 100000
-            for _, v in ipairs(Lighting:GetChildren()) do
-                if v:IsA("PostEffect") then
-                    v.Enabled = not disableVisuals
-                end
+            if sethiddenproperty then
+                sethiddenproperty(userGameSettings, "SavedQualityLevel", target)
             end
+
+            pcall(function()
+                userGameSettings.SavedQualityLevel = target
+            end)
+            pcall(function()
+                if target == Enum.SavedQualitySetting.Automatic then
+                    settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+                else
+                    settings().Rendering.QualityLevel = Enum.QualityLevel["Level" .. tostring(target.Value)] or Enum.QualityLevel.Automatic
+                end
+            end)
         end)
     end
 
@@ -2624,6 +2803,20 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
         end
     end
 
+
+    local function updateFpsOverlay(enabled)
+        if self.fpsOverlayLabel then
+            self.fpsOverlayLabel.Visible = enabled
+        end
+    end
+
+    local function setMemoryStatsVisible(enabled)
+        self.state.memoryStatsVisible = enabled
+        if self.state.memoryWindowFrame then
+            self.state.memoryWindowFrame.Visible = enabled
+        end
+    end
+
     self.state.settingsActions = {
         applyPerformanceMode = applyPerformanceMode,
         applyFxCulling = applyFxCulling,
@@ -2631,9 +2824,13 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
         applyBackgroundSurvival = applyBackgroundSurvival,
         applyDisable3D = applyDisable3D,
         ensureAntiAfkConnection = ensureAntiAfkConnection,
+        updateFpsOverlay = updateFpsOverlay,
+        setMemoryStatsVisible = setMemoryStatsVisible,
     }
 
     ensureAntiAfkConnection()
+    updateFpsOverlay(self.state.fpsCounter)
+    setMemoryStatsVisible(self.state.memoryStatsVisible)
 end
 
 function MeerlyWin95:_buildConsolePage()
@@ -3055,12 +3252,17 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     end)
     addToggle("FPS Counter", self.state.fpsCounter, function(v)
         self.state.fpsCounter = v
+        self.state.settingsActions.updateFpsOverlay(v)
         self:log("EVENT", "FPS Counter " .. (v and "enabled" or "disabled"))
     end)
     addButton("Rejoin Server", function()
         self:_safeExecutorAction("Rejoin Server", function()
             TeleportService:Teleport(game.PlaceId, LocalPlayer)
         end)
+    end)
+    addToggle("Memory Stats", self.state.memoryStatsVisible, function(v)
+        self.state.settingsActions.setMemoryStatsVisible(v)
+        self:log("EVENT", "Memory Stats " .. (v and "enabled" or "disabled"))
     end)
 
     addSection("Performance Settings")
@@ -3167,17 +3369,20 @@ function MeerlyWin95:_buildRobloxSettingsPage()
 end
 
 function MeerlyWin95:_buildDefaultPages()
+    self:_buildRobloxSettingsPage()
+    self:_buildMacroPage()
+    self:_buildClickerPage()
+    self:_buildStatisticsPage()
     self:_buildThemePage()
     self:_buildConfigPage()
     self:_buildConsolePage()
-    self:_buildClickerPage()
-    self:_buildMacroPage()
-    self:_buildStatisticsPage()
-    self:_buildRobloxSettingsPage()
 
     -- Memory stats floating UI (does NOT hide with main by default as requested).
     local memoryWindow, memoryBody = self:addFloatingWindow("Memory Stats", false)
     memoryWindow.Size = UDim2.fromOffset(260, 88)
+    self.state.memoryWindowFrame = memoryWindow
+    self.state.memoryWindowBody = memoryBody
+    memoryWindow.Visible = self.state.memoryStatsVisible
 
     self:_connect(RunService.Heartbeat, function()
         if not self.state.alive then
@@ -3205,7 +3410,7 @@ function MeerlyWin95:_buildDefaultPages()
         end
     end)
 
-    self:selectPage("Theme")
+    self:selectPage("Settings")
     self:_taskbarResize()
 end
 
@@ -3242,6 +3447,39 @@ function MeerlyWin95:_wireCoreBindings()
         if self.state.watchdog and dt > 1.0 then
             self:log("WARN", string.format("Watchdog heartbeat lag: %.3f", dt))
         end
+
+        local samples = self.state.fpsFrameSamples
+        local cursor = self.state.fpsSampleCursor
+        samples[cursor] = math.max(0.0001, dt)
+        cursor += 1
+        if cursor > 240 then
+            cursor = 1
+        end
+        self.state.fpsSampleCursor = cursor
+
+        if self.state.fpsCounter and self.fpsOverlayLabel then
+            local now = os.clock()
+            if now - (self.state.fpsLastOverlayUpdate or 0) >= 0.25 then
+                self.state.fpsLastOverlayUpdate = now
+                local valid = {}
+                local total = 0
+                for _, sample in ipairs(samples) do
+                    if sample and sample > 0 then
+                        valid[#valid + 1] = sample
+                        total += sample
+                    end
+                end
+                local fpsCurrent = (dt > 0) and (1 / dt) or 0
+                local fpsAvg = (#valid > 0 and (1 / (total / #valid)) or 0)
+                local onePercentLow = 0
+                if #valid > 0 then
+                    table.sort(valid)
+                    local idx = math.max(1, math.floor(#valid * 0.99))
+                    onePercentLow = 1 / valid[idx]
+                end
+                self.fpsOverlayLabel.Text = string.format("FPS: %.1f\nAVG FPS: %.1f\n1%% LOW: %.1f", fpsCurrent, fpsAvg, onePercentLow)
+            end
+        end
     end)
 
     task.spawn(function()
@@ -3250,6 +3488,18 @@ function MeerlyWin95:_wireCoreBindings()
             if self.state.selectedPage == "Statistics" then
                 self:_renderStatisticsPage()
             end
+        end
+    end)
+
+    task.spawn(function()
+        while self.state.alive do
+            task.wait(300)
+            local totalMb = 0
+            safeCall("ConsoleMemoryTick", function()
+                totalMb = Stats:GetTotalMemoryUsageMb()
+            end)
+            local luaMb = collectgarbage("count") / 1024
+            self:log("INFO", string.format("Memory Tick | Lua: %.2f MB | Total: %.2f MB", luaMb, totalMb))
         end
     end)
 end
