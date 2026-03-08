@@ -453,6 +453,8 @@ function MeerlyWin95.new(options)
         fxCulling = "Medium",
         streamOptimized = false,
         backgroundSurvival = false,
+        gcEnabled = false,
+        gcIntervalSec = 60,
         zoomUnlock = false,
         fpsCounter = false,
         memoryStatsVisible = true,
@@ -1374,6 +1376,8 @@ function MeerlyWin95:_snapshotConfig()
             fxCulling = self.state.fxCulling,
             streamOptimized = self.state.streamOptimized,
             backgroundSurvival = self.state.backgroundSurvival,
+            gcEnabled = self.state.gcEnabled,
+            gcIntervalSec = self.state.gcIntervalSec,
             zoomUnlock = self.state.zoomUnlock,
             fpsCounter = self.state.fpsCounter,
             memoryStatsVisible = self.state.memoryStatsVisible,
@@ -1855,10 +1859,19 @@ function MeerlyWin95:_buildClickerPage()
         BorderSizePixel = 0,
         BackgroundColor3 = self.theme.panel,
         ScrollBarThickness = 6,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
         CanvasSize = UDim2.new(0, 0, 0, 0),
     })
     applyBevel(leftHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    local leftContent = make("Frame", {
+        Parent = leftHost,
+        Size = UDim2.new(1, -8, 0, 0),
+        Position = UDim2.fromOffset(4, 4),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        AutomaticSize = Enum.AutomaticSize.Y,
+    })
 
     local rightHost = make("ScrollingFrame", {
         Parent = page,
@@ -1867,19 +1880,28 @@ function MeerlyWin95:_buildClickerPage()
         BorderSizePixel = 0,
         BackgroundColor3 = self.theme.panel,
         ScrollBarThickness = 6,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
         CanvasSize = UDim2.new(0, 0, 0, 0),
     })
     applyBevel(rightHost, self.theme.bevelLight, self.theme.bevelDark)
 
+    local rightContent = make("Frame", {
+        Parent = rightHost,
+        Size = UDim2.new(1, -8, 0, 0),
+        Position = UDim2.fromOffset(4, 4),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        AutomaticSize = Enum.AutomaticSize.Y,
+    })
+
     make("UIListLayout", {
-        Parent = leftHost,
+        Parent = leftContent,
         FillDirection = Enum.FillDirection.Vertical,
         SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 4),
     })
     make("UIListLayout", {
-        Parent = rightHost,
+        Parent = rightContent,
         FillDirection = Enum.FillDirection.Vertical,
         SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 4),
@@ -1918,6 +1940,16 @@ function MeerlyWin95:_buildClickerPage()
         local n = math.clamp(self.state.clickerShapeVertices, 3, 9)
         local radius = 24
         local cx, cy = 28, 28
+        local palette = {
+            Color3.fromRGB(120, 180, 255),
+            Color3.fromRGB(140, 230, 160),
+            Color3.fromRGB(255, 175, 95),
+            Color3.fromRGB(220, 135, 255),
+            Color3.fromRGB(255, 110, 145),
+            Color3.fromRGB(255, 230, 120),
+        }
+        local cycleColor = palette[(self.state.clickerShapeCycle % #palette) + 1]
+
         for i = 1, 9 do
             local edge = shapeEdges[i]
             if i <= n then
@@ -1930,6 +1962,7 @@ function MeerlyWin95:_buildClickerPage()
                 local dx, dy = x2 - x1, y2 - y1
                 local len = math.sqrt((dx * dx) + (dy * dy))
                 edge.Visible = true
+                edge.BackgroundColor3 = cycleColor
                 edge.Size = UDim2.fromOffset(math.max(2, len), 2)
                 edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
                 edge.Rotation = angleDeg(dy, dx)
@@ -1938,6 +1971,7 @@ function MeerlyWin95:_buildClickerPage()
             end
         end
         shapeInfo.Text = string.format("Shape: %d-gon\nCycle: C%d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
+        shapeInfo.TextColor3 = cycleColor
     end
 
     local function refresh()
@@ -1952,6 +1986,9 @@ function MeerlyWin95:_buildClickerPage()
         )
         footerInfo.Text = "Tip: Left upgrades boost click damage, right upgrades boost passive income."
         drawShape()
+
+        leftHost.CanvasSize = UDim2.fromOffset(0, math.max(0, leftContent.AbsoluteSize.Y + 8))
+        rightHost.CanvasSize = UDim2.fromOffset(0, math.max(0, rightContent.AbsoluteSize.Y + 8))
 
         for _, row in ipairs(clickButtons) do
             local lv = self.state.clickerUpgradeLevels[row.def.id] or 0
@@ -1996,9 +2033,9 @@ function MeerlyWin95:_buildClickerPage()
 
     for _, def in ipairs(CLICKER_UPGRADES) do
         if def.kind == "clickFlat" or def.kind == "clickMult" then
-            makeUpgradeButton(def, leftHost, clickButtons)
+            makeUpgradeButton(def, leftContent, clickButtons)
         else
-            makeUpgradeButton(def, rightHost, passiveButtons)
+            makeUpgradeButton(def, rightContent, passiveButtons)
         end
     end
 
@@ -2056,7 +2093,6 @@ function MeerlyWin95:_buildClickerPage()
             toggle.TextColor3 = theme.text
             status.TextColor3 = theme.text
             shapeHost.BackgroundColor3 = theme.panel
-            shapeInfo.TextColor3 = theme.subtle
             colTitleLeft.TextColor3 = theme.accent
             colTitleRight.TextColor3 = theme.accent
             leftHost.BackgroundColor3 = theme.panel
@@ -2550,29 +2586,12 @@ function MeerlyWin95:_renderStatisticsPage()
     end
 
     for _, row in ipairs(rows) do
-        local hasDetail = row.detail ~= ""
         local container = make("Frame", {
             Parent = self.statisticsList,
-            Size = UDim2.new(1, -8, 0, 58),
+            Size = UDim2.new(1, -8, 0, 44),
             BorderSizePixel = 0,
             BackgroundColor3 = self.theme.panel,
             ZIndex = 13,
-        })
-        local tierBorder = make("Frame", {
-            Parent = container,
-            Size = UDim2.new(0, 3, 1, 0),
-            Position = UDim2.fromOffset(0, 0),
-            BorderSizePixel = 0,
-            BackgroundColor3 = getTierColorByName(row.tier),
-            ZIndex = 14,
-        })
-
-        make("Frame", {
-            Parent = container,
-            Size = UDim2.new(0, 3, 1, 0),
-            BorderSizePixel = 0,
-            BackgroundColor3 = getTierColorByName(row.tier),
-            ZIndex = 14,
         })
 
         make("Frame", {
@@ -2586,7 +2605,7 @@ function MeerlyWin95:_renderStatisticsPage()
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, -16, 0, 18),
+            Size = UDim2.new(0.6, -8, 0, 18),
             Position = UDim2.fromOffset(8, 2),
             Font = Enum.Font.Code,
             TextSize = 13,
@@ -2600,8 +2619,22 @@ function MeerlyWin95:_renderStatisticsPage()
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
+            Size = UDim2.new(0.4, -8, 0, 18),
+            Position = UDim2.new(0.6, 0, 0, 2),
+            Font = Enum.Font.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Text = "Personal Best: " .. row.primary,
+            ZIndex = 14,
+            TextColor3 = self.theme.accent,
+        })
+
+        make("TextLabel", {
+            Parent = container,
+            BackgroundTransparency = 1,
             Size = UDim2.new(1, -16, 0, 16),
-            Position = UDim2.fromOffset(8, 20),
+            Position = UDim2.fromOffset(8, 24),
             Font = Enum.Font.Code,
             TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -2609,20 +2642,6 @@ function MeerlyWin95:_renderStatisticsPage()
             Text = row.detail,
             ZIndex = 14,
             TextColor3 = self.theme.subtle,
-        })
-
-        make("TextLabel", {
-            Parent = container,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, -16, 0, 18),
-            Position = UDim2.fromOffset(8, 38),
-            Font = Enum.Font.Code,
-            TextSize = 13,
-            TextXAlignment = Enum.TextXAlignment.Right,
-            TextYAlignment = Enum.TextYAlignment.Center,
-            Text = row.primary,
-            ZIndex = 14,
-            TextColor3 = self.theme.accent,
         })
     end
 end
@@ -3293,6 +3312,25 @@ function MeerlyWin95:_buildRobloxSettingsPage()
         self.state.settingsActions.applyBackgroundSurvival(v)
     end)
 
+    addToggle("Auto GC", self.state.gcEnabled, function(v)
+        self.state.gcEnabled = v
+        self:log("EVENT", "Auto GC " .. (v and "enabled" or "disabled"))
+    end)
+    addSlider("GC Interval (sec)", 10, 300, 5, function()
+        return self.state.gcIntervalSec
+    end, function(value, committed)
+        local rounded = math.clamp(math.floor(value + 0.5), 10, 300)
+        self.state.gcIntervalSec = rounded
+        if committed then
+            self:log("EVENT", "Auto GC interval set to " .. tostring(rounded) .. "s")
+        end
+    end, function(value)
+        if value >= 60 then
+            return string.format("%dm %02ds", math.floor(value / 60), math.floor(value % 60))
+        end
+        return string.format("%ds", value)
+    end)
+
     addSection("AFK Settings")
     addToggle("Anti-AFK (idle pulse)", self.state.antiAfk, function(v)
         self.state.antiAfk = v
@@ -3506,6 +3544,23 @@ function MeerlyWin95:_wireCoreBindings()
             end)
             local luaMb = collectgarbage("count") / 1024
             self:log("INFO", string.format("Memory Tick | Lua: %.2f MB | Total: %.2f MB", luaMb, totalMb))
+        end
+    end)
+
+    task.spawn(function()
+        local lastGc = os.clock()
+        while self.state.alive do
+            task.wait(1)
+            if self.state.gcEnabled then
+                local interval = math.clamp(tonumber(self.state.gcIntervalSec) or 60, 10, 300)
+                if (os.clock() - lastGc) >= interval then
+                    collectgarbage("collect")
+                    lastGc = os.clock()
+                    self:log("DEBUG", "Auto GC executed")
+                end
+            else
+                lastGc = os.clock()
+            end
         end
     end)
 end
