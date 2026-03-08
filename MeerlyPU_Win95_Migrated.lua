@@ -154,17 +154,39 @@ local function loadWin95Library()
     local accessKeyEscaped = escapeLuaString(CONFIG.AccessKey)
     local accessLinkEscaped = escapeLuaString(CONFIG.AccessLink)
 
-    local keyPattern = 'local%s+HARDCODED_KEY%s*=%s*"[^"]*"'
-    local linkPattern = 'local%s+KEY_LINK%s*=%s*"[^"]*"'
+    local function patchConstant(sourceText, constantName, replacementValue)
+        local replacement = string.format('local %s = "%s"', constantName, replacementValue)
+        local patterns = {
+            string.format('local%%s+%s%%s*=%%s*"[^"]*"', constantName),
+            string.format("local%%s+%s%%s*=%%s*'[^']*'", constantName),
+            string.format('%s%%s*=%%s*"[^"]*"', constantName),
+            string.format("%s%%s*=%%s*'[^']*'", constantName),
+        }
 
-    local keyReplacements
-    source, keyReplacements = source:gsub(keyPattern, 'local HARDCODED_KEY = "' .. accessKeyEscaped .. '"', 1)
+        local replacements = 0
+        for _, pattern in ipairs(patterns) do
+            sourceText, replacements = sourceText:gsub(pattern, replacement, 1)
+            if replacements > 0 then
+                return sourceText, true
+            end
+        end
 
-    local linkReplacements
-    source, linkReplacements = source:gsub(linkPattern, 'local KEY_LINK = "' .. accessLinkEscaped .. '"', 1)
+        return sourceText, false
+    end
 
-    assert(keyReplacements > 0, "Failed to patch HARDCODED_KEY in Win95 library source")
-    assert(linkReplacements > 0, "Failed to patch KEY_LINK in Win95 library source")
+    local keyPatched
+    source, keyPatched = patchConstant(source, "HARDCODED_KEY", accessKeyEscaped)
+
+    local linkPatched
+    source, linkPatched = patchConstant(source, "KEY_LINK", accessLinkEscaped)
+
+    if not keyPatched then
+        warn("[MeerlyPU_Win95_Migrated] Failed to patch HARDCODED_KEY; proceeding with library default key")
+    end
+
+    if not linkPatched then
+        warn("[MeerlyPU_Win95_Migrated] Failed to patch KEY_LINK; proceeding with library default link")
+    end
 
     source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
 
