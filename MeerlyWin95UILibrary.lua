@@ -2552,12 +2552,21 @@ function MeerlyWin95:_renderStatisticsPage()
     end
 
     for _, row in ipairs(rows) do
+        local hasDetail = row.detail ~= ""
         local container = make("Frame", {
             Parent = self.statisticsList,
             Size = UDim2.new(1, -8, 0, 58),
             BorderSizePixel = 0,
             BackgroundColor3 = self.theme.panel,
             ZIndex = 13,
+        })
+        local tierBorder = make("Frame", {
+            Parent = container,
+            Size = UDim2.new(0, 3, 1, 0),
+            Position = UDim2.fromOffset(0, 0),
+            BorderSizePixel = 0,
+            BackgroundColor3 = getTierColorByName(row.tier),
+            ZIndex = 14,
         })
 
         make("Frame", {
