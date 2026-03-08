@@ -17,6 +17,9 @@ local player = Players.LocalPlayer
 -- ============================================================
 local CONFIG = {
     LibraryPath = "MeerlyWin95UILibrary.lua",
+    -- Optional remote fallback. Example:
+    LibraryRawUrl = "https://raw.githubusercontent.com/ItsMeerly/MeerlyScriptHub/refs/heads/main/MeerlyWin95UILibrary.lua",
+    -- LibraryRawUrl = nil,
     AccessKey = "1234",
     AccessLink = "https://work.ink/2kaV/meerlype-key123",
     Title = "MeerlyPE Win95",
@@ -32,15 +35,17 @@ local function escapeLuaString(value)
 end
 
 local function loadWin95Library()
-    assert(type(readfile) == "function", "readfile is required to load local Win95 library")
-
     local tried = {}
+
     local function tryRead(path)
+        if type(readfile) ~= "function" then
+            return nil
+        end
         if not path or path == "" then
             return nil
         end
 
-        tried[#tried + 1] = path
+        tried[#tried + 1] = "file:" .. path
         local ok, result = pcall(readfile, path)
         if ok and type(result) == "string" and result ~= "" then
             return result
@@ -48,11 +53,38 @@ local function loadWin95Library()
 
         if type(result) == "string" and string.find(result, "Expected File But Got Directory", 1, true) then
             local initPath = string.gsub(path, "/+$", "") .. "/init.lua"
-            tried[#tried + 1] = initPath
+            tried[#tried + 1] = "file:" .. initPath
             local okInit, initResult = pcall(readfile, initPath)
             if okInit and type(initResult) == "string" and initResult ~= "" then
                 return initResult
             end
+        end
+
+        return nil
+    end
+
+    local function tryHttpGet(url)
+        if not url or url == "" then
+            return nil
+        end
+
+        local getter
+        if typeof(game) == "Instance" and type(game.HttpGet) == "function" then
+            getter = function(target)
+                return game:HttpGet(target)
+            end
+        elseif type(httpget) == "function" then
+            getter = httpget
+        end
+
+        if not getter then
+            return nil
+        end
+
+        tried[#tried + 1] = "url:" .. url
+        local ok, result = pcall(getter, url)
+        if ok and type(result) == "string" and result ~= "" then
+            return result
         end
 
         return nil
@@ -63,8 +95,9 @@ local function loadWin95Library()
         or tryRead("./" .. tostring(CONFIG.LibraryPath or ""))
         or tryRead("MeerlyWin95UILibrary.lua")
         or tryRead("./MeerlyWin95UILibrary.lua")
+        or tryHttpGet(CONFIG.LibraryRawUrl)
 
-    assert(source, "Failed to read Win95 library file. Tried: " .. table.concat(tried, ", "))
+    assert(source, "Failed to load Win95 library source. Tried: " .. table.concat(tried, ", "))
 
     source = source:gsub(
         'local HARDCODED_KEY = ".-"',
@@ -79,6 +112,7 @@ local function loadWin95Library()
     local chunk = assert(loadstring(source), "Failed to compile Win95 library")
     return chunk()
 end
+
 
 local MeerlyWin95 = loadWin95Library()
 
