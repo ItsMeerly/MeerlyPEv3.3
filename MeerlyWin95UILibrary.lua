@@ -56,6 +56,12 @@ _G.__MEERLY_UI_CONFIGS = _G.__MEERLY_UI_CONFIGS or {
     }
 }
 
+_G.__MEERLY_UI_RUNTIME_STATS = _G.__MEERLY_UI_RUNTIME_STATS or {
+    totalAccumulatedSeconds = 0,
+    activeInstances = 0,
+    sharedStartUnix = nil,
+}
+
 -- // -------------------------------------------------------------------------
 -- // Theme definitions (10 presets)
 -- // -------------------------------------------------------------------------
@@ -185,6 +191,27 @@ local function deepCopy(tbl)
         out[k] = deepCopy(v)
     end
     return out
+end
+
+local function formatDurationHM(totalSeconds)
+    totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+    local h = math.floor(totalSeconds / 3600)
+    local m = math.floor((totalSeconds % 3600) / 60)
+    return string.format("%dh %02dm", h, m)
+end
+
+local function getExecutorGlobal(name)
+    local value = rawget(_G, name)
+    if value ~= nil then
+        return value
+    end
+    if getgenv then
+        local ok, env = pcall(getgenv)
+        if ok and type(env) == "table" then
+            return env[name]
+        end
+    end
+    return nil
 end
 
 local function make(className, props)
@@ -330,6 +357,9 @@ function MeerlyWin95.new(options)
         backgroundSurvival = false,
         zoomUnlock = false,
         fpsCounter = false,
+        sessionStartClock = os.clock(),
+        statsProviders = {},
+        afkConnection = nil,
     }
 
     self.theme = deepCopy(THEMES[self.state.themeIndex].base)
@@ -338,6 +368,8 @@ function MeerlyWin95.new(options)
     self:_buildDefaultPages()
     self:_wireCoreBindings()
     self:_applyTheme()
+    self:_setupRuntimeStatistics()
+    self:_initializeRobloxSettingsRuntime()
     self:log("INFO", "UI initialized")
     self:log("EVENT", "Waiting for key-gate unlock")
 
@@ -1354,6 +1386,362 @@ function MeerlyWin95:_buildConfigPage()
     })
 end
 
+function MeerlyWin95:_setupRuntimeStatistics()
+    local runtime = _G.__MEERLY_UI_RUNTIME_STATS
+    runtime.activeInstances = math.max(0, tonumber(runtime.activeInstances) or 0) + 1
+    if not runtime.sharedStartUnix then
+        runtime.sharedStartUnix = os.time()
+    end
+
+    self.state.runtimeStats = runtime
+    self.state.sessionStartClock = os.clock()
+    self.state.statsProviders = {}
+
+    self:registerStatisticProvider("Session Time", function()
+        local sessionSeconds = math.max(0, math.floor(os.clock() - self.state.sessionStartClock))
+        return {
+            primary = formatDurationHM(sessionSeconds),
+            detail = string.format("%ds", sessionSeconds),
+            order = 1,
+        }
+    end)
+
+    self:registerStatisticProvider("Total Runtime", function()
+        local sharedStart = runtime.sharedStartUnix or os.time()
+        local totalSeconds = math.max(0, math.floor((tonumber(runtime.totalAccumulatedSeconds) or 0) + (os.time() - sharedStart)))
+        return {
+            primary = formatDurationHM(totalSeconds),
+            detail = string.format("%ds", totalSeconds),
+            order = 2,
+        }
+    end)
+
+    self:registerStatisticProvider("Active UI Instances", function()
+        return {
+            primary = tostring(math.max(0, tonumber(runtime.activeInstances) or 0)),
+            detail = "linked runtime sessions",
+            order = 3,
+        }
+    end)
+end
+
+function MeerlyWin95:registerStatisticProvider(name, providerFn)
+    if type(name) ~= "string" or name == "" or type(providerFn) ~= "function" then
+        return false
+    end
+
+    self.state.statsProviders[name] = providerFn
+    if self.state.selectedPage == "Statistics" then
+        self:_renderStatisticsPage()
+    end
+    return true
+end
+
+function MeerlyWin95:_collectStatisticsRows()
+    local rows = {}
+    for name, provider in pairs(self.state.statsProviders or {}) do
+        local ok, payload = pcall(provider)
+        if ok and type(payload) == "table" then
+            rows[#rows + 1] = {
+                name = name,
+                primary = tostring(payload.primary or "n/a"),
+                detail = tostring(payload.detail or ""),
+                order = tonumber(payload.order) or 999,
+            }
+        else
+            rows[#rows + 1] = {
+                name = name,
+                primary = "error",
+                detail = ok and "invalid payload" or tostring(payload),
+                order = 1000,
+            }
+        end
+    end
+
+    table.sort(rows, function(a, b)
+        if a.order == b.order then
+            return a.name < b.name
+        end
+        return a.order < b.order
+    end)
+
+    return rows
+end
+
+function MeerlyWin95:_renderStatisticsPage()
+    if not self.statisticsList then
+        return
+    end
+
+    for _, child in ipairs(self.statisticsList:GetChildren()) do
+        if not child:IsA("UIListLayout") then
+            child:Destroy()
+        end
+    end
+
+    local rows = self:_collectStatisticsRows()
+    if #rows == 0 then
+        make("TextLabel", {
+            Parent = self.statisticsList,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -8, 0, 20),
+            Font = Enum.Font.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = "No statistics providers registered",
+            ZIndex = 14,
+            TextColor3 = self.theme.subtle,
+        })
+        return
+    end
+
+    for _, row in ipairs(rows) do
+        local container = make("Frame", {
+            Parent = self.statisticsList,
+            Size = UDim2.new(1, -8, 0, 34),
+            BorderSizePixel = 0,
+            BackgroundColor3 = self.theme.panel,
+            BackgroundTransparency = 0,
+            ZIndex = 13,
+        })
+
+        make("TextLabel", {
+            Parent = container,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0.5, -4, 1, 0),
+            Position = UDim2.fromOffset(6, 0),
+            Font = Enum.Font.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Text = row.name,
+            ZIndex = 14,
+            TextColor3 = self.theme.text,
+        })
+
+        make("TextLabel", {
+            Parent = container,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0.5, -6, 1, 0),
+            Position = UDim2.new(0.5, 0, 0, 0),
+            Font = Enum.Font.Code,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Text = row.primary,
+            ZIndex = 14,
+            TextColor3 = self.theme.accent,
+        })
+
+        if row.detail ~= "" then
+            make("TextLabel", {
+                Parent = container,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -12, 0, 12),
+                Position = UDim2.fromOffset(6, 20),
+                Font = Enum.Font.Code,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = row.detail,
+                ZIndex = 14,
+                TextColor3 = self.theme.subtle,
+            })
+        end
+
+    end
+end
+
+function MeerlyWin95:_buildStatisticsPage()
+    local page = self:addPage("Statistics", "SS")
+
+    local title = make("TextLabel", {
+        Parent = page,
+        Text = "Statistics",
+        Font = Enum.Font.Code,
+        TextSize = 18,
+        Size = UDim2.new(1, -24, 0, 24),
+        Position = UDim2.fromOffset(8, 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local refresh = make("TextButton", {
+        Parent = page,
+        Text = "Refresh Stats",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.fromOffset(120, 24),
+        Position = UDim2.fromOffset(8, 36),
+        BorderSizePixel = 0,
+    })
+    applyBevel(refresh, self.theme.bevelLight, self.theme.bevelDark)
+
+    self.statisticsList = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(1, -24, 1, -72),
+        Position = UDim2.fromOffset(8, 64),
+        BorderSizePixel = 0,
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 6,
+        ScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ZIndex = 13,
+    })
+
+    self.statisticsLayout = make("UIListLayout", {
+        Parent = self.statisticsList,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+    })
+
+    self:_connect(refresh.MouseButton1Click, function()
+        self:_renderStatisticsPage()
+        self:log("EVENT", "Statistics page refreshed")
+    end)
+
+    self:_connect(RunService.Heartbeat, function()
+        if self.state.alive and self.state.selectedPage == "Statistics" then
+            self:_renderStatisticsPage()
+        end
+    end)
+
+    table.insert(self.dynamicThemeParts, {
+        apply = function(theme)
+            title.TextColor3 = theme.text
+            refresh.BackgroundColor3 = theme.window
+            refresh.TextColor3 = theme.text
+        end,
+    })
+
+    self:_renderStatisticsPage()
+end
+
+function MeerlyWin95:_initializeRobloxSettingsRuntime()
+    local function applyPerformanceMode(mode)
+        self:_safeExecutorAction("Graphics " .. tostring(mode), function()
+            local quality = {
+                ["Super Low"] = 1,
+                ["Low"] = 3,
+                ["Default"] = 7,
+                ["Extremely High"] = 10,
+            }
+            local level = quality[mode] or quality.Default
+
+            if sethiddenproperty then
+                local userGameSettings = UserSettings():GetService("UserGameSettings")
+                sethiddenproperty(userGameSettings, "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1)
+                sethiddenproperty(userGameSettings, "GraphicsQualityLevel", level)
+            else
+                error("sethiddenproperty unavailable")
+            end
+        end)
+    end
+
+    local function applyFxCulling(mode)
+        self:_safeExecutorAction("FX Culling " .. tostring(mode), function()
+            local enabled = mode == "Low"
+            local distance = ({ Low = 500, Medium = 300, Strong = 180, Extreme = 100 })[mode] or 300
+            local ok, descendants = pcall(function()
+                return workspace:GetDescendants()
+            end)
+            if not ok then
+                error("workspace unavailable")
+            end
+
+            local changed = 0
+            for _, inst in ipairs(descendants) do
+                if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") then
+                    pcall(function()
+                        if inst:IsA("ParticleEmitter") then
+                            inst.Enabled = enabled
+                        end
+                        if inst:IsA("Trail") or inst:IsA("Beam") then
+                            inst.Enabled = enabled
+                        end
+                        if inst:IsA("ParticleEmitter") then
+                            inst.Rate = enabled and inst.Rate or 0
+                        end
+                    end)
+                    changed += 1
+                end
+            end
+            self:log("DEBUG", string.format("FX culling touched %d effects @%d studs", changed, distance))
+        end)
+    end
+
+    local function applyStreamingOptimized(enabled)
+        self:_safeExecutorAction("Streaming Optimisations", function()
+            if sethiddenproperty then
+                sethiddenproperty(workspace, "StreamingEnabled", enabled)
+            else
+                error("sethiddenproperty unavailable")
+            end
+        end)
+    end
+
+    local function applyBackgroundSurvival(enabled)
+        self:_safeExecutorAction("Background Survival", function()
+            local runOnFocusLost = getExecutorGlobal("run_on_actor") or getExecutorGlobal("syn")
+            if enabled and runOnFocusLost then
+                -- Placeholder hook for executors that support background worker APIs.
+                return
+            end
+            if not enabled then
+                return
+            end
+            error("background executor hook unavailable")
+        end)
+    end
+
+    local function applyDisable3D(disabled)
+        self:_safeExecutorAction("Disable 3D", function()
+            if type(getExecutorGlobal("setrenderproperty")) == "function" then
+                getExecutorGlobal("setrenderproperty")("Enabled", not disabled)
+                return
+            end
+            if type(getExecutorGlobal("setRenderingEnabled")) == "function" then
+                getExecutorGlobal("setRenderingEnabled")(not disabled)
+                return
+            end
+            error("render toggle function unavailable")
+        end)
+    end
+
+    local function ensureAntiAfkConnection()
+        if self.state.afkConnection then
+            return
+        end
+        local idledSignal = LocalPlayer and LocalPlayer.Idled
+        if idledSignal then
+            self.state.afkConnection = idledSignal:Connect(function()
+                if not self.state.antiAfk then
+                    return
+                end
+                self:_safeExecutorAction("Anti-AFK pulse", function()
+                    local vim = game:GetService("VirtualInputManager")
+                    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end)
+            end)
+            table.insert(self.state.connections, self.state.afkConnection)
+        end
+    end
+
+    self.state.settingsActions = {
+        applyPerformanceMode = applyPerformanceMode,
+        applyFxCulling = applyFxCulling,
+        applyStreamingOptimized = applyStreamingOptimized,
+        applyBackgroundSurvival = applyBackgroundSurvival,
+        applyDisable3D = applyDisable3D,
+        ensureAntiAfkConnection = ensureAntiAfkConnection,
+    }
+
+    ensureAntiAfkConnection()
+end
+
 function MeerlyWin95:_buildConsolePage()
     local page = self:addPage("Console", "LG")
 
@@ -1552,7 +1940,7 @@ function MeerlyWin95:_buildRobloxSettingsPage()
         table.insert(self.dynamicThemeParts, {
             apply = function(theme)
                 lbl.TextColor3 = theme.accent
-                line.BackgroundColor3 = theme.stroke
+                line.BackgroundColor3 = theme.subtle
             end,
         })
     end
@@ -1785,23 +2173,28 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     addCycleSwitch("Graphics", { "Super Low", "Low", "Default", "Extremely High" }, self.state.performanceMode, function(v)
         self.state.performanceMode = v
         self:log("EVENT", "Graphics mode set: " .. v)
+        self.state.settingsActions.applyPerformanceMode(v)
     end)
     addCycleSwitch("FX Culling", { "Low", "Medium", "Strong", "Extreme" }, self.state.fxCulling, function(v)
         self.state.fxCulling = v
         self:log("EVENT", "FX Culling set: " .. v)
+        self.state.settingsActions.applyFxCulling(v)
     end)
     addToggle("Streaming Optimisations", self.state.streamOptimized, function(v)
         self.state.streamOptimized = v
         self:log("EVENT", "Streaming Optimisations " .. (v and "enabled" or "disabled"))
+        self.state.settingsActions.applyStreamingOptimized(v)
     end)
     addToggle("Background Survival Mode", self.state.backgroundSurvival, function(v)
         self.state.backgroundSurvival = v
         self:log("EVENT", "Background Survival Mode " .. (v and "enabled" or "disabled"))
+        self.state.settingsActions.applyBackgroundSurvival(v)
     end)
 
     addSection("AFK Settings")
-    addToggle("Anti-AFK (10s space loop)", self.state.antiAfk, function(v)
+    addToggle("Anti-AFK (idle pulse)", self.state.antiAfk, function(v)
         self.state.antiAfk = v
+        self.state.settingsActions.ensureAntiAfkConnection()
         self:log("EVENT", "Anti-AFK " .. (v and "enabled" or "disabled"))
     end)
     addToggle("Watchdog", self.state.watchdog, function(v)
@@ -1845,13 +2238,7 @@ function MeerlyWin95:_buildRobloxSettingsPage()
 
     addToggle("Disable 3D Rendering", self.state.disable3D, function(v)
         self.state.disable3D = v
-        self:_safeExecutorAction("Disable 3D", function()
-            if setRenderingEnabled then
-                setRenderingEnabled(not v)
-            else
-                error("setRenderingEnabled unavailable")
-            end
-        end)
+        self.state.settingsActions.applyDisable3D(v)
     end)
     addButton("AFK Camera (move away)", function()
         self:_safeExecutorAction("AFK Camera", function()
@@ -1871,6 +2258,7 @@ function MeerlyWin95:_buildDefaultPages()
     self:_buildThemePage()
     self:_buildConfigPage()
     self:_buildConsolePage()
+    self:_buildStatisticsPage()
     self:_buildRobloxSettingsPage()
 
     -- Memory stats floating UI (does NOT hide with main by default as requested).
@@ -1944,14 +2332,9 @@ function MeerlyWin95:_wireCoreBindings()
 
     task.spawn(function()
         while self.state.alive do
-            task.wait(10)
-            if self.state.antiAfk then
-                self:_safeExecutorAction("Anti-AFK pulse", function()
-                    local vim = game:GetService("VirtualInputManager")
-                    vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-                    task.wait(0.05)
-                    vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-                end)
+            task.wait(30)
+            if self.state.selectedPage == "Statistics" then
+                self:_renderStatisticsPage()
             end
         end
     end)
@@ -1967,6 +2350,19 @@ function MeerlyWin95:destroy()
     end
 
     self.state.alive = false
+
+    safeCall("RuntimeStatsFinalize", function()
+        local runtime = _G.__MEERLY_UI_RUNTIME_STATS
+        if runtime then
+            local elapsed = math.max(0, math.floor(os.clock() - (self.state.sessionStartClock or os.clock())))
+            runtime.totalAccumulatedSeconds = math.max(0, tonumber(runtime.totalAccumulatedSeconds) or 0) + elapsed
+            runtime.activeInstances = math.max(0, (tonumber(runtime.activeInstances) or 1) - 1)
+            if runtime.activeInstances <= 0 then
+                runtime.activeInstances = 0
+                runtime.sharedStartUnix = os.time()
+            end
+        end
+    end)
 
     -- Revert payloads / effects best effort.
     safeCall("BlurCleanup", function()
