@@ -33,7 +33,38 @@ end
 
 local function loadWin95Library()
     assert(type(readfile) == "function", "readfile is required to load local Win95 library")
-    local source = readfile(CONFIG.LibraryPath)
+
+    local tried = {}
+    local function tryRead(path)
+        if not path or path == "" then
+            return nil
+        end
+
+        tried[#tried + 1] = path
+        local ok, result = pcall(readfile, path)
+        if ok and type(result) == "string" and result ~= "" then
+            return result
+        end
+
+        if type(result) == "string" and string.find(result, "Expected File But Got Directory", 1, true) then
+            local initPath = string.gsub(path, "/+$", "") .. "/init.lua"
+            tried[#tried + 1] = initPath
+            local okInit, initResult = pcall(readfile, initPath)
+            if okInit and type(initResult) == "string" and initResult ~= "" then
+                return initResult
+            end
+        end
+
+        return nil
+    end
+
+    local source =
+        tryRead(CONFIG.LibraryPath)
+        or tryRead("./" .. tostring(CONFIG.LibraryPath or ""))
+        or tryRead("MeerlyWin95UILibrary.lua")
+        or tryRead("./MeerlyWin95UILibrary.lua")
+
+    assert(source, "Failed to read Win95 library file. Tried: " .. table.concat(tried, ", "))
 
     source = source:gsub(
         'local HARDCODED_KEY = ".-"',
