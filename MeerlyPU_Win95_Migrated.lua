@@ -1039,11 +1039,65 @@ task.spawn(function()
     end
 end)
 
+
+local function applyRuntimeKeygateOverride(app)
+    if not app or not app.keyGate then
+        return
+    end
+
+    local keyGate = app.keyGate
+    local keyInput
+    local unlockBtn
+    local statusLabel
+    local infoLabel
+
+    for _, child in ipairs(keyGate:GetChildren()) do
+        if child:IsA("TextBox") and not keyInput then
+            keyInput = child
+        elseif child:IsA("TextButton") and child.Text == "Unlock" and not unlockBtn then
+            unlockBtn = child
+        elseif child:IsA("TextLabel") then
+            if string.find(child.Text or "", "Key link:", 1, true) then
+                infoLabel = child
+            elseif (child.Text == "Locked" or child.Text == "Invalid key" or child.Text == "Access granted") and not statusLabel then
+                statusLabel = child
+            end
+        end
+    end
+
+    if infoLabel then
+        infoLabel.Text = "Enter access key to load UI features.\nKey link: " .. tostring(CONFIG.AccessLink)
+    end
+
+    if keyInput and unlockBtn then
+        unlockBtn.MouseButton1Click:Connect(function()
+            if keyInput.Text == tostring(CONFIG.AccessKey) then
+                app.state.unlocked = true
+                keyGate.Visible = false
+                if statusLabel then
+                    statusLabel.Text = "Access granted"
+                end
+                if app._taskbarResize then
+                    app:_taskbarResize()
+                end
+                if app.state and app.state.selectedPage and app.selectPage then
+                    app:selectPage(app.state.selectedPage)
+                end
+                if app.log then
+                    app:log("EVENT", "Keygate unlocked (PU override)")
+                end
+            end
+        end)
+    end
+end
+
 local app = MeerlyWin95.new({
     title = CONFIG.Title,
     toggleKey = CONFIG.ToggleKey,
     defaultThemeIndex = 2,
 })
+
+applyRuntimeKeygateOverride(app)
 
 _G.MeerlyWin95_PUMigrated = app
 app:log("EVENT", "PU migrated pages loaded: Weapons / Utility / Teleports")
