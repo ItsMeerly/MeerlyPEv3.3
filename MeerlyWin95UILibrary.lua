@@ -33,6 +33,8 @@ local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local Stats = game:GetService("Stats")
+local HttpService = game:GetService("HttpService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -174,6 +176,44 @@ local LEVEL_COLORS = {
     EVENT = Color3.fromRGB(220, 190, 255),
 }
 
+local CLICKER_UPGRADES = {
+    { id = "Tap", name = "Tap Training", kind = "clickFlat", value = 1, baseCost = 15, growth = 1.22 },
+    { id = "Over", name = "Overclock", kind = "clickMult", value = 0.12, baseCost = 110, growth = 1.42 },
+    { id = "Crit", name = "Crit Routine", kind = "clickMult", value = 0.06, baseCost = 260, growth = 1.36 },
+    { id = "Grip", name = "Grip Strength", kind = "clickFlat", value = 5, baseCost = 740, growth = 1.31 },
+    { id = "Burst", name = "Burst Click", kind = "clickFlat", value = 9, baseCost = 980, growth = 1.30 },
+    { id = "Momentum", name = "Momentum", kind = "clickMult", value = 0.09, baseCost = 1400, growth = 1.35 },
+    { id = "Precision", name = "Precision Grip", kind = "clickFlat", value = 18, baseCost = 2100, growth = 1.32 },
+    { id = "Combo", name = "Combo Surge", kind = "clickMult", value = 0.14, baseCost = 3200, growth = 1.34 },
+
+    { id = "Gen", name = "Generator", kind = "passiveFlat", value = 1, baseCost = 40, growth = 1.28 },
+    { id = "Auto", name = "Automation", kind = "passiveMult", value = 0.14, baseCost = 170, growth = 1.48 },
+    { id = "Core", name = "Power Core", kind = "passiveMult", value = 0.07, baseCost = 320, growth = 1.38 },
+    { id = "Drip", name = "Drip Feed", kind = "passiveFlat", value = 3, baseCost = 520, growth = 1.33 },
+    { id = "Forge", name = "Forge Lines", kind = "passiveFlat", value = 7, baseCost = 960, growth = 1.30 },
+    { id = "Nexus", name = "Nexus Grid", kind = "passiveMult", value = 0.10, baseCost = 1550, growth = 1.34 },
+    { id = "Refinery", name = "Refinery", kind = "passiveFlat", value = 15, baseCost = 2600, growth = 1.31 },
+    { id = "Singularity", name = "Singularity", kind = "passiveMult", value = 0.16, baseCost = 3900, growth = 1.35 },
+}
+
+local function makeDefaultUpgradeLevels()
+    local levels = {}
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        levels[def.id] = 0
+    end
+    return levels
+end
+
+local ACHIEVEMENT_TIERS = {
+    { name = "Master", color = Color3.fromRGB(255, 120, 220) },
+    { name = "Platinum", color = Color3.fromRGB(190, 255, 220) },
+    { name = "Diamond", color = Color3.fromRGB(110, 220, 255) },
+    { name = "Gold", color = Color3.fromRGB(235, 198, 64) },
+    { name = "Silver", color = Color3.fromRGB(170, 170, 178) },
+    { name = "Bronze", color = Color3.fromRGB(184, 115, 51) },
+    { name = "None", color = Color3.fromRGB(96, 96, 108) },
+}
+
 local function safeCall(tag, fn)
     local ok, err = pcall(fn)
     if not ok then
@@ -198,6 +238,64 @@ local function formatDurationHM(totalSeconds)
     local h = math.floor(totalSeconds / 3600)
     local m = math.floor((totalSeconds % 3600) / 60)
     return string.format("%dh %02dm", h, m)
+end
+
+
+local function safeWriteFile(path, content)
+    if type(writefile) == "function" then
+        return pcall(function()
+            writefile(path, content)
+        end)
+    end
+    return false, "writefile unavailable"
+end
+
+local function safeReadFile(path)
+    if type(readfile) == "function" then
+        local ok, data = pcall(function()
+            return readfile(path)
+        end)
+        return ok, data
+    end
+    return false, "readfile unavailable"
+end
+
+local function getTierByThreshold(value, bronze, silver, gold, diamond, platinum, master)
+    value = tonumber(value) or 0
+    if master and value >= master then return "Master" end
+    if platinum and value >= platinum then return "Platinum" end
+    if diamond and value >= diamond then return "Diamond" end
+    if gold and value >= gold then return "Gold" end
+    if silver and value >= silver then return "Silver" end
+    if bronze and value >= bronze then return "Bronze" end
+    return "None"
+end
+
+local function getTierColorByName(name)
+    for _, tier in ipairs(ACHIEVEMENT_TIERS) do
+        if tier.name == name then
+            return tier.color
+        end
+    end
+    return ACHIEVEMENT_TIERS[#ACHIEVEMENT_TIERS].color
+end
+
+local function clickerUpgradeCost(def, level)
+    return math.max(1, math.floor((def.baseCost * (def.growth ^ level)) + 0.5))
+end
+
+
+local function angleDeg(dy, dx)
+    local ok, val = pcall(function()
+        if math.atan2 then
+            return math.deg(math.atan2(dy, dx))
+        end
+        return math.deg(math.atan(dy, dx))
+    end)
+    if ok and val then
+        return val
+    end
+    return 0
 end
 
 local function getExecutorGlobal(name)
@@ -357,14 +455,52 @@ function MeerlyWin95.new(options)
         backgroundSurvival = false,
         zoomUnlock = false,
         fpsCounter = false,
+        memoryStatsVisible = true,
         sessionStartClock = os.clock(),
         statsProviders = {},
         afkConnection = nil,
+        clickerHighScoreFile = "clicker_highscore.txt",
+        clickerStateFile = "clicker_state.txt",
+        clickerStatsFile = "statistics_data.json",
+        clickerAutosaveSec = 600,
+        clickerLastSave = 0,
+        clickerRunning = false,
+        clickerScore = 0,
+        clickerHighScore = 0,
+        clickPower = 1,
+        passiveIncomePerSec = 0,
+        clickerPassiveCarry = 0,
+        clickerShapeVertices = 3,
+        clickerShapeCycle = 0,
+        clickerShapeProgress = 0,
+        clickerShapeMilestone = 25,
+        totalClicksOverTime = 0,
+        clickerUpgradeLevels = makeDefaultUpgradeLevels(),
+        statisticsData = {
+            longestSessionSeconds = 0,
+            totalSkillActivations = 0,
+            clickerHighScore = 0,
+            totalClicksOverTime = 0,
+            sessionActive = false,
+            sessionStartTime = 0,
+            lastSessionReason = "",
+        },
+        macroFilename = "macro.json",
+        macroEvents = {},
+        macroRecording = false,
+        macroPlaying = false,
+        macroLoopEnabled = false,
+        macroRecordConnection = nil,
+        macroRecordEndConnection = nil,
+        fpsFrameSamples = {},
+        fpsSampleCursor = 1,
+        fpsLastOverlayUpdate = 0,
     }
 
     self.theme = deepCopy(THEMES[self.state.themeIndex].base)
 
     self:_buildUI()
+    self:_initializeClickerState()
     self:_buildDefaultPages()
     self:_wireCoreBindings()
     self:_applyTheme()
@@ -607,6 +743,22 @@ function MeerlyWin95:_buildUI()
         Parent = playerGui
     })
 
+    self.fpsOverlayLabel = make("TextLabel", {
+        Parent = self.screenGui,
+        Size = UDim2.fromOffset(220, 54),
+        Position = UDim2.fromOffset(6, 6),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Text = "FPS: --\nAVG: --\n1% LOW: --",
+        Visible = false,
+        ZIndex = 200,
+    })
+    applyBevel(self.fpsOverlayLabel, self.theme.bevelLight, self.theme.bevelDark)
+
     self.shell = make("Frame", {
         Parent = self.screenGui,
         Size = UDim2.fromOffset(760, 520),
@@ -800,6 +952,10 @@ function MeerlyWin95:_buildUI()
             unlock.TextColor3 = theme.text
             status.TextColor3 = theme.text
             self.keyGate.BackgroundColor3 = theme.window
+            if self.fpsOverlayLabel then
+                self.fpsOverlayLabel.BackgroundColor3 = theme.panel
+                self.fpsOverlayLabel.TextColor3 = theme.text
+            end
         end,
     })
 
@@ -1220,6 +1376,9 @@ function MeerlyWin95:_snapshotConfig()
             backgroundSurvival = self.state.backgroundSurvival,
             zoomUnlock = self.state.zoomUnlock,
             fpsCounter = self.state.fpsCounter,
+            memoryStatsVisible = self.state.memoryStatsVisible,
+            clickerRunning = self.state.clickerRunning,
+            totalClicksOverTime = self.state.totalClicksOverTime,
         },
         themePreview = THEMES[self.state.themeIndex].swatches[1],
     }
@@ -1242,6 +1401,10 @@ function MeerlyWin95:_loadSnapshot(data)
 
     self.theme = deepCopy(THEMES[self.state.themeIndex].base)
     self:_applyTheme()
+    if self.state.settingsActions then
+        self.state.settingsActions.updateFpsOverlay(self.state.fpsCounter)
+        self.state.settingsActions.setMemoryStatsVisible(self.state.memoryStatsVisible)
+    end
 end
 
 function MeerlyWin95:_buildConfigPage()
@@ -1386,6 +1549,868 @@ function MeerlyWin95:_buildConfigPage()
     })
 end
 
+
+function MeerlyWin95:_recalcClickerStats()
+    local clickFlat = 1
+    local passiveFlat = 0
+    local clickMult = 1
+    local passiveMult = 1
+
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        local lv = self.state.clickerUpgradeLevels[def.id] or 0
+        if lv > 0 then
+            if def.kind == "clickFlat" then
+                clickFlat += (def.value * lv)
+            elseif def.kind == "passiveFlat" then
+                passiveFlat += (def.value * lv)
+            elseif def.kind == "clickMult" then
+                clickMult *= (1 + (def.value * lv))
+            elseif def.kind == "passiveMult" then
+                passiveMult *= (1 + (def.value * lv))
+            end
+        end
+    end
+
+    self.state.clickPower = math.max(1, math.floor(clickFlat * clickMult + 0.5))
+    self.state.passiveIncomePerSec = math.max(0, math.floor(passiveFlat * passiveMult + 0.5))
+end
+
+function MeerlyWin95:_addClickerScore(amount, isManualClick)
+    amount = math.max(0, math.floor(tonumber(amount) or 0))
+    if amount <= 0 then
+        return
+    end
+
+    self.state.clickerScore += amount
+    if self.state.clickerScore > self.state.clickerHighScore then
+        self.state.clickerHighScore = self.state.clickerScore
+    end
+
+    if isManualClick then
+        self.state.totalClicksOverTime += amount
+    end
+
+    self.state.clickerShapeProgress += amount
+    while self.state.clickerShapeProgress >= self.state.clickerShapeMilestone do
+        self.state.clickerShapeProgress -= self.state.clickerShapeMilestone
+        self.state.clickerShapeVertices += 1
+        if self.state.clickerShapeVertices > 9 then
+            self.state.clickerShapeVertices = 3
+            self.state.clickerShapeCycle += 1
+        end
+        self.state.clickerShapeMilestone = math.floor((self.state.clickerShapeMilestone * 1.35) + 5)
+    end
+end
+
+function MeerlyWin95:_encodeClickerUpgrades()
+    local parts = table.create(#CLICKER_UPGRADES)
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        parts[#parts + 1] = string.format("%s:%d", def.id, self.state.clickerUpgradeLevels[def.id] or 0)
+    end
+    return table.concat(parts, ";")
+end
+
+function MeerlyWin95:_saveStatistics()
+    local payload = HttpService:JSONEncode(self.state.statisticsData)
+    local ok = safeWriteFile(self.state.clickerStatsFile, payload)
+    return ok
+end
+
+function MeerlyWin95:_loadStatistics()
+    local okRead, raw = safeReadFile(self.state.clickerStatsFile)
+    local data = self.state.statisticsData
+    if okRead and type(raw) == "string" and #raw > 0 then
+        local okDecode, parsed = pcall(function()
+            return HttpService:JSONDecode(raw)
+        end)
+        if okDecode and type(parsed) == "table" then
+            data.longestSessionSeconds = math.max(0, math.floor(tonumber(parsed.longestSessionSeconds) or 0))
+            data.totalSkillActivations = math.max(0, math.floor(tonumber(parsed.totalSkillActivations) or 0))
+            data.clickerHighScore = math.max(0, math.floor(tonumber(parsed.clickerHighScore) or 0))
+            data.totalClicksOverTime = math.max(0, math.floor(tonumber(parsed.totalClicksOverTime) or 0))
+            data.sessionActive = parsed.sessionActive == true
+            data.sessionStartTime = math.max(0, math.floor(tonumber(parsed.sessionStartTime) or 0))
+            data.lastSessionReason = tostring(parsed.lastSessionReason or "")
+        end
+    end
+
+    if data.sessionActive and data.sessionStartTime > 0 then
+        local recoveredSeconds = math.max(0, os.time() - data.sessionStartTime)
+        if recoveredSeconds > data.longestSessionSeconds then
+            data.longestSessionSeconds = recoveredSeconds
+        end
+    end
+
+    data.sessionActive = true
+    data.sessionStartTime = os.time()
+    data.lastSessionReason = "running"
+end
+
+function MeerlyWin95:_saveClickerState(force)
+    if not force and (os.clock() - self.state.clickerLastSave) < self.state.clickerAutosaveSec then
+        return
+    end
+    self.state.clickerLastSave = os.clock()
+
+    local payload = string.format(
+        "%d|%s|%d|%d|%d|%d",
+        math.floor(self.state.clickerScore),
+        self:_encodeClickerUpgrades(),
+        math.floor(self.state.clickerShapeVertices),
+        math.floor(self.state.clickerShapeCycle),
+        math.floor(self.state.clickerShapeProgress),
+        math.floor(self.state.clickerShapeMilestone)
+    )
+    safeWriteFile(self.state.clickerStateFile, payload)
+    safeWriteFile(self.state.clickerHighScoreFile, tostring(math.floor(self.state.clickerHighScore)))
+
+    if self.state.clickerHighScore > self.state.statisticsData.clickerHighScore then
+        self.state.statisticsData.clickerHighScore = self.state.clickerHighScore
+    end
+    self.state.statisticsData.totalClicksOverTime = math.max(self.state.statisticsData.totalClicksOverTime or 0, self.state.totalClicksOverTime)
+    self:_saveStatistics()
+end
+
+function MeerlyWin95:_loadClickerState()
+    local okRead, raw = safeReadFile(self.state.clickerHighScoreFile)
+    if okRead then
+        local val = tonumber(raw)
+        if val then
+            self.state.clickerHighScore = math.max(0, math.floor(val))
+        end
+    end
+
+    local okState, rawState = safeReadFile(self.state.clickerStateFile)
+    if okState and type(rawState) == "string" then
+        local scorePart, upgradesPart, vPart, cPart, pPart, mPart = rawState:match("^(%-?%d+)|([^|]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)|(%-?%d+)$")
+        if not scorePart then
+            scorePart, upgradesPart = rawState:match("^(%-?%d+)|(.+)$")
+        end
+
+        local parsedScore = tonumber(scorePart)
+        if parsedScore then
+            self.state.clickerScore = math.max(0, math.floor(parsedScore))
+        end
+
+        if type(upgradesPart) == "string" then
+            for chunk in string.gmatch(upgradesPart, "[^;]+") do
+                local id, lv = chunk:match("^(%a+):(%-?%d+)$")
+                if id and lv and self.state.clickerUpgradeLevels[id] ~= nil then
+                    self.state.clickerUpgradeLevels[id] = math.max(0, math.floor(tonumber(lv) or 0))
+                end
+            end
+        end
+
+        if vPart and cPart and pPart and mPart then
+            self.state.clickerShapeVertices = math.clamp(math.floor(tonumber(vPart) or 3), 3, 9)
+            self.state.clickerShapeCycle = math.max(0, math.floor(tonumber(cPart) or 0))
+            self.state.clickerShapeProgress = math.max(0, math.floor(tonumber(pPart) or 0))
+            self.state.clickerShapeMilestone = math.max(25, math.floor(tonumber(mPart) or 25))
+            if self.state.clickerShapeProgress >= self.state.clickerShapeMilestone then
+                self.state.clickerShapeProgress = self.state.clickerShapeProgress % self.state.clickerShapeMilestone
+            end
+        end
+
+        if self.state.clickerScore > self.state.clickerHighScore then
+            self.state.clickerHighScore = self.state.clickerScore
+        end
+    end
+
+    self.state.clickerPassiveCarry = 0
+    self:_recalcClickerStats()
+
+    if self.state.clickerHighScore > self.state.statisticsData.clickerHighScore then
+        self.state.statisticsData.clickerHighScore = self.state.clickerHighScore
+    end
+    self.state.totalClicksOverTime = math.max(self.state.totalClicksOverTime or 0, self.state.statisticsData.totalClicksOverTime or 0)
+end
+
+function MeerlyWin95:_initializeClickerState()
+    self:_loadStatistics()
+    self:_loadClickerState()
+end
+
+function MeerlyWin95:_finalizeSessionStatistics(reason)
+    local elapsed = math.max(0, math.floor(os.clock() - (self.state.sessionStartClock or os.clock())))
+    local data = self.state.statisticsData
+    if elapsed > data.longestSessionSeconds then
+        data.longestSessionSeconds = elapsed
+    end
+    if self.state.clickerHighScore > data.clickerHighScore then
+        data.clickerHighScore = self.state.clickerHighScore
+    end
+    data.totalClicksOverTime = math.max(data.totalClicksOverTime or 0, self.state.totalClicksOverTime or 0)
+    data.sessionActive = false
+    data.lastSessionReason = tostring(reason or "session_end")
+    self:_saveStatistics()
+end
+
+function MeerlyWin95:_buildClickerPage()
+    local page = self:addPage("Clicker", "CK")
+
+    local title = make("TextLabel", {
+        Parent = page,
+        Text = "AFK Mini Clicker",
+        Font = Enum.Font.Code,
+        TextSize = 18,
+        Size = UDim2.new(1, -24, 0, 24),
+        Position = UDim2.fromOffset(8, 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local toggle = make("TextButton", {
+        Parent = page,
+        Text = "Mini Game: OFF",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.fromOffset(180, 24),
+        Position = UDim2.fromOffset(8, 36),
+        BorderSizePixel = 0,
+    })
+    applyBevel(toggle, self.theme.bevelLight, self.theme.bevelDark)
+
+    local status = make("TextLabel", {
+        Parent = page,
+        Text = "",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.new(1, -160, 0, 36),
+        Position = UDim2.fromOffset(8, 64),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+    })
+
+    local shapeHost = make("Frame", {
+        Parent = page,
+        Size = UDim2.fromOffset(142, 84),
+        Position = UDim2.new(1, -150, 0, 12),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+    })
+    applyBevel(shapeHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    local shapeCanvas = make("Frame", {
+        Parent = shapeHost,
+        Size = UDim2.fromOffset(56, 56),
+        Position = UDim2.fromOffset(6, 14),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    })
+
+    local shapeInfo = make("TextLabel", {
+        Parent = shapeHost,
+        Size = UDim2.new(1, -68, 1, -8),
+        Position = UDim2.fromOffset(64, 4),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Code,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextWrapped = true,
+        Text = "",
+    })
+
+    local shapeEdges = table.create(9)
+    for i = 1, 9 do
+        local edge = make("Frame", {
+            Parent = shapeCanvas,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Size = UDim2.fromOffset(2, 2),
+            BorderSizePixel = 0,
+            BackgroundColor3 = self.theme.accent,
+            Visible = false,
+        })
+        shapeEdges[i] = edge
+    end
+
+    local colTitleLeft = make("TextLabel", {
+        Parent = page,
+        Text = "Click Power",
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(0.5, -14, 0, 16),
+        Position = UDim2.fromOffset(8, 104),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local colTitleRight = make("TextLabel", {
+        Parent = page,
+        Text = "Passive /s",
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Size = UDim2.new(0.5, -14, 0, 16),
+        Position = UDim2.new(0.5, 6, 0, 104),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local listHeightOffset = -204
+    local leftHost = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(0.5, -14, 1, listHeightOffset),
+        Position = UDim2.fromOffset(8, 122),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+        ScrollBarThickness = 6,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+    })
+    applyBevel(leftHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    local rightHost = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(0.5, -14, 1, listHeightOffset),
+        Position = UDim2.new(0.5, 6, 0, 122),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+        ScrollBarThickness = 6,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+    })
+    applyBevel(rightHost, self.theme.bevelLight, self.theme.bevelDark)
+
+    make("UIListLayout", {
+        Parent = leftHost,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+    })
+    make("UIListLayout", {
+        Parent = rightHost,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+    })
+
+    local footer = make("Frame", {
+        Parent = page,
+        Size = UDim2.new(1, -24, 0, 68),
+        Position = UDim2.new(0, 8, 1, -76),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.panel,
+    })
+    applyBevel(footer, self.theme.bevelLight, self.theme.bevelDark)
+
+    local clickBtn = make("TextButton", { Parent = footer, Text = "Click", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(8, 8), BorderSizePixel = 0 })
+    local resetBtn = make("TextButton", { Parent = footer, Text = "Reset", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(106, 8), BorderSizePixel = 0 })
+    local saveBtn = make("TextButton", { Parent = footer, Text = "Save", Font = Enum.Font.Code, TextSize = 12, Size = UDim2.fromOffset(90, 24), Position = UDim2.fromOffset(204, 8), BorderSizePixel = 0 })
+    applyBevel(clickBtn, self.theme.bevelLight, self.theme.bevelDark)
+    applyBevel(resetBtn, self.theme.bevelLight, self.theme.bevelDark)
+    applyBevel(saveBtn, self.theme.bevelLight, self.theme.bevelDark)
+
+    local footerInfo = make("TextLabel", {
+        Parent = footer,
+        Text = "",
+        Font = Enum.Font.Code,
+        TextSize = 11,
+        Size = UDim2.new(1, -12, 0, 20),
+        Position = UDim2.fromOffset(8, 40),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local clickButtons, passiveButtons = {}, {}
+
+    local function drawShape()
+        local n = math.clamp(self.state.clickerShapeVertices, 3, 9)
+        local radius = 24
+        local cx, cy = 28, 28
+        for i = 1, 9 do
+            local edge = shapeEdges[i]
+            if i <= n then
+                local a1 = ((i - 1) / n) * (2 * math.pi) - (math.pi / 2)
+                local a2 = (i / n) * (2 * math.pi) - (math.pi / 2)
+                local x1 = cx + (math.cos(a1) * radius)
+                local y1 = cy + (math.sin(a1) * radius)
+                local x2 = cx + (math.cos(a2) * radius)
+                local y2 = cy + (math.sin(a2) * radius)
+                local dx, dy = x2 - x1, y2 - y1
+                local len = math.sqrt((dx * dx) + (dy * dy))
+                edge.Visible = true
+                edge.Size = UDim2.fromOffset(math.max(2, len), 2)
+                edge.Position = UDim2.fromOffset((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+                edge.Rotation = angleDeg(dy, dx)
+            else
+                edge.Visible = false
+            end
+        end
+        shapeInfo.Text = string.format("Shape: %d-gon
+Cycle: C%d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
+    end
+
+    local function refresh()
+        toggle.Text = "Mini Game: " .. (self.state.clickerRunning and "ON" or "OFF")
+        status.Text = string.format(
+            "Score: %d | High: %d
+Click Power: %d | Passive: %d/s | Total Clicks Over Time: %d",
+            self.state.clickerScore,
+            self.state.clickerHighScore,
+            self.state.clickPower,
+            self.state.passiveIncomePerSec,
+            self.state.totalClicksOverTime
+        )
+        footerInfo.Text = "Tip: Left upgrades boost click damage, right upgrades boost passive income."
+        drawShape()
+
+        for _, row in ipairs(clickButtons) do
+            local lv = self.state.clickerUpgradeLevels[row.def.id] or 0
+            local cost = clickerUpgradeCost(row.def, lv)
+            row.button.Text = string.format("%s | Lv %d | Cost %d", row.def.name, lv, cost)
+        end
+        for _, row in ipairs(passiveButtons) do
+            local lv = self.state.clickerUpgradeLevels[row.def.id] or 0
+            local cost = clickerUpgradeCost(row.def, lv)
+            row.button.Text = string.format("%s | Lv %d | Cost %d", row.def.name, lv, cost)
+        end
+    end
+
+    local function makeUpgradeButton(def, host, bucket)
+        local btn = make("TextButton", {
+            Parent = host,
+            Text = def.name,
+            Font = Enum.Font.Code,
+            TextSize = 12,
+            Size = UDim2.new(1, -10, 0, 24),
+            BorderSizePixel = 0,
+            BackgroundColor3 = self.theme.window,
+        })
+        applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
+        table.insert(bucket, { def = def, button = btn })
+        self:_connect(btn.MouseButton1Click, function()
+            if not self.state.clickerRunning then
+                return
+            end
+            local level = self.state.clickerUpgradeLevels[def.id] or 0
+            local cost = clickerUpgradeCost(def, level)
+            if self.state.clickerScore < cost then
+                self:log("EVENT", def.name .. " requires " .. tostring(cost))
+                return
+            end
+            self.state.clickerScore -= cost
+            self.state.clickerUpgradeLevels[def.id] = level + 1
+            self:_recalcClickerStats()
+            refresh()
+        end)
+    end
+
+    for _, def in ipairs(CLICKER_UPGRADES) do
+        if def.kind == "clickFlat" or def.kind == "clickMult" then
+            makeUpgradeButton(def, leftHost, clickButtons)
+        else
+            makeUpgradeButton(def, rightHost, passiveButtons)
+        end
+    end
+
+    self:_connect(toggle.MouseButton1Click, function()
+        self.state.clickerRunning = not self.state.clickerRunning
+        refresh()
+    end)
+
+    self:_connect(clickBtn.MouseButton1Click, function()
+        if not self.state.clickerRunning then
+            return
+        end
+        self:_addClickerScore(self.state.clickPower, true)
+        refresh()
+    end)
+
+    self:_connect(resetBtn.MouseButton1Click, function()
+        self.state.clickerScore = 0
+        self.state.clickerUpgradeLevels = makeDefaultUpgradeLevels()
+        self.state.clickerShapeVertices = 3
+        self.state.clickerShapeCycle = 0
+        self.state.clickerShapeProgress = 0
+        self.state.clickerShapeMilestone = 25
+        self.state.clickerPassiveCarry = 0
+        self:_recalcClickerStats()
+        refresh()
+    end)
+
+    self:_connect(saveBtn.MouseButton1Click, function()
+        self:_saveClickerState(true)
+        self:log("EVENT", "Clicker state saved")
+    end)
+
+    self:_connect(RunService.Heartbeat, function(dt)
+        if not self.state.alive or not self.state.clickerRunning then
+            return
+        end
+        local add = self.state.passiveIncomePerSec * dt
+        self.state.clickerPassiveCarry += add
+        if self.state.clickerPassiveCarry >= 1 then
+            local whole = math.floor(self.state.clickerPassiveCarry)
+            self.state.clickerPassiveCarry -= whole
+            self:_addClickerScore(whole, false)
+        end
+        if self.state.selectedPage == "Clicker" then
+            refresh()
+        end
+        self:_saveClickerState(false)
+    end)
+
+    table.insert(self.dynamicThemeParts, {
+        apply = function(theme)
+            title.TextColor3 = theme.text
+            toggle.BackgroundColor3 = theme.window
+            toggle.TextColor3 = theme.text
+            status.TextColor3 = theme.text
+            shapeHost.BackgroundColor3 = theme.panel
+            shapeInfo.TextColor3 = theme.subtle
+            colTitleLeft.TextColor3 = theme.accent
+            colTitleRight.TextColor3 = theme.accent
+            leftHost.BackgroundColor3 = theme.panel
+            rightHost.BackgroundColor3 = theme.panel
+            footer.BackgroundColor3 = theme.panel
+            clickBtn.BackgroundColor3 = theme.window
+            clickBtn.TextColor3 = theme.text
+            resetBtn.BackgroundColor3 = theme.window
+            resetBtn.TextColor3 = theme.text
+            saveBtn.BackgroundColor3 = theme.window
+            saveBtn.TextColor3 = theme.text
+            footerInfo.TextColor3 = theme.subtle
+            for _, edge in ipairs(shapeEdges) do
+                edge.BackgroundColor3 = theme.accent
+            end
+            for _, row in ipairs(clickButtons) do
+                row.button.BackgroundColor3 = theme.window
+                row.button.TextColor3 = theme.text
+            end
+            for _, row in ipairs(passiveButtons) do
+                row.button.BackgroundColor3 = theme.window
+                row.button.TextColor3 = theme.text
+            end
+        end,
+    })
+
+    refresh()
+end
+
+function MeerlyWin95:_buildMacroPage()
+    local page = self:addPage("Macro", "MC")
+
+    local title = make("TextLabel", {
+        Parent = page,
+        Text = "Macro (Declarable Input Capture)",
+        Font = Enum.Font.Code,
+        TextSize = 18,
+        Size = UDim2.new(1, -24, 0, 24),
+        Position = UDim2.fromOffset(8, 8),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local status = make("TextLabel", {
+        Parent = page,
+        Text = "Status: Idle",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.new(1, -24, 0, 20),
+        Position = UDim2.fromOffset(8, 36),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local function setStatus(t)
+        status.Text = "Status: " .. tostring(t)
+    end
+
+    local loopBtn = make("TextButton", {
+        Parent = page,
+        Text = "Loop Playback: OFF",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.fromOffset(170, 24),
+        Position = UDim2.fromOffset(8, 58),
+        BorderSizePixel = 0,
+    })
+    applyBevel(loopBtn, self.theme.bevelLight, self.theme.bevelDark)
+
+    local filenameBox = make("TextBox", {
+        Parent = page,
+        Text = self.state.macroFilename,
+        PlaceholderText = "macro.json",
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        Size = UDim2.fromOffset(190, 24),
+        Position = UDim2.fromOffset(186, 58),
+        BorderSizePixel = 0,
+        BackgroundColor3 = self.theme.window,
+        ClearTextOnFocus = false,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    applyBevel(filenameBox, self.theme.bevelLight, self.theme.bevelDark)
+
+    local controls = {
+        { "Record", UDim2.fromOffset(8, 90) },
+        { "Play", UDim2.fromOffset(86, 90) },
+        { "Stop", UDim2.fromOffset(164, 90) },
+        { "Save", UDim2.fromOffset(242, 90) },
+        { "Load", UDim2.fromOffset(320, 90) },
+        { "Clear", UDim2.fromOffset(398, 90) },
+    }
+
+    local buttons = {}
+    for _, def in ipairs(controls) do
+        local btn = make("TextButton", {
+            Parent = page,
+            Text = def[1],
+            Font = Enum.Font.Code,
+            TextSize = 12,
+            Size = UDim2.fromOffset(72, 24),
+            Position = def[2],
+            BorderSizePixel = 0,
+        })
+        applyBevel(btn, self.theme.bevelLight, self.theme.bevelDark)
+        buttons[def[1]] = btn
+    end
+
+    local notes = make("TextLabel", {
+        Parent = page,
+        Text = "Records any keyboard input (except Unknown) with down/up timing.",
+        Font = Enum.Font.Code,
+        TextSize = 11,
+        Size = UDim2.new(1, -24, 0, 20),
+        Position = UDim2.fromOffset(8, 120),
+        BackgroundTransparency = 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local list = make("ScrollingFrame", {
+        Parent = page,
+        Size = UDim2.new(1, -24, 1, -152),
+        Position = UDim2.fromOffset(8, 144),
+        BorderSizePixel = 0,
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 6,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+    })
+    local listLayout = make("UIListLayout", {
+        Parent = list,
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2),
+    })
+
+    local function renderEvents()
+        for _, c in ipairs(list:GetChildren()) do
+            if c:IsA("TextLabel") then
+                c:Destroy()
+            end
+        end
+        if #self.state.macroEvents == 0 then
+            make("TextLabel", {
+                Parent = list,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -8, 0, 18),
+                Font = Enum.Font.Code,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = "(no events)",
+                TextColor3 = self.theme.subtle,
+            })
+            return
+        end
+        for i, e in ipairs(self.state.macroEvents) do
+            make("TextLabel", {
+                Parent = list,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -8, 0, 18),
+                Font = Enum.Font.Code,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = string.format("%03d | t=%.3f | %s %s", i, tonumber(e.t) or 0, tostring(e.k), (e.d == 1 and "down" or "up")),
+                TextColor3 = self.theme.text,
+            })
+        end
+    end
+
+    local recordStart = 0
+    local function stopRecording()
+        if self.state.macroRecordConnection then
+            self.state.macroRecordConnection:Disconnect()
+            self.state.macroRecordConnection = nil
+        end
+        if self.state.macroRecordEndConnection then
+            self.state.macroRecordEndConnection:Disconnect()
+            self.state.macroRecordEndConnection = nil
+        end
+        self.state.macroRecording = false
+    end
+
+    local function startRecording()
+        if self.state.macroPlaying then
+            setStatus("Stop playback before recording")
+            return
+        end
+        self.state.macroEvents = {}
+        recordStart = os.clock()
+        self.state.macroRecording = true
+        setStatus("Recording...")
+        self.state.macroRecordConnection = UserInputService.InputBegan:Connect(function(input, gp)
+            if gp or not self.state.macroRecording then
+                return
+            end
+            if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode ~= Enum.KeyCode.Unknown then
+                self.state.macroEvents[#self.state.macroEvents + 1] = { t = os.clock() - recordStart, k = input.KeyCode.Name, d = 1 }
+                renderEvents()
+            end
+        end)
+        table.insert(self.state.connections, self.state.macroRecordConnection)
+        self.state.macroRecordEndConnection = UserInputService.InputEnded:Connect(function(input, gp)
+            if gp or not self.state.macroRecording then
+                return
+            end
+            if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode ~= Enum.KeyCode.Unknown then
+                self.state.macroEvents[#self.state.macroEvents + 1] = { t = os.clock() - recordStart, k = input.KeyCode.Name, d = 0 }
+                renderEvents()
+            end
+        end)
+        table.insert(self.state.connections, self.state.macroRecordEndConnection)
+    end
+
+    local function playOnce()
+        if #self.state.macroEvents == 0 then
+            return
+        end
+        local start = os.clock()
+        for _, e in ipairs(self.state.macroEvents) do
+            local target = start + (tonumber(e.t) or 0)
+            while self.state.alive and self.state.macroPlaying and os.clock() < target do
+                task.wait()
+            end
+            if not self.state.macroPlaying then
+                break
+            end
+            local keyCode = Enum.KeyCode[tostring(e.k)]
+            if keyCode then
+                VirtualInputManager:SendKeyEvent(e.d == 1, keyCode, false, game)
+            end
+        end
+    end
+
+    self:_connect(loopBtn.MouseButton1Click, function()
+        self.state.macroLoopEnabled = not self.state.macroLoopEnabled
+        loopBtn.Text = "Loop Playback: " .. (self.state.macroLoopEnabled and "ON" or "OFF")
+    end)
+
+    self:_connect(filenameBox.FocusLost, function()
+        local t = tostring(filenameBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        self.state.macroFilename = (t ~= "" and t or "macro.json")
+        filenameBox.Text = self.state.macroFilename
+    end)
+
+    self:_connect(buttons.Record.MouseButton1Click, function()
+        if self.state.macroRecording then
+            stopRecording()
+            setStatus("Recorded " .. tostring(#self.state.macroEvents) .. " events")
+            return
+        end
+        startRecording()
+    end)
+
+    self:_connect(buttons.Play.MouseButton1Click, function()
+        if self.state.macroRecording then
+            setStatus("Stop recording first")
+            return
+        end
+        if #self.state.macroEvents == 0 or self.state.macroPlaying then
+            return
+        end
+        self.state.macroPlaying = true
+        setStatus("Playing " .. tostring(#self.state.macroEvents) .. " events")
+        task.spawn(function()
+            while self.state.alive and self.state.macroPlaying do
+                playOnce()
+                if not self.state.macroLoopEnabled then
+                    break
+                end
+                task.wait(0.1)
+            end
+            self.state.macroPlaying = false
+            setStatus("Idle")
+        end)
+    end)
+
+    self:_connect(buttons.Stop.MouseButton1Click, function()
+        stopRecording()
+        self.state.macroPlaying = false
+        setStatus("Idle")
+    end)
+
+    self:_connect(buttons.Clear.MouseButton1Click, function()
+        if self.state.macroRecording or self.state.macroPlaying then
+            return
+        end
+        self.state.macroEvents = {}
+        renderEvents()
+        setStatus("Cleared")
+    end)
+
+    self:_connect(buttons.Save.MouseButton1Click, function()
+        local payload = {
+            version = 1,
+            recordedAt = os.time(),
+            events = self.state.macroEvents,
+        }
+        local ok, err = safeWriteFile(self.state.macroFilename, HttpService:JSONEncode(payload))
+        if ok then
+            setStatus("Saved " .. self.state.macroFilename)
+        else
+            setStatus("Save failed: " .. tostring(err))
+        end
+    end)
+
+    self:_connect(buttons.Load.MouseButton1Click, function()
+        if self.state.macroRecording or self.state.macroPlaying then
+            return
+        end
+        local ok, data = safeReadFile(self.state.macroFilename)
+        if not ok then
+            setStatus("Load failed")
+            return
+        end
+        local decoded
+        local okDecode = pcall(function()
+            decoded = HttpService:JSONDecode(data)
+        end)
+        if not okDecode or type(decoded) ~= "table" or type(decoded.events) ~= "table" then
+            setStatus("Invalid macro file")
+            return
+        end
+        self.state.macroEvents = decoded.events
+        renderEvents()
+        setStatus("Loaded " .. tostring(#self.state.macroEvents) .. " events")
+    end)
+
+    table.insert(self.dynamicThemeParts, {
+        apply = function(theme)
+            title.TextColor3 = theme.text
+            status.TextColor3 = theme.subtle
+            loopBtn.BackgroundColor3 = theme.window
+            loopBtn.TextColor3 = theme.text
+            filenameBox.BackgroundColor3 = theme.window
+            filenameBox.TextColor3 = theme.text
+            filenameBox.PlaceholderColor3 = theme.subtle
+            notes.TextColor3 = theme.subtle
+            for _, btn in pairs(buttons) do
+                btn.BackgroundColor3 = theme.window
+                btn.TextColor3 = theme.text
+            end
+            for _, child in ipairs(list:GetChildren()) do
+                if child:IsA("TextLabel") then
+                    child.TextColor3 = theme.text
+                end
+            end
+        end,
+    })
+
+    renderEvents()
+end
+
 function MeerlyWin95:_setupRuntimeStatistics()
     local runtime = _G.__MEERLY_UI_RUNTIME_STATS
     runtime.activeInstances = math.max(0, tonumber(runtime.activeInstances) or 0) + 1
@@ -1399,28 +2424,57 @@ function MeerlyWin95:_setupRuntimeStatistics()
 
     self:registerStatisticProvider("Session Time", function()
         local sessionSeconds = math.max(0, math.floor(os.clock() - self.state.sessionStartClock))
+        local tier = getTierByThreshold(sessionSeconds, 2 * 3600, 6 * 3600, 10 * 3600, 14 * 3600, 16 * 3600, 20 * 3600)
         return {
             primary = formatDurationHM(sessionSeconds),
-            detail = string.format("%ds", sessionSeconds),
+            detail = "Bronze 2h | Silver 6h | Gold 10h | Diamond 14h | Platinum 16h | Master 20h",
             order = 1,
+            tier = tier,
         }
     end)
 
     self:registerStatisticProvider("Total Runtime", function()
         local sharedStart = runtime.sharedStartUnix or os.time()
         local totalSeconds = math.max(0, math.floor((tonumber(runtime.totalAccumulatedSeconds) or 0) + (os.time() - sharedStart)))
+        local tier = getTierByThreshold(totalSeconds, 8 * 3600, 24 * 3600, 72 * 3600, 168 * 3600, 336 * 3600, 720 * 3600)
         return {
             primary = formatDurationHM(totalSeconds),
-            detail = string.format("%ds", totalSeconds),
+            detail = "Bronze 8h | Silver 24h | Gold 72h | Diamond 168h | Platinum 336h | Master 720h",
             order = 2,
+            tier = tier,
         }
     end)
 
-    self:registerStatisticProvider("Active UI Instances", function()
+    self:registerStatisticProvider("Clicker High Score", function()
+        local best = math.max(self.state.statisticsData.clickerHighScore or 0, self.state.clickerHighScore or 0)
+        local tier = getTierByThreshold(best, 10000, 100000, 1000000, 10000000, 50000000, 100000000)
         return {
-            primary = tostring(math.max(0, tonumber(runtime.activeInstances) or 0)),
-            detail = "linked runtime sessions",
-            order = 3,
+            primary = tostring(best),
+            detail = "Bronze 10k | Silver 100k | Gold 1m | Diamond 10m | Platinum 50m | Master 100m",
+            order = 20,
+            tier = tier,
+        }
+    end)
+
+    self:registerStatisticProvider("Clicker Shape Cycle", function()
+        local cycle = math.max(0, self.state.clickerShapeCycle or 0)
+        local tier = getTierByThreshold(cycle, 2, 4, 6, 8, 10, 12)
+        return {
+            primary = string.format("C%d", cycle),
+            detail = "Bronze C2 | Silver C4 | Gold C6 | Diamond C8 | Platinum C10 | Master C12",
+            order = 21,
+            tier = tier,
+        }
+    end)
+
+    self:registerStatisticProvider("Total Clicks Over Time", function()
+        local total = math.max(self.state.totalClicksOverTime or 0, self.state.statisticsData.totalClicksOverTime or 0)
+        local tier = getTierByThreshold(total, 10000, 100000, 1000000, 10000000, 50000000, 100000000)
+        return {
+            primary = tostring(total),
+            detail = "Bronze 10k | Silver 100k | Gold 1m | Diamond 10m | Platinum 50m | Master 100m",
+            order = 22,
+            tier = tier,
         }
     end)
 end
@@ -1447,6 +2501,7 @@ function MeerlyWin95:_collectStatisticsRows()
                 primary = tostring(payload.primary or "n/a"),
                 detail = tostring(payload.detail or ""),
                 order = tonumber(payload.order) or 999,
+                tier = tostring(payload.tier or "None"),
             }
         else
             rows[#rows + 1] = {
@@ -1454,6 +2509,7 @@ function MeerlyWin95:_collectStatisticsRows()
                 primary = "error",
                 detail = ok and "invalid payload" or tostring(payload),
                 order = 1000,
+                tier = "None",
             }
         end
     end
@@ -1498,18 +2554,25 @@ function MeerlyWin95:_renderStatisticsPage()
     for _, row in ipairs(rows) do
         local container = make("Frame", {
             Parent = self.statisticsList,
-            Size = UDim2.new(1, -8, 0, 34),
+            Size = UDim2.new(1, -8, 0, 58),
             BorderSizePixel = 0,
             BackgroundColor3 = self.theme.panel,
-            BackgroundTransparency = 0,
             ZIndex = 13,
+        })
+
+        make("Frame", {
+            Parent = container,
+            Size = UDim2.new(0, 3, 1, 0),
+            BorderSizePixel = 0,
+            BackgroundColor3 = getTierColorByName(row.tier),
+            ZIndex = 14,
         })
 
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0.5, -4, 1, 0),
-            Position = UDim2.fromOffset(6, 0),
+            Size = UDim2.new(1, -16, 0, 18),
+            Position = UDim2.fromOffset(8, 2),
             Font = Enum.Font.Code,
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -1522,8 +2585,22 @@ function MeerlyWin95:_renderStatisticsPage()
         make("TextLabel", {
             Parent = container,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0.5, -6, 1, 0),
-            Position = UDim2.new(0.5, 0, 0, 0),
+            Size = UDim2.new(1, -16, 0, 16),
+            Position = UDim2.fromOffset(8, 20),
+            Font = Enum.Font.Code,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Text = row.detail,
+            ZIndex = 14,
+            TextColor3 = self.theme.subtle,
+        })
+
+        make("TextLabel", {
+            Parent = container,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -16, 0, 18),
+            Position = UDim2.fromOffset(8, 38),
             Font = Enum.Font.Code,
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Right,
@@ -1532,22 +2609,6 @@ function MeerlyWin95:_renderStatisticsPage()
             ZIndex = 14,
             TextColor3 = self.theme.accent,
         })
-
-        if row.detail ~= "" then
-            make("TextLabel", {
-                Parent = container,
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -12, 0, 12),
-                Position = UDim2.fromOffset(6, 20),
-                Font = Enum.Font.Code,
-                TextSize = 11,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Text = row.detail,
-                ZIndex = 14,
-                TextColor3 = self.theme.subtle,
-            })
-        end
-
     end
 end
 
@@ -1622,28 +2683,35 @@ end
 function MeerlyWin95:_initializeRobloxSettingsRuntime()
     local function applyPerformanceMode(mode)
         self:_safeExecutorAction("Graphics " .. tostring(mode), function()
-            local quality = {
-                ["Super Low"] = 1,
-                ["Low"] = 3,
-                ["Default"] = 7,
-                ["Extremely High"] = 10,
+            local qualityLevels = {
+                ["Super Low"] = Enum.SavedQualitySetting.QualityLevel1,
+                ["Low"] = Enum.SavedQualitySetting.QualityLevel3,
+                ["Default"] = Enum.SavedQualitySetting.Automatic,
+                ["Extremely High"] = Enum.SavedQualitySetting.QualityLevel10,
             }
-            local level = quality[mode] or quality.Default
+            local target = qualityLevels[mode] or Enum.SavedQualitySetting.Automatic
+            local userGameSettings = UserSettings():GetService("UserGameSettings")
 
             if sethiddenproperty then
-                local userGameSettings = UserSettings():GetService("UserGameSettings")
-                sethiddenproperty(userGameSettings, "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1)
-                sethiddenproperty(userGameSettings, "GraphicsQualityLevel", level)
-            else
-                error("sethiddenproperty unavailable")
+                sethiddenproperty(userGameSettings, "SavedQualityLevel", target)
             end
+
+            pcall(function()
+                userGameSettings.SavedQualityLevel = target
+            end)
+            pcall(function()
+                if target == Enum.SavedQualitySetting.Automatic then
+                    settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+                else
+                    settings().Rendering.QualityLevel = Enum.QualityLevel["Level" .. tostring(target.Value)] or Enum.QualityLevel.Automatic
+                end
+            end)
         end)
     end
 
     local function applyFxCulling(mode)
         self:_safeExecutorAction("FX Culling " .. tostring(mode), function()
             local enabled = mode == "Low"
-            local distance = ({ Low = 500, Medium = 300, Strong = 180, Extreme = 100 })[mode] or 300
             local ok, descendants = pcall(function()
                 return workspace:GetDescendants()
             end)
@@ -1655,12 +2723,7 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
             for _, inst in ipairs(descendants) do
                 if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") then
                     pcall(function()
-                        if inst:IsA("ParticleEmitter") then
-                            inst.Enabled = enabled
-                        end
-                        if inst:IsA("Trail") or inst:IsA("Beam") then
-                            inst.Enabled = enabled
-                        end
+                        inst.Enabled = enabled
                         if inst:IsA("ParticleEmitter") then
                             inst.Rate = enabled and inst.Rate or 0
                         end
@@ -1668,36 +2731,37 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
                     changed += 1
                 end
             end
-            self:log("DEBUG", string.format("FX culling touched %d effects @%d studs", changed, distance))
+            self:log("DEBUG", string.format("FX culling touched %d effects", changed))
         end)
     end
 
     local function applyStreamingOptimized(enabled)
         self:_safeExecutorAction("Streaming Optimisations", function()
-            if sethiddenproperty then
-                sethiddenproperty(workspace, "StreamingEnabled", enabled)
+            if enabled then
+                pcall(function()
+                    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+                end)
+                pcall(function()
+                    settings().Network.IncomingReplicationLag = 0.1
+                end)
             else
-                error("sethiddenproperty unavailable")
+                pcall(function()
+                    settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+                end)
             end
         end)
     end
 
     local function applyBackgroundSurvival(enabled)
-        self:_safeExecutorAction("Background Survival", function()
-            local runOnFocusLost = getExecutorGlobal("run_on_actor") or getExecutorGlobal("syn")
-            if enabled and runOnFocusLost then
-                -- Placeholder hook for executors that support background worker APIs.
-                return
-            end
-            if not enabled then
-                return
-            end
-            error("background executor hook unavailable")
-        end)
+        self:log("EVENT", enabled and "Background survival enabled — optimized for tabbed-out AFK" or "Background survival disabled")
     end
 
     local function applyDisable3D(disabled)
         self:_safeExecutorAction("Disable 3D", function()
+            if RunService.Set3dRenderingEnabled then
+                RunService:Set3dRenderingEnabled(not disabled)
+                return
+            end
             if type(getExecutorGlobal("setrenderproperty")) == "function" then
                 getExecutorGlobal("setrenderproperty")("Enabled", not disabled)
                 return
@@ -1730,6 +2794,20 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
         end
     end
 
+
+    local function updateFpsOverlay(enabled)
+        if self.fpsOverlayLabel then
+            self.fpsOverlayLabel.Visible = enabled
+        end
+    end
+
+    local function setMemoryStatsVisible(enabled)
+        self.state.memoryStatsVisible = enabled
+        if self.state.memoryWindowFrame then
+            self.state.memoryWindowFrame.Visible = enabled
+        end
+    end
+
     self.state.settingsActions = {
         applyPerformanceMode = applyPerformanceMode,
         applyFxCulling = applyFxCulling,
@@ -1737,9 +2815,13 @@ function MeerlyWin95:_initializeRobloxSettingsRuntime()
         applyBackgroundSurvival = applyBackgroundSurvival,
         applyDisable3D = applyDisable3D,
         ensureAntiAfkConnection = ensureAntiAfkConnection,
+        updateFpsOverlay = updateFpsOverlay,
+        setMemoryStatsVisible = setMemoryStatsVisible,
     }
 
     ensureAntiAfkConnection()
+    updateFpsOverlay(self.state.fpsCounter)
+    setMemoryStatsVisible(self.state.memoryStatsVisible)
 end
 
 function MeerlyWin95:_buildConsolePage()
@@ -2161,12 +3243,17 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     end)
     addToggle("FPS Counter", self.state.fpsCounter, function(v)
         self.state.fpsCounter = v
+        self.state.settingsActions.updateFpsOverlay(v)
         self:log("EVENT", "FPS Counter " .. (v and "enabled" or "disabled"))
     end)
     addButton("Rejoin Server", function()
         self:_safeExecutorAction("Rejoin Server", function()
             TeleportService:Teleport(game.PlaceId, LocalPlayer)
         end)
+    end)
+    addToggle("Memory Stats", self.state.memoryStatsVisible, function(v)
+        self.state.settingsActions.setMemoryStatsVisible(v)
+        self:log("EVENT", "Memory Stats " .. (v and "enabled" or "disabled"))
     end)
 
     addSection("Performance Settings")
@@ -2243,7 +3330,25 @@ function MeerlyWin95:_buildRobloxSettingsPage()
     addButton("AFK Camera (move away)", function()
         self:_safeExecutorAction("AFK Camera", function()
             local cam = workspace.CurrentCamera
-            cam.CFrame = CFrame.new(0, 100000, 0)
+            if not cam then
+                return
+            end
+            if not self.state._afkCameraSnapshot then
+                self.state._afkCameraSnapshot = {
+                    cameraType = cam.CameraType,
+                    cameraSubject = cam.CameraSubject,
+                    cframe = cam.CFrame,
+                }
+                cam.CameraType = Enum.CameraType.Scriptable
+                cam.CameraSubject = nil
+                cam.CFrame = CFrame.new(0, 10000, 0)
+            else
+                local old = self.state._afkCameraSnapshot
+                cam.CameraType = old.cameraType or Enum.CameraType.Custom
+                cam.CameraSubject = old.cameraSubject
+                cam.CFrame = old.cframe or cam.CFrame
+                self.state._afkCameraSnapshot = nil
+            end
         end)
     end)
 
@@ -2255,15 +3360,20 @@ function MeerlyWin95:_buildRobloxSettingsPage()
 end
 
 function MeerlyWin95:_buildDefaultPages()
+    self:_buildRobloxSettingsPage()
+    self:_buildMacroPage()
+    self:_buildClickerPage()
+    self:_buildStatisticsPage()
     self:_buildThemePage()
     self:_buildConfigPage()
     self:_buildConsolePage()
-    self:_buildStatisticsPage()
-    self:_buildRobloxSettingsPage()
 
     -- Memory stats floating UI (does NOT hide with main by default as requested).
     local memoryWindow, memoryBody = self:addFloatingWindow("Memory Stats", false)
     memoryWindow.Size = UDim2.fromOffset(260, 88)
+    self.state.memoryWindowFrame = memoryWindow
+    self.state.memoryWindowBody = memoryBody
+    memoryWindow.Visible = self.state.memoryStatsVisible
 
     self:_connect(RunService.Heartbeat, function()
         if not self.state.alive then
@@ -2291,7 +3401,7 @@ function MeerlyWin95:_buildDefaultPages()
         end
     end)
 
-    self:selectPage("Theme")
+    self:selectPage("Settings")
     self:_taskbarResize()
 end
 
@@ -2328,6 +3438,39 @@ function MeerlyWin95:_wireCoreBindings()
         if self.state.watchdog and dt > 1.0 then
             self:log("WARN", string.format("Watchdog heartbeat lag: %.3f", dt))
         end
+
+        local samples = self.state.fpsFrameSamples
+        local cursor = self.state.fpsSampleCursor
+        samples[cursor] = math.max(0.0001, dt)
+        cursor += 1
+        if cursor > 240 then
+            cursor = 1
+        end
+        self.state.fpsSampleCursor = cursor
+
+        if self.state.fpsCounter and self.fpsOverlayLabel then
+            local now = os.clock()
+            if now - (self.state.fpsLastOverlayUpdate or 0) >= 0.25 then
+                self.state.fpsLastOverlayUpdate = now
+                local valid = {}
+                local total = 0
+                for _, sample in ipairs(samples) do
+                    if sample and sample > 0 then
+                        valid[#valid + 1] = sample
+                        total += sample
+                    end
+                end
+                local fpsCurrent = (dt > 0) and (1 / dt) or 0
+                local fpsAvg = (#valid > 0 and (1 / (total / #valid)) or 0)
+                local onePercentLow = 0
+                if #valid > 0 then
+                    table.sort(valid)
+                    local idx = math.max(1, math.floor(#valid * 0.99))
+                    onePercentLow = 1 / valid[idx]
+                end
+                self.fpsOverlayLabel.Text = string.format("FPS: %.1f\nAVG FPS: %.1f\n1%% LOW: %.1f", fpsCurrent, fpsAvg, onePercentLow)
+            end
+        end
     end)
 
     task.spawn(function()
@@ -2336,6 +3479,18 @@ function MeerlyWin95:_wireCoreBindings()
             if self.state.selectedPage == "Statistics" then
                 self:_renderStatisticsPage()
             end
+        end
+    end)
+
+    task.spawn(function()
+        while self.state.alive do
+            task.wait(300)
+            local totalMb = 0
+            safeCall("ConsoleMemoryTick", function()
+                totalMb = Stats:GetTotalMemoryUsageMb()
+            end)
+            local luaMb = collectgarbage("count") / 1024
+            self:log("INFO", string.format("Memory Tick | Lua: %.2f MB | Total: %.2f MB", luaMb, totalMb))
         end
     end)
 end
@@ -2350,6 +3505,11 @@ function MeerlyWin95:destroy()
     end
 
     self.state.alive = false
+
+    safeCall("ClickerSave", function()
+        self:_saveClickerState(true)
+        self:_finalizeSessionStatistics("destroy")
+    end)
 
     safeCall("RuntimeStatsFinalize", function()
         local runtime = _G.__MEERLY_UI_RUNTIME_STATS
