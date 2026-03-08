@@ -16,8 +16,8 @@ local CONFIG = {
     LibraryPath = "MeerlyWin95UILibrary.lua",
     LibraryRawUrl = "https://raw.githubusercontent.com/ItsMeerly/MeerlyScriptHub/refs/heads/main/MeerlyWin95UILibrary.lua",
     UseDefaultRawFallbacks = true,
-    AccessKey = "1234",
-    AccessLink = "https://work.ink/2kaV/meerlype-key123",
+    AccessKey = "ForLoveWithLove",
+    AccessLink = "https://work.ink/2kaV/meerlyunrng",
     Title = "Meerly Win95 - PU Migration",
     ToggleKey = Enum.KeyCode.Semicolon,
 }
@@ -934,10 +934,11 @@ end
 
 local originalBuildDefaultPages = MeerlyWin95._buildDefaultPages
 function MeerlyWin95:_buildDefaultPages()
-    originalBuildDefaultPages(self)
+    -- Build PU pages first so they appear before library default pages in taskbar.
     self:_buildPUMigratedWeaponsPage()
     self:_buildPUMigratedUtilityPage()
     self:_buildPUMigratedTeleportsPage()
+    originalBuildDefaultPages(self)
 end
 
 if player.Character then
