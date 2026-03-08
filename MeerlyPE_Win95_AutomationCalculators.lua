@@ -19,7 +19,9 @@ local CONFIG = {
     LibraryPath = "MeerlyWin95UILibrary.lua",
     -- Optional remote fallback. Example:
     -- LibraryRawUrl = "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/MeerlyWin95UILibrary.lua",
-    LibraryRawUrl = nil,
+    LibraryRawUrl = "https://raw.githubusercontent.com/ItsMeerly/MeerlyScriptHub/refs/heads/main/MeerlyWin95UILibrary.lua",
+    -- Optional: when true, also probes common raw GitHub URLs for the library file.
+    UseDefaultRawFallbacks = true,
     AccessKey = "1234",
     AccessLink = "https://work.ink/2kaV/meerlype-key123",
     Title = "Meerly Win95 + PE Automation/Calculators",
@@ -36,6 +38,14 @@ end
 
 local function loadWin95Library()
     local tried = {}
+    local triedSet = {}
+
+    local function markTried(tag)
+        if not triedSet[tag] then
+            triedSet[tag] = true
+            tried[#tried + 1] = tag
+        end
+    end
 
     local function tryRead(path)
         if type(readfile) ~= "function" then
@@ -45,7 +55,7 @@ local function loadWin95Library()
             return nil
         end
 
-        tried[#tried + 1] = "file:" .. path
+        markTried("file:" .. path)
         local ok, result = pcall(readfile, path)
         if ok and type(result) == "string" and result ~= "" then
             return result
@@ -53,7 +63,7 @@ local function loadWin95Library()
 
         if type(result) == "string" and string.find(result, "Expected File But Got Directory", 1, true) then
             local initPath = string.gsub(path, "/+$", "") .. "/init.lua"
-            tried[#tried + 1] = "file:" .. initPath
+            markTried("file:" .. initPath)
             local okInit, initResult = pcall(readfile, initPath)
             if okInit and type(initResult) == "string" and initResult ~= "" then
                 return initResult
@@ -81,7 +91,7 @@ local function loadWin95Library()
             return nil
         end
 
-        tried[#tried + 1] = "url:" .. url
+        markTried("url:" .. url)
         local ok, result = pcall(getter, url)
         if ok and type(result) == "string" and result ~= "" then
             return result
@@ -90,14 +100,66 @@ local function loadWin95Library()
         return nil
     end
 
-    local source =
-        tryRead(CONFIG.LibraryPath)
-        or tryRead("./" .. tostring(CONFIG.LibraryPath or ""))
-        or tryRead("MeerlyWin95UILibrary.lua")
-        or tryRead("./MeerlyWin95UILibrary.lua")
-        or tryHttpGet(CONFIG.LibraryRawUrl)
+    local function discoverLocalCandidates()
+        local candidates = {
+            CONFIG.LibraryPath,
+            "./" .. tostring(CONFIG.LibraryPath or ""),
+            "MeerlyWin95UILibrary.lua",
+            "./MeerlyWin95UILibrary.lua",
+            "MeerlyWin95UILibrary/init.lua",
+            "./MeerlyWin95UILibrary/init.lua",
+        }
 
-    assert(source, "Failed to load Win95 library source. Tried: " .. table.concat(tried, ", "))
+        if type(listfiles) == "function" then
+            local ok, files = pcall(listfiles, ".")
+            if ok and type(files) == "table" then
+                for _, full in ipairs(files) do
+                    local lower = string.lower(tostring(full))
+                    if lower:find("win95") and lower:sub(-4) == ".lua" then
+                        candidates[#candidates + 1] = full
+                    end
+                end
+            end
+        end
+
+        return candidates
+    end
+
+    local function defaultRawUrls()
+        if CONFIG.UseDefaultRawFallbacks == false then
+            return {}
+        end
+
+        return {
+            "https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/main/MeerlyWin95UILibrary.lua",
+            "https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/master/MeerlyWin95UILibrary.lua",
+            "https://raw.githubusercontent.com/ItsMeerly/MeerlyPE/main/MeerlyWin95UILibrary.lua",
+            "https://raw.githubusercontent.com/ItsMeerly/MeerlyPE/master/MeerlyWin95UILibrary.lua",
+        }
+    end
+
+    local source
+    for _, candidate in ipairs(discoverLocalCandidates()) do
+        source = tryRead(candidate)
+        if source then
+            break
+        end
+    end
+
+    if not source then
+        source = tryHttpGet(CONFIG.LibraryRawUrl)
+    end
+
+    if not source then
+        for _, url in ipairs(defaultRawUrls()) do
+            source = tryHttpGet(url)
+            if source then
+                break
+            end
+        end
+    end
+
+    assert(source, "Failed to load Win95 library source. Set CONFIG.LibraryRawUrl if needed. Tried: " .. table.concat(tried, ", "))
 
     source = source:gsub(
         'local HARDCODED_KEY = ".-"',
@@ -360,7 +422,6 @@ local function addAccordion(page, title, defaultOpen)
 
     refresh()
     addSimpleBevel(header)
-    addSimpleBevel(body)
     bindDynamicTheme(ui, function(theme)
         header.BackgroundColor3 = theme.window
         header.TextColor3 = theme.text
