@@ -19,7 +19,7 @@ local CONFIG = {
     LibraryPath = "MeerlyWin95UILibrary.lua",
     AccessKey = "1234",
     AccessLink = "https://work.ink/2kaV/meerlype-key123",
-    Title = "Meerly Win95 + PE Automation/Calculators",
+    Title = "MeerlyPE Win95",
     ToggleKey = Enum.KeyCode.Semicolon,
 }
 
