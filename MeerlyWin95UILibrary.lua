@@ -1937,15 +1937,13 @@ function MeerlyWin95:_buildClickerPage()
                 edge.Visible = false
             end
         end
-        shapeInfo.Text = string.format("Shape: %d-gon
-Cycle: C%d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
+        shapeInfo.Text = string.format("Shape: %d-gon\nCycle: C%d", self.state.clickerShapeVertices, self.state.clickerShapeCycle)
     end
 
     local function refresh()
         toggle.Text = "Mini Game: " .. (self.state.clickerRunning and "ON" or "OFF")
         status.Text = string.format(
-            "Score: %d | High: %d
-Click Power: %d | Passive: %d/s | Total Clicks Over Time: %d",
+            "Score: %d | High: %d\nClick Power: %d | Passive: %d/s | Total Clicks Over Time: %d",
             self.state.clickerScore,
             self.state.clickerHighScore,
             self.state.clickPower,
@@ -2564,6 +2562,14 @@ function MeerlyWin95:_renderStatisticsPage()
             Parent = container,
             Size = UDim2.new(0, 3, 1, 0),
             Position = UDim2.fromOffset(0, 0),
+            BorderSizePixel = 0,
+            BackgroundColor3 = getTierColorByName(row.tier),
+            ZIndex = 14,
+        })
+
+        make("Frame", {
+            Parent = container,
+            Size = UDim2.new(0, 3, 1, 0),
             BorderSizePixel = 0,
             BackgroundColor3 = getTierColorByName(row.tier),
             ZIndex = 14,
