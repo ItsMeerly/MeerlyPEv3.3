@@ -47,16 +47,20 @@ local KEY_LINK = "https://example.com/get-key"
 -- // -------------------------------------------------------------------------
 -- // Internal shared config storage (unified file-ish table)
 -- // -------------------------------------------------------------------------
-_G.__MEERLY_UI_CONFIGS = _G.__MEERLY_UI_CONFIGS or {
-    activeSlot = 1,
-    slots = {
-        [1] = { name = "Config 1", data = nil },
-        [2] = { name = "Config 2", data = nil },
-        [3] = { name = "Config 3", data = nil },
-        [4] = { name = "Config 4", data = nil },
-        [5] = { name = "Config 5", data = nil },
+local function makeDefaultUnifiedConfigStore()
+    return {
+        activeSlot = 1,
+        slots = {
+            [1] = { name = "Config 1", data = nil },
+            [2] = { name = "Config 2", data = nil },
+            [3] = { name = "Config 3", data = nil },
+            [4] = { name = "Config 4", data = nil },
+            [5] = { name = "Config 5", data = nil },
+        }
     }
-}
+end
+
+_G.__MEERLY_UI_CONFIGS = _G.__MEERLY_UI_CONFIGS or makeDefaultUnifiedConfigStore()
 
 _G.__MEERLY_UI_RUNTIME_STATS = _G.__MEERLY_UI_RUNTIME_STATS or {
     totalAccumulatedSeconds = 0,
@@ -242,6 +246,7 @@ end
 
 
 local UNIVERSAL_SAVE_FOLDER = "MeerlyWin95LibUniversalSave"
+local UNIFIED_CONFIGS_FILE = "unified_configs.json"
 
 local function resolveUniversalSavePath(path)
     local fileName = tostring(path or "")
@@ -288,6 +293,46 @@ local function safeReadFile(path)
         return ok, data
     end
     return false, "readfile unavailable"
+end
+
+local function loadUnifiedConfigStoreFromDisk()
+    local okRead, raw = safeReadFile(UNIFIED_CONFIGS_FILE)
+    if not okRead or type(raw) ~= "string" or #raw == 0 then
+        return
+    end
+
+    local okDecode, parsed = pcall(function()
+        return HttpService:JSONDecode(raw)
+    end)
+    if not okDecode or type(parsed) ~= "table" then
+        return
+    end
+
+    local defaults = makeDefaultUnifiedConfigStore()
+    local normalized = {
+        activeSlot = math.clamp(math.floor(tonumber(parsed.activeSlot) or defaults.activeSlot), 1, 5),
+        slots = {}
+    }
+
+    for slot = 1, 5 do
+        local parsedSlot = type(parsed.slots) == "table" and parsed.slots[slot] or nil
+        if type(parsedSlot) == "table" then
+            normalized.slots[slot] = {
+                name = tostring(parsedSlot.name or defaults.slots[slot].name),
+                data = type(parsedSlot.data) == "table" and parsedSlot.data or nil,
+            }
+        else
+            normalized.slots[slot] = defaults.slots[slot]
+        end
+    end
+
+    _G.__MEERLY_UI_CONFIGS = normalized
+end
+
+
+local function persistUnifiedConfigStoreToDisk()
+    local payload = HttpService:JSONEncode(_G.__MEERLY_UI_CONFIGS)
+    return safeWriteFile(UNIFIED_CONFIGS_FILE, payload)
 end
 
 local function getTierByThreshold(value, bronze, silver, gold, diamond, platinum, master)
@@ -451,6 +496,8 @@ function MeerlyWin95.new(options)
     local self = setmetatable({}, MeerlyWin95)
 
     options = options or {}
+
+    loadUnifiedConfigStoreFromDisk()
 
     self.settings = {
         title = options.title or "Meerly Win95 UI",
@@ -1530,12 +1577,14 @@ function MeerlyWin95:_buildConfigPage()
 
         self:_connect(nameBox.FocusLost, function()
             _G.__MEERLY_UI_CONFIGS.slots[slot].name = nameBox.Text ~= "" and nameBox.Text or ("Config " .. slot)
+            persistUnifiedConfigStoreToDisk()
         end)
 
         self:_connect(save.MouseButton1Click, function()
             _G.__MEERLY_UI_CONFIGS.activeSlot = slot
             _G.__MEERLY_UI_CONFIGS.slots[slot].name = nameBox.Text ~= "" and nameBox.Text or ("Config " .. slot)
             _G.__MEERLY_UI_CONFIGS.slots[slot].data = self:_snapshotConfig()
+            persistUnifiedConfigStoreToDisk()
             refreshPreview()
             self:log("EVENT", "Saved config slot " .. slot)
         end)
@@ -1544,6 +1593,7 @@ function MeerlyWin95:_buildConfigPage()
             local data = _G.__MEERLY_UI_CONFIGS.slots[slot].data
             if data then
                 _G.__MEERLY_UI_CONFIGS.activeSlot = slot
+                persistUnifiedConfigStoreToDisk()
                 self:_loadSnapshot(data)
                 self:log("EVENT", "Loaded config slot " .. slot)
             else
@@ -1553,6 +1603,7 @@ function MeerlyWin95:_buildConfigPage()
 
         self:_connect(clear.MouseButton1Click, function()
             _G.__MEERLY_UI_CONFIGS.slots[slot].data = nil
+            persistUnifiedConfigStoreToDisk()
             refreshPreview()
             self:log("EVENT", "Cleared config slot " .. slot)
         end)
