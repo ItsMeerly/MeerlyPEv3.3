@@ -151,42 +151,15 @@ local function loadWin95Library()
 
     assert(source, "Failed to load Win95 library source. Tried: " .. table.concat(tried, ", "))
 
-    local accessKeyEscaped = escapeLuaString(CONFIG.AccessKey)
-    local accessLinkEscaped = escapeLuaString(CONFIG.AccessLink)
+    source = source:gsub(
+        'local HARDCODED_KEY = ".-"',
+        'local HARDCODED_KEY = "' .. escapeLuaString(CONFIG.AccessKey) .. '"'
+    )
 
-    local function patchConstant(sourceText, constantName, replacementValue)
-        local replacement = string.format('local %s = "%s"', constantName, replacementValue)
-        local patterns = {
-            string.format('local%%s+%s%%s*=%%s*"[^"]*"', constantName),
-            string.format("local%%s+%s%%s*=%%s*'[^']*'", constantName),
-            string.format('%s%%s*=%%s*"[^"]*"', constantName),
-            string.format("%s%%s*=%%s*'[^']*'", constantName),
-        }
-
-        local replacements = 0
-        for _, pattern in ipairs(patterns) do
-            sourceText, replacements = sourceText:gsub(pattern, replacement, 1)
-            if replacements > 0 then
-                return sourceText, true
-            end
-        end
-
-        return sourceText, false
-    end
-
-    local keyPatched
-    source, keyPatched = patchConstant(source, "HARDCODED_KEY", accessKeyEscaped)
-
-    local linkPatched
-    source, linkPatched = patchConstant(source, "KEY_LINK", accessLinkEscaped)
-
-    if not keyPatched then
-        warn("[MeerlyPU_Win95_Migrated] Failed to patch HARDCODED_KEY; proceeding with library default key")
-    end
-
-    if not linkPatched then
-        warn("[MeerlyPU_Win95_Migrated] Failed to patch KEY_LINK; proceeding with library default link")
-    end
+    source = source:gsub(
+        'local KEY_LINK = ".-"',
+        'local KEY_LINK = "' .. escapeLuaString(CONFIG.AccessLink) .. '"'
+    )
 
     source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
 
