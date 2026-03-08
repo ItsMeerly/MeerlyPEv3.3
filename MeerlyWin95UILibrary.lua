@@ -241,10 +241,38 @@ local function formatDurationHM(totalSeconds)
 end
 
 
+local UNIVERSAL_SAVE_FOLDER = "MeerlyWin95LibUniversalSave"
+
+local function resolveUniversalSavePath(path)
+    local fileName = tostring(path or "")
+    if fileName == "" then
+        return UNIVERSAL_SAVE_FOLDER
+    end
+    fileName = fileName:gsub("^/+", "")
+    return string.format("%s/%s", UNIVERSAL_SAVE_FOLDER, fileName)
+end
+
+local function ensureUniversalSaveFolder()
+    if type(isfolder) == "function" and isfolder(UNIVERSAL_SAVE_FOLDER) then
+        return true
+    end
+    if type(makefolder) == "function" then
+        local ok = pcall(function()
+            makefolder(UNIVERSAL_SAVE_FOLDER)
+        end)
+        if ok then
+            return true
+        end
+    end
+    return type(isfolder) == "function" and isfolder(UNIVERSAL_SAVE_FOLDER)
+end
+
 local function safeWriteFile(path, content)
     if type(writefile) == "function" then
+        local filePath = resolveUniversalSavePath(path)
+        ensureUniversalSaveFolder()
         return pcall(function()
-            writefile(path, content)
+            writefile(filePath, content)
         end)
     end
     return false, "writefile unavailable"
@@ -252,8 +280,10 @@ end
 
 local function safeReadFile(path)
     if type(readfile) == "function" then
+        local filePath = resolveUniversalSavePath(path)
+        ensureUniversalSaveFolder()
         local ok, data = pcall(function()
-            return readfile(path)
+            return readfile(filePath)
         end)
         return ok, data
     end
