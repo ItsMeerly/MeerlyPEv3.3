@@ -161,15 +161,76 @@ local function loadWin95Library()
 
     assert(source, "Failed to load Win95 library source. Set CONFIG.LibraryRawUrl if needed. Tried: " .. table.concat(tried, ", "))
 
-    source = source:gsub(
-        'local HARDCODED_KEY = ".-"',
-        'local HARDCODED_KEY = "' .. escapeLuaString(CONFIG.AccessKey) .. '"'
-    )
+    local escapedKey = escapeLuaString(CONFIG.AccessKey)
+    local escapedLink = escapeLuaString(CONFIG.AccessLink)
 
-    source = source:gsub(
-        'local KEY_LINK = ".-"',
-        'local KEY_LINK = "' .. escapeLuaString(CONFIG.AccessLink) .. '"'
-    )
+    local keyPatched = false
+    local linkPatched = false
+
+    local keyPatterns = {
+        'local%s+HARDCODED_KEY%s*=%s*".-"',
+        "local%s+HARDCODED_KEY%s*=%s*'.-'",
+    }
+
+    for _, pattern in ipairs(keyPatterns) do
+        local replaced
+        source, replaced = source:gsub(pattern, 'local HARDCODED_KEY = "' .. escapedKey .. '"', 1)
+        if replaced > 0 then
+            keyPatched = true
+            break
+        end
+    end
+
+    local linkPatterns = {
+        'local%s+KEY_LINK%s*=%s*".-"',
+        "local%s+KEY_LINK%s*=%s*'.-'",
+    }
+
+    for _, pattern in ipairs(linkPatterns) do
+        local replaced
+        source, replaced = source:gsub(pattern, 'local KEY_LINK = "' .. escapedLink .. '"', 1)
+        if replaced > 0 then
+            linkPatched = true
+            break
+        end
+    end
+
+    -- Fallbacks for variants that inline literals or rename constants.
+    if not keyPatched then
+        local replaced
+        source, replaced = source:gsub('MEERLY%-ACCESS%-KEY', escapedKey, 1)
+        keyPatched = replaced > 0
+    end
+
+    if not linkPatched then
+        local replaced
+        source, replaced = source:gsub('https://example%.com/get%-key', escapedLink, 1)
+        linkPatched = replaced > 0
+    end
+
+    if not keyPatched then
+        local replaced
+        source, replaced = source:gsub('if%s+keyInput%.Text%s*==%s*[%w_%.]+%s+then', 'if keyInput.Text == "' .. escapedKey .. '" then', 1)
+        keyPatched = replaced > 0
+    end
+
+    if not linkPatched then
+        local replaced
+        source, replaced = source:gsub(
+            'Text%s*=%s*"Enter access key to load UI features%.\nKey link:%s*"%s*%.%.%s*[%w_%.]+',
+            'Text = "Enter access key to load UI features\nKey link: ' .. escapedLink .. '"',
+            1
+        )
+        linkPatched = replaced > 0
+    end
+
+    if not keyPatched then
+        warn('[MeerlyPU_Win95_Migrated] Unable to patch key in loaded Win95 library source; continuing.')
+    end
+
+    if not linkPatched then
+        warn('[MeerlyPU_Win95_Migrated] Unable to patch link in loaded Win95 library source; continuing.')
+    end
 
     -- Some client builds reject ScrollingFrame.ScrollBarInset; strip this property
     -- from the loaded source to avoid noisy runtime warnings.
@@ -1095,10 +1156,64 @@ function MeerlyWin95:_buildDefaultPages()
     originalBuildDefaultPages(self)
 end
 
+
+local function applyRuntimeKeygateOverride(app)
+    if not app or not app.keyGate then
+        return
+    end
+
+    local keyGate = app.keyGate
+    local keyInput
+    local unlockBtn
+    local statusLabel
+    local infoLabel
+
+    for _, child in ipairs(keyGate:GetChildren()) do
+        if child:IsA("TextBox") and not keyInput then
+            keyInput = child
+        elseif child:IsA("TextButton") and child.Text == "Unlock" and not unlockBtn then
+            unlockBtn = child
+        elseif child:IsA("TextLabel") then
+            if string.find(child.Text or "", "Key link:", 1, true) then
+                infoLabel = child
+            elseif (child.Text == "Locked" or child.Text == "Invalid key" or child.Text == "Access granted") and not statusLabel then
+                statusLabel = child
+            end
+        end
+    end
+
+    if infoLabel then
+        infoLabel.Text = "Enter access key to load UI features.\nKey link: " .. tostring(CONFIG.AccessLink)
+    end
+
+    if keyInput and unlockBtn then
+        unlockBtn.MouseButton1Click:Connect(function()
+            if keyInput.Text == tostring(CONFIG.AccessKey) then
+                app.state.unlocked = true
+                keyGate.Visible = false
+                if statusLabel then
+                    statusLabel.Text = "Access granted"
+                end
+                if app._taskbarResize then
+                    app:_taskbarResize()
+                end
+                if app.state and app.state.selectedPage and app.selectPage then
+                    app:selectPage(app.state.selectedPage)
+                end
+                if app.log then
+                    app:log("EVENT", "Keygate unlocked (PU override)")
+                end
+            end
+        end)
+    end
+end
+
 local app = MeerlyWin95.new({
     title = CONFIG.Title,
     toggleKey = CONFIG.ToggleKey,
 })
+
+applyRuntimeKeygateOverride(app)
 
 _G.MeerlyWin95_PE = app
 return app
