@@ -171,12 +171,6 @@ local function loadWin95Library()
         end
     end
 
-    if not keyPatched then
-        local replaced
-        source, replaced = source:gsub('MEERLY%-ACCESS%-KEY', escapedKey, 1)
-        keyPatched = replaced > 0
-    end
-
     local linkPatterns = {
         'local%s+KEY_LINK%s*=%s*".-"',
         "local%s+KEY_LINK%s*=%s*'.-'",
@@ -191,14 +185,42 @@ local function loadWin95Library()
         end
     end
 
+    -- Fallbacks for variants that inline literals or rename constants.
+    if not keyPatched then
+        local replaced
+        source, replaced = source:gsub('MEERLY%-ACCESS%-KEY', escapedKey, 1)
+        keyPatched = replaced > 0
+    end
+
     if not linkPatched then
         local replaced
         source, replaced = source:gsub('https://example%.com/get%-key', escapedLink, 1)
         linkPatched = replaced > 0
     end
 
-    assert(keyPatched, "Failed to patch HARDCODED_KEY in Win95 library source")
-    assert(linkPatched, "Failed to patch KEY_LINK in Win95 library source")
+    if not keyPatched then
+        local replaced
+        source, replaced = source:gsub('if%s+keyInput%.Text%s*==%s*[%w_%.]+%s+then', 'if keyInput.Text == "' .. escapedKey .. '" then', 1)
+        keyPatched = replaced > 0
+    end
+
+    if not linkPatched then
+        local replaced
+        source, replaced = source:gsub(
+            'Text%s*=%s*"Enter access key to load UI features%.\nKey link:%s*"%s*%.%.%s*[%w_%.]+',
+            'Text = "Enter access key to load UI features\nKey link: ' .. escapedLink .. '"',
+            1
+        )
+        linkPatched = replaced > 0
+    end
+
+    if not keyPatched then
+        warn('[MeerlyPU_Win95_Migrated] Unable to patch key in loaded Win95 library source; continuing.')
+    end
+
+    if not linkPatched then
+        warn('[MeerlyPU_Win95_Migrated] Unable to patch link in loaded Win95 library source; continuing.')
+    end
 
     source = source:gsub("ScrollBarInset%s*=%s*Enum%.ScrollBarInset%.%w+%s*,?%s*", "")
 
