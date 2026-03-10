@@ -1830,11 +1830,6 @@ makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
     setDisappearHider(v)
 end, "OP Settings")
 
-makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
-    aggressiveFxCullEnabled = v
-    applyAggressiveFxCull(v)
-end, "OP Settings")
-
 makeToggle("Cull Mob Parts - Custom Hide Mobs", cullMobPartsEnabled, function(v)
     applyMobPartsCull(v)
 end, "OP Settings")
@@ -1925,6 +1920,11 @@ makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
     lowGraphicsEnabled = v
     applyVisuals(v)
     log(v and "Low graphics enabled" or "Low graphics disabled")
+end, "Settings")
+
+makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
+    aggressiveFxCullEnabled = v
+    applyAggressiveFxCull(v)
 end, "Settings")
 
 makeToggle("Streaming Optimisations", streamingOptimized, function(v)
