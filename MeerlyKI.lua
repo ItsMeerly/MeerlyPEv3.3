@@ -458,6 +458,7 @@ local function makeButton(text, callback, tabName)
     return button
 end
 
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
 local function makeInlineButtons(buttons, tabName)
     local row = newRow(34, tabName)
     local gap = 6
@@ -483,6 +484,8 @@ local function makeInlineButtons(buttons, tabName)
     end
 end
 
+=======
+>>>>>>> main
 local function makeSlider(labelText, minValue, maxValue, defaultValue, onChanged, tabName)
     local row = newRow(52, tabName)
 
@@ -560,9 +563,12 @@ local function makeSlider(labelText, minValue, maxValue, defaultValue, onChanged
             updateVisuals()
             onChanged(value)
         end,
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
         setVisible = function(state)
             row.Visible = state == true
         end,
+=======
+>>>>>>> main
     }
 end
 
@@ -573,6 +579,7 @@ local uiVisible = true
 local autoRebirth = false
 local autoEnlightenment = false
 local autoTranscendence = false
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
 local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
@@ -580,6 +587,11 @@ local autoTranscendenceDelay = 5
 local raidOriginalPosition = nil
 local raidReturnPending = false
 local raidConnection = nil
+=======
+local autoRebirthDelay = 5
+local autoEnlightenmentDelay = 5
+local autoTranscendenceDelay = 5
+>>>>>>> main
 
 local originalHiddenStates = {}
 
@@ -825,6 +837,7 @@ end, "Features")
 makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
 end, "Features")
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
 
 makeSectionLabel("Remote Bypass", "Features")
 
@@ -893,6 +906,9 @@ makeButton("Toggle Music", function()
     fireRemote("ToggleMusic")
 end, "Features")
 
+=======
+
+>>>>>>> main
 makeSectionLabel("Quick Actions", "Teleports")
 for _, data in ipairs(teleportLocations.quickActions) do
     local name, resolver = data[1], data[2]
@@ -919,6 +935,44 @@ for _, data in ipairs(teleportLocations.secret) do
     end, "Teleports")
 end
 
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+=======
+makeButton("Dev Grant Currency", function()
+    fireRemote("DevGrantCurrency")
+end, "Features")
+
+makeButton("Toggle Music", function()
+    fireRemote("ToggleMusic")
+end, "Features")
+
+makeToggle("Auto Rebirth", false, function(state)
+    autoRebirth = state
+    log("Auto Rebirth " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Rebirth Timer", 1, 90, autoRebirthDelay, function(value)
+    autoRebirthDelay = value
+end, "Features")
+
+makeToggle("Auto Enlightenment", false, function(state)
+    autoEnlightenment = state
+    log("Auto Enlightenment " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Enlightenment Timer", 1, 90, autoEnlightenmentDelay, function(value)
+    autoEnlightenmentDelay = value
+end, "Features")
+
+makeToggle("Auto Transcendence", false, function(state)
+    autoTranscendence = state
+    log("Auto Transcendence " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Transcendence Timer", 1, 90, autoTranscendenceDelay, function(value)
+    autoTranscendenceDelay = value
+end, "Features")
+
+>>>>>>> main
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRebirth then
@@ -927,6 +981,7 @@ task.spawn(function()
         task.wait(autoRebirthDelay)
     end
 end)
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
 
 task.spawn(function()
     while screen.Parent do
@@ -945,6 +1000,38 @@ task.spawn(function()
         task.wait(autoTranscendenceDelay)
     end
 end)
+=======
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoEnlightenment then
+            fireRemote("PerformEnlightenment")
+        end
+        task.wait(autoEnlightenmentDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoTranscendence then
+            fireRemote("PerformTranscendence")
+        end
+        task.wait(autoTranscendenceDelay)
+    end
+end)
+
+makeButton("Perform Rebirth", function()
+    fireRemote("PerformRebirth")
+end, "Features")
+
+makeButton("Perform Enlightenment", function()
+    fireRemote("PerformEnlightenment")
+end, "Features")
+
+makeButton("Perform Transcendence", function()
+    fireRemote("PerformTranscendence")
+end, "Features")
+>>>>>>> main
 
 quickKillButton.MouseButton1Click:Connect(function()
     screen:Destroy()
