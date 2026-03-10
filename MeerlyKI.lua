@@ -262,7 +262,7 @@ end)
 
 local tabPages = {}
 local tabButtons = {}
-local currentTabName = "Movement"
+local currentTabName = "Features"
 local activeList = nil
 
 local function switchTab(name)
@@ -315,7 +315,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Movement", "World", "Teleports", "Remotes" }
+local tabNames = { "Features", "Teleports" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -339,7 +339,7 @@ end
 
 updateTabButtonSizes()
 tabBar:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateTabButtonSizes)
-switchTab("Movement")
+switchTab("Features")
 
 local function newRow(height, tabName)
     local parentList = tabPages[tabName or currentTabName] or activeList
@@ -458,14 +458,96 @@ local function makeButton(text, callback, tabName)
     return button
 end
 
+local function makeSlider(labelText, minValue, maxValue, defaultValue, onChanged, tabName)
+    local row = newRow(52, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(1, -20, 0, 18)
+    label.Position = UDim2.fromOffset(10, 6)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local bar = Instance.new("Frame")
+    bar.Parent = row
+    bar.Size = UDim2.new(1, -20, 0, 10)
+    bar.Position = UDim2.fromOffset(10, 30)
+    bar.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+    bar.BorderSizePixel = 0
+    makeCorner(bar, 4)
+
+    local fill = Instance.new("Frame")
+    fill.Parent = bar
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = uiTheme.accent
+    fill.BorderSizePixel = 0
+    makeCorner(fill, 4)
+
+    local dragging = false
+    local value = math.clamp(defaultValue or minValue, minValue, maxValue)
+
+    local function updateLabel()
+        label.Text = string.format("%s: %ds", labelText, value)
+    end
+
+    local function updateVisuals()
+        local alpha = (value - minValue) / (maxValue - minValue)
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        updateLabel()
+    end
+
+    local function setFromX(x)
+        local alpha = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+        value = math.floor(minValue + ((maxValue - minValue) * alpha) + 0.5)
+        updateVisuals()
+        onChanged(value)
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromX(input.Position.X)
+        end
+    end)
+
+    bar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromX(input.Position.X)
+        end
+    end)
+
+    updateVisuals()
+    onChanged(value)
+
+    return {
+        get = function() return value end,
+        set = function(v)
+            value = math.clamp(math.floor(v), minValue, maxValue)
+            updateVisuals()
+            onChanged(value)
+        end,
+    }
+end
+
 local walkSpeedEnabled = false
 local walkSpeedValue = 16
-local sprintEnabled = false
-local sprintSpeed = 30
-local tickHackEnabled = false
-local tickMultiplier = 1
 local hideOthersEnabled = false
 local uiVisible = true
+local autoRebirth = false
+local autoEnlightenment = false
+local autoTranscendence = false
+local autoRebirthDelay = 5
+local autoEnlightenmentDelay = 5
+local autoTranscendenceDelay = 5
 
 local originalHiddenStates = {}
 
@@ -492,21 +574,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
 
-    if sprintEnabled and input.KeyCode == Enum.KeyCode.LeftShift then
-        local humanoid = getHumanoid()
-        if humanoid then
-            humanoid.WalkSpeed = sprintSpeed
-        end
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if sprintEnabled and input.KeyCode == Enum.KeyCode.LeftShift then
-        local humanoid = getHumanoid()
-        if humanoid then
-            humanoid.WalkSpeed = walkSpeedEnabled and walkSpeedValue or 16
-        end
-    end
 end)
 
 local function applyHideOnCharacter(character, hide)
@@ -556,28 +623,33 @@ Players.PlayerAdded:Connect(function(plr)
 end)
 
 local teleportLocations = {
-    ["The Lobby"] = function()
-        return workspace.SpawnLocation
-    end,
-    ["The Study"] = function()
-        return workspace.Rooms.Room1:GetChildren()[4].RugMain
-    end,
-    ["The Archives"] = function()
-        return workspace:GetChildren()[37]:GetChildren()[196]
-    end,
-    ["The Sanctum"] = function()
-        return workspace.Rooms.Room3:GetChildren()[334]
-    end,
-    ["The Chamber"] = function()
-        return workspace.Rooms.Room4:GetChildren()[120]
-    end,
-    ["The Observatory"] = function()
-        return workspace.Rooms.Room5.FloorTile_40_5
-    end,
-    ["Observatory Roof"] = function()
-        return workspace.Rooms.Room5.DomeApex
-    end,
+    quickActions = {
+        { "The Lobby", function() return workspace.SpawnLocation end },
+        { "The Study", function() return workspace.Rooms.Room1:GetChildren()[4].RugMain end },
+        { "The Archives", function() return workspace:GetChildren()[37]:GetChildren()[196] end },
+        { "The Sanctum", function() return workspace.Rooms.Room3:GetChildren()[334] end },
+        { "The Chamber", function() return workspace.Rooms.Room4:GetChildren()[120] end },
+        { "The Observatory", function() return workspace.Rooms.Room5.FloorTile_40_5 end },
+    },
+    secret = {
+        { "Observatory Roof", function() return workspace.Rooms.Room5.DomeApex end },
+    },
 }
+
+local function makeSectionLabel(text, tabName)
+    local row = newRow(30, tabName)
+    row.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(1, -8, 1, 0)
+    label.Position = UDim2.fromOffset(4, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextColor3 = uiTheme.accent
+    label.Text = text
+end
 
 local function teleportTo(targetInstance)
     if not targetInstance then
@@ -626,7 +698,7 @@ makeInput("WalkSpeed Value", walkSpeedValue, function(text)
     local value = tonumber(text) or 16
     walkSpeedValue = math.clamp(math.floor(value), 1, 300)
     return walkSpeedValue
-end, "Movement")
+end, "Features")
 
 makeToggle("Walkspeed Changer", false, function(state)
     walkSpeedEnabled = state
@@ -635,50 +707,15 @@ makeToggle("Walkspeed Changer", false, function(state)
         if humanoid then humanoid.WalkSpeed = 16 end
     end
     log("Walkspeed changer " .. (state and "enabled" or "disabled"))
-end, "Movement")
-
-makeInput("Sprint Speed", sprintSpeed, function(text)
-    local value = tonumber(text) or 30
-    sprintSpeed = math.clamp(math.floor(value), 1, 400)
-    return sprintSpeed
-end, "Movement")
-
-makeToggle("Shift to Sprint", false, function(state)
-    sprintEnabled = state
-    log("Shift sprint " .. (state and "enabled" or "disabled"))
-end, "Movement")
-
-makeInput("Tick Multiplier", tickMultiplier, function(text)
-    local value = tonumber(text) or 1
-    tickMultiplier = math.clamp(value, 0.5, 10)
-    return string.format("%.2f", tickMultiplier)
-end, "World")
-
-makeToggle("Increase Game Tick Speed", false, function(state)
-    tickHackEnabled = state
-    if state then
-        local fps = math.floor(60 * tickMultiplier)
-        local ok = pcall(function()
-            if setfpscap then
-                setfpscap(fps)
-            else
-                error("setfpscap unavailable")
-            end
-        end)
-        log(ok and ("Applied FPS cap: " .. fps) or "Tick speed unsupported in this executor")
-    else
-        pcall(function()
-            if setfpscap then setfpscap(60) end
-        end)
-        log("Tick speed reset")
-    end
-end, "World")
+end, "Features")
 
 makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
-end, "World")
+end, "Features")
 
-for name, resolver in pairs(teleportLocations) do
+makeSectionLabel("Quick Actions", "Teleports")
+for _, data in ipairs(teleportLocations.quickActions) do
+    local name, resolver = data[1], data[2]
     makeButton("Teleport: " .. name, function()
         local ok, target = pcall(resolver)
         if not ok then
@@ -689,17 +726,92 @@ for name, resolver in pairs(teleportLocations) do
     end, "Teleports")
 end
 
+makeSectionLabel("Secret", "Teleports")
+for _, data in ipairs(teleportLocations.secret) do
+    local name, resolver = data[1], data[2]
+    makeButton("Teleport: " .. name, function()
+        local ok, target = pcall(resolver)
+        if not ok then
+            log("Teleport resolver error for " .. name)
+            return
+        end
+        teleportTo(target)
+    end, "Teleports")
+end
+
+makeButton("Dev Grant Currency", function()
+    fireRemote("DevGrantCurrency")
+end, "Features")
+
+makeButton("Toggle Music", function()
+    fireRemote("ToggleMusic")
+end, "Features")
+
+makeToggle("Auto Rebirth", false, function(state)
+    autoRebirth = state
+    log("Auto Rebirth " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Rebirth Timer", 1, 90, autoRebirthDelay, function(value)
+    autoRebirthDelay = value
+end, "Features")
+
+makeToggle("Auto Enlightenment", false, function(state)
+    autoEnlightenment = state
+    log("Auto Enlightenment " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Enlightenment Timer", 1, 90, autoEnlightenmentDelay, function(value)
+    autoEnlightenmentDelay = value
+end, "Features")
+
+makeToggle("Auto Transcendence", false, function(state)
+    autoTranscendence = state
+    log("Auto Transcendence " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeSlider("Transcendence Timer", 1, 90, autoTranscendenceDelay, function(value)
+    autoTranscendenceDelay = value
+end, "Features")
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRebirth then
+            fireRemote("PerformRebirth")
+        end
+        task.wait(autoRebirthDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoEnlightenment then
+            fireRemote("PerformEnlightenment")
+        end
+        task.wait(autoEnlightenmentDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoTranscendence then
+            fireRemote("PerformTranscendence")
+        end
+        task.wait(autoTranscendenceDelay)
+    end
+end)
+
 makeButton("Perform Rebirth", function()
     fireRemote("PerformRebirth")
-end, "Remotes")
+end, "Features")
 
 makeButton("Perform Enlightenment", function()
     fireRemote("PerformEnlightenment")
-end, "Remotes")
+end, "Features")
 
 makeButton("Perform Transcendence", function()
     fireRemote("PerformTranscendence")
-end, "Remotes")
+end, "Features")
 
 quickKillButton.MouseButton1Click:Connect(function()
     screen:Destroy()
