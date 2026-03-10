@@ -588,6 +588,7 @@ local autoRaidMasterEnabled = false
 local raidStarted = false
 local onGoingRaid = false
 local raidEnemyScanInterval = 2
+local raidSeekEnabled = false
 local raidPresenceScanInterval = 7
 local lastRaidPresenceScan = 0
 local raidOriginalPosition = nil
@@ -842,31 +843,13 @@ local function fireRemote(remoteName)
     log("Fired remote: " .. remoteName)
 end
 
-local function getRaidTimerSeconds()
+local function isRaidTimerVisible()
     local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
     local raidTimer = hud and hud:FindFirstChild("RaidNextTimer")
-    local raw = raidTimer and raidTimer.Value
-
-    if raw == nil then
+    if not raidTimer then
         return nil
     end
-
-    if typeof(raw) == "number" then
-        return raw
-    end
-
-    if typeof(raw) == "string" then
-        local m, sec = string.match(raw, "^(%d+):(%d+)$")
-        if m and sec then
-            return (tonumber(m) * 60) + tonumber(sec)
-        end
-        local asNumber = tonumber(raw)
-        if asNumber then
-            return asNumber
-        end
-    end
-
-    return nil
+    return raidTimer.Visible == true
 end
 
 local function getRaidEnemiesAlive()
@@ -918,6 +901,74 @@ local function makeButtonGrid(buttons, columns, tabName)
         end
         makeInlineButtons(rowButtons, tabName)
     end
+end
+
+local function makeInputToggleRow(labelText, defaultText, defaultToggle, onCommit, onToggle, tabName)
+    local row = newRow(34, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.42, -8, 1, 0)
+    label.Position = UDim2.fromOffset(8, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+
+    local box = Instance.new("TextBox")
+    box.Parent = row
+    box.Size = UDim2.new(0.24, -4, 1, -8)
+    box.Position = UDim2.new(0.42, 0, 0, 4)
+    box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    box.BorderSizePixel = 0
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 12
+    box.TextColor3 = uiTheme.text
+    box.ClearTextOnFocus = false
+    makeCorner(box, 5)
+
+    local toggle = Instance.new("TextButton")
+    toggle.Parent = row
+    toggle.Size = UDim2.new(0.24, -4, 1, -8)
+    toggle.Position = UDim2.new(0.74, 0, 0, 4)
+    toggle.BorderSizePixel = 0
+    toggle.Font = Enum.Font.GothamBold
+    toggle.TextSize = 12
+    makeCorner(toggle, 5)
+
+    local toggleState = defaultToggle == true
+    local function refreshToggle()
+        toggle.Text = toggleState and "ON" or "OFF"
+        toggle.BackgroundColor3 = toggleState and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+        toggle.TextColor3 = toggleState and Color3.fromRGB(10, 10, 12) or uiTheme.text
+    end
+
+    toggle.MouseButton1Click:Connect(function()
+        toggleState = not toggleState
+        refreshToggle()
+        onToggle(toggleState)
+    end)
+
+    box.FocusLost:Connect(function()
+        box.Text = tostring(onCommit(box.Text))
+    end)
+
+    box.Text = tostring(onCommit(defaultText))
+    refreshToggle()
+    onToggle(toggleState)
+
+    return {
+        setToggle = function(v)
+            toggleState = v == true
+            refreshToggle()
+            onToggle(toggleState)
+        end,
+        getToggle = function()
+            return toggleState
+        end,
+    }
 end
 
 makeSectionLabel("General Actions", "Features")
@@ -1068,18 +1119,23 @@ makeToggle("Auto Raid Master", false, function(state)
     log("Auto Raid master " .. (state and "enabled" or "disabled"))
 end, "Auto Raid")
 
-makeInput("Seek Enemies Scan (s)", raidEnemyScanInterval, function(text)
+makeInputToggleRow("Seek Enemies Scan /s", raidEnemyScanInterval, raidSeekEnabled, function(text)
     local value = tonumber(text) or raidEnemyScanInterval
     raidEnemyScanInterval = math.clamp(math.floor(value), 1, 10)
     return raidEnemyScanInterval
+end, function(state)
+    raidSeekEnabled = state
 end, "Auto Raid")
 
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRaidMasterEnabled then
-            local raidTimerSeconds = getRaidTimerSeconds()
-            if raidTimerSeconds ~= nil and raidTimerSeconds < 6 then
-                raidStarted = true
+            local raidTimerVisible = isRaidTimerVisible()
+            if raidTimerVisible ~= nil then
+                raidStarted = (raidTimerVisible == false)
+                if raidTimerVisible then
+                    onGoingRaid = false
+                end
             end
 
             if raidStarted then
@@ -1123,7 +1179,7 @@ end)
 
 task.spawn(function()
     while screen.Parent do
-        if keyAccepted and autoRaidMasterEnabled and raidStarted then
+        if keyAccepted and autoRaidMasterEnabled and raidStarted and raidSeekEnabled then
             local enemiesAlive, firstEnemy = getRaidEnemiesAlive()
             onGoingRaid = enemiesAlive
             if enemiesAlive and firstEnemy then
