@@ -286,7 +286,9 @@ local function createTab(name)
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
-    page.ScrollBarThickness = 6
+    page.ScrollBarThickness = (name == "Teleports") and 10 or 6
+    page.ScrollBarImageColor3 = uiTheme.accent
+    page.ScrollBarImageTransparency = 0.15
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.CanvasSize = UDim2.new()
     page.Visible = false
@@ -582,13 +584,113 @@ local antiAfkEnabled = false
 local antiAfkInterval = 600
 local autoClickerEnabled = false
 local autoClickerCPS = 10
+local hidePlayersScanInterval = 10
 local raidOriginalPosition = nil
 local raidReturnPending = false
 local raidConnection = nil
 
-local originalHiddenStates = {}
+local hiddenObjectStates = {}
+
+local function hideObject(obj)
+    if hiddenObjectStates[obj] then
+        return
+    end
+
+    local state = {}
+
+    if obj:IsA("BasePart") then
+        state.class = "BasePart"
+        state.localTransparencyModifier = obj.LocalTransparencyModifier
+        state.transparency = obj.Transparency
+        state.canCollide = obj.CanCollide
+        state.canTouch = obj.CanTouch
+        if obj.CanQuery ~= nil then
+            state.canQuery = obj.CanQuery
+        end
+        obj.LocalTransparencyModifier = 1
+        obj.Transparency = 1
+        obj.CanCollide = false
+        obj.CanTouch = false
+        pcall(function() obj.CanQuery = false end)
+    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+        state.class = "Gui"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        state.class = "Effect"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        state.class = "DecalTexture"
+        state.transparency = obj.Transparency
+        obj.Transparency = 1
+    elseif obj:IsA("Highlight") then
+        state.class = "Highlight"
+        state.enabled = obj.Enabled
+        state.fillTransparency = obj.FillTransparency
+        state.outlineTransparency = obj.OutlineTransparency
+        obj.Enabled = false
+        obj.FillTransparency = 1
+        obj.OutlineTransparency = 1
+    else
+        return
+    end
+
+    hiddenObjectStates[obj] = state
+end
+
+local function restoreObject(obj)
+    local state = hiddenObjectStates[obj]
+    if not state then
+        return
+    end
+
+    if state.class == "BasePart" then
+        obj.LocalTransparencyModifier = state.localTransparencyModifier or 0
+        obj.Transparency = state.transparency or 0
+        obj.CanCollide = state.canCollide == true
+        obj.CanTouch = state.canTouch == true
+        pcall(function()
+            if state.canQuery ~= nil then
+                obj.CanQuery = state.canQuery
+            end
+        end)
+    elseif state.class == "Gui" or state.class == "Effect" then
+        obj.Enabled = state.enabled ~= false
+    elseif state.class == "DecalTexture" then
+        obj.Transparency = state.transparency or 0
+    elseif state.class == "Highlight" then
+        obj.Enabled = state.enabled ~= false
+        obj.FillTransparency = state.fillTransparency or 0
+        obj.OutlineTransparency = state.outlineTransparency or 0
+    end
+
+    hiddenObjectStates[obj] = nil
+end
+
+local function applyHideOnCharacter(character, hide)
+    if not character then return end
+    for _, obj in ipairs(character:GetDescendants()) do
+        if hide then
+            hideObject(obj)
+        else
+            restoreObject(obj)
+        end
+    end
+end
+
+local function restoreAllHiddenObjects()
+    for obj in pairs(hiddenObjectStates) do
+        if obj and obj.Parent then
+            restoreObject(obj)
+        else
+            hiddenObjectStates[obj] = nil
+        end
+    end
+end
 
 local function getHumanoid()
+
     local character = localPlayer.Character
     if not character then return nil end
     return character:FindFirstChildOfClass("Humanoid")
@@ -619,40 +721,19 @@ UserInputService.InputBegan:Connect(function(input, gp)
 
 end)
 
-local function applyHideOnCharacter(character, hide)
-    if not character then return end
-    for _, obj in ipairs(character:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if hide then
-                if not originalHiddenStates[obj] then
-                    originalHiddenStates[obj] = { transp = obj.LocalTransparencyModifier, coll = obj.CanCollide }
-                end
-                obj.LocalTransparencyModifier = 1
-                obj.CanCollide = false
-            else
-                local state = originalHiddenStates[obj]
-                if state then
-                    obj.LocalTransparencyModifier = state.transp
-                    obj.CanCollide = state.coll
-                    originalHiddenStates[obj] = nil
-                else
-                    obj.LocalTransparencyModifier = 0
-                end
-            end
-        elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") or obj:IsA("ParticleEmitter") then
-            obj.Enabled = not hide
-        end
-    end
-end
-
 local function setHideOtherPlayers(state)
     hideOthersEnabled = state
+
+    if not state then
+        restoreAllHiddenObjects()
+    end
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= localPlayer then
             applyHideOnCharacter(plr.Character, state)
         end
     end
-    log(state and "Other players hidden" or "Other players restored")
+    log(state and "Other players hidden (including FX/parts/accessories)" or "Other players restored")
 end
 
 Players.PlayerAdded:Connect(function(plr)
@@ -663,6 +744,19 @@ Players.PlayerAdded:Connect(function(plr)
             applyHideOnCharacter(char, true)
         end
     end)
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and hideOthersEnabled then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer then
+                    applyHideOnCharacter(plr.Character, true)
+                end
+            end
+        end
+        task.wait(hidePlayersScanInterval)
+    end
 end)
 
 local teleportLocations = {
@@ -889,19 +983,12 @@ makeToggle("Anti-AFK (SPACE / 10 min)", false, function(state)
     log("Anti-AFK " .. (state and "enabled" or "disabled"))
 end, "Features")
 
-local autoClickerSlider
-makeToggle("Auto Clicker (F6 Hotkey)", false, function(state)
-    autoClickerEnabled = state
-    if autoClickerSlider then
-        autoClickerSlider.setVisible(state)
-    end
-    log("Auto Clicker " .. (state and "enabled" or "disabled"))
+makeInput("Auto Clicker CPS (F6)", autoClickerCPS, function(text)
+    local value = tonumber(text) or autoClickerCPS
+    autoClickerCPS = math.clamp(math.floor(value), 1, 20)
+    log("Auto Clicker CPS set to " .. autoClickerCPS)
+    return autoClickerCPS
 end, "Features")
-
-autoClickerSlider = makeSlider("Auto Clicker CPS", 1, 20, autoClickerCPS, function(value)
-    autoClickerCPS = value
-end, "Features")
-autoClickerSlider.setVisible(autoClickerEnabled)
 
 makeSectionLabel("Remote Bypass", "Features")
 
