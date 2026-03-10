@@ -12,8 +12,8 @@ local StarterGui = game:GetService("StarterGui")
 
 local localPlayer = Players.LocalPlayer
 
-local hardcodedAccessKey = "ForLoveWithLove"
-local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
+local hardcodedAccessKey = "KnowledgeIsPower"
+local keychainUrl = "https://work.ink/2kaV/meerly-knowledge-incremental"
 
 local uiTheme = {
     bg = Color3.fromRGB(18, 18, 24),
