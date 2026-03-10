@@ -73,7 +73,9 @@ local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
 local trackedWeaponPartConnections = makeWeakKeyTable()
 local trackedWeaponDamageState = makeWeakKeyTable()
+local trackedWeaponFxState = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
+local otherPlayerWeaponFxState = makeWeakKeyTable()
 
 local backgroundMode = false
 local windowFocused = true
@@ -309,6 +311,64 @@ local function setPartHiddenLocal(part, hide, stateTable)
     end
 end
 
+local function isWeaponFxInstance(instance)
+    return instance:IsA("ParticleEmitter")
+        or instance:IsA("Trail")
+        or instance:IsA("Beam")
+        or instance:IsA("Smoke")
+        or instance:IsA("Fire")
+        or instance:IsA("Sparkles")
+end
+
+local function setWeaponFxHiddenLocal(instance, hide, stateTable)
+    if not isWeaponFxInstance(instance) then
+        return
+    end
+
+    local state = stateTable[instance]
+    if not state then
+        state = {}
+        local okEnabled, enabled = pcall(function()
+            return instance.Enabled
+        end)
+        if okEnabled then
+            state.enabled = enabled
+        end
+
+        if instance:IsA("ParticleEmitter") then
+            local okRate, rate = pcall(function()
+                return instance.Rate
+            end)
+            if okRate then
+                state.rate = rate
+            end
+        end
+        stateTable[instance] = state
+    end
+
+    if hide then
+        pcall(function()
+            instance.Enabled = false
+        end)
+        if instance:IsA("ParticleEmitter") then
+            pcall(function()
+                instance.Rate = 0
+            end)
+        end
+    else
+        if state.enabled ~= nil then
+            pcall(function()
+                instance.Enabled = state.enabled
+            end)
+        end
+        if instance:IsA("ParticleEmitter") and state.rate ~= nil then
+            pcall(function()
+                instance.Rate = state.rate
+            end)
+        end
+    end
+end
+
 -- Slow-pass scan for non-local player weapons.
 -- Why: periodic scanning is cheaper than per-instance listeners across all players,
 -- and is good enough for background visual simplification.
@@ -316,6 +376,11 @@ local function applyOtherPlayersWeaponHiding()
     for part in pairs(otherPlayerWeaponPartState) do
         if (not part) or (not part.Parent) then
             otherPlayerWeaponPartState[part] = nil
+        end
+    end
+    for fx in pairs(otherPlayerWeaponFxState) do
+        if (not fx) or (not fx.Parent) then
+            otherPlayerWeaponFxState[fx] = nil
         end
     end
 
@@ -332,7 +397,12 @@ local function applyOtherPlayersWeaponHiding()
                         if descendant:IsA("BasePart") then
                             setPartHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
                             hiddenCount += 1
+                        elseif isWeaponFxInstance(descendant) then
+                            setWeaponFxHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponFxState)
                         end
+                    end
+                    if isWeaponFxInstance(child) then
+                        setWeaponFxHiddenLocal(child, hideOtherPlayersWeapons, otherPlayerWeaponFxState)
                     end
                 end
             end
@@ -345,7 +415,13 @@ local function applyOtherPlayersWeaponHiding()
                 setPartHiddenLocal(part, false, otherPlayerWeaponPartState)
             end
         end
+        for fx in pairs(otherPlayerWeaponFxState) do
+            if fx and fx.Parent then
+                setWeaponFxHiddenLocal(fx, false, otherPlayerWeaponFxState)
+            end
+        end
         otherPlayerWeaponPartState = makeWeakKeyTable()
+        otherPlayerWeaponFxState = makeWeakKeyTable()
     end
 
     return hiddenCount
@@ -513,6 +589,8 @@ end
 local function applyWeaponState(container)
     if container:IsA("BasePart") then
         applyWeaponPartState(container)
+    elseif isWeaponFxInstance(container) then
+        setWeaponFxHiddenLocal(container, hideTrackedWeaponParts, trackedWeaponFxState)
     end
 
     if container:GetAttribute("Damage") ~= nil then
@@ -522,6 +600,8 @@ local function applyWeaponState(container)
     for _, descendant in ipairs(container:GetDescendants()) do
         if descendant:IsA("BasePart") then
             applyWeaponPartState(descendant)
+        elseif isWeaponFxInstance(descendant) then
+            setWeaponFxHiddenLocal(descendant, hideTrackedWeaponParts, trackedWeaponFxState)
         end
         if descendant:GetAttribute("Damage") ~= nil then
             applyDamageState(descendant)
@@ -565,6 +645,7 @@ local function untrackWeapon(container)
         end
         trackedWeaponPartState[container] = nil
         trackedWeaponDamageState[container] = nil
+        trackedWeaponFxState[container] = nil
     end
 
     for _, descendant in ipairs(container:GetDescendants()) do
@@ -574,6 +655,7 @@ local function untrackWeapon(container)
         end
         trackedWeaponPartState[descendant] = nil
         trackedWeaponDamageState[descendant] = nil
+        trackedWeaponFxState[descendant] = nil
     end
 end
 
@@ -651,6 +733,7 @@ local function bindCharacterForWeapons(character)
     trackedWeaponPartState = makeWeakKeyTable()
     trackedWeaponPartConnections = makeWeakKeyTable()
     trackedWeaponDamageState = makeWeakKeyTable()
+    trackedWeaponFxState = makeWeakKeyTable()
     originalWalkSpeed = nil
 
     if weaponChildAddedConnection then
@@ -695,6 +778,12 @@ local function pruneTrackedWeaponStateTables()
     for instance in pairs(trackedWeaponDamageState) do
         if (not instance) or (not instance.Parent) then
             trackedWeaponDamageState[instance] = nil
+        end
+    end
+
+    for fx in pairs(trackedWeaponFxState) do
+        if (not fx) or (not fx.Parent) then
+            trackedWeaponFxState[fx] = nil
         end
     end
 end
