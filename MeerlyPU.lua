@@ -697,15 +697,40 @@ end
 local function runSelfWeaponPass(message, opts)
     opts = opts or {}
 
+    if type(trackedWeapons) ~= "table" then
+        trackedWeapons = makeWeakKeyTable()
+        orderedTrackedWeapons = orderedTrackedWeapons or {}
+        log("Weapon tracker table was unavailable; recreated tracker state")
+    end
+
+    if not trackedCharacter or not trackedCharacter.Parent then
+        trackedCharacter = localPlayer and localPlayer.Character
+        if not trackedCharacter then
+            log("Weapon pass skipped: no active character")
+            return
+        end
+        log("Weapon tracker pointed at current character")
+    end
+
     if opts.rescan ~= false then
-        rescanCharacterWeapons(true)
+        local rescanOk, rescanErr = pcall(function()
+            rescanCharacterWeapons(true)
+        end)
+        if not rescanOk then
+            log(string.format("Weapon rescan failed: %s", tostring(rescanErr)))
+        end
     end
 
     weaponDamageOverridePassActive = opts.applyDamageOnce == true
 
     for weapon in pairs(trackedWeapons) do
         if weapon and weapon.Parent == trackedCharacter then
-            applyWeaponState(weapon)
+            local passOk, passErr = pcall(function()
+                applyWeaponState(weapon)
+            end)
+            if not passOk then
+                log(string.format("Weapon pass failed on %s: %s", tostring(weapon.Name), tostring(passErr)))
+            end
         else
             untrackWeapon(weapon)
         end
@@ -715,7 +740,12 @@ local function runSelfWeaponPass(message, opts)
         weaponDamageOverrideOnRescan = false
     end
 
-    applyHitboxEnlarger()
+    local hitboxOk, hitboxErr = pcall(function()
+        applyHitboxEnlarger()
+    end)
+    if not hitboxOk then
+        log(string.format("Hitbox enlarger pass failed: %s", tostring(hitboxErr)))
+    end
     weaponDamageOverridePassActive = false
 
     if message then
