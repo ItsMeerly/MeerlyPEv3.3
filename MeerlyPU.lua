@@ -495,13 +495,13 @@ local function applyHitboxEnlarger()
 
     local enlargedCount = 0
     if isTargetHitboxEntity(firstWeapon) then
-        firstWeapon.Size = Vector3.new(1000, 30, 1000)
+        firstWeapon.Size = Vector3.new(1000, 300, 1000)
         enlargedCount += 1
     end
 
     for _, descendant in ipairs(firstWeapon:GetDescendants()) do
         if isTargetHitboxEntity(descendant) then
-            descendant.Size = Vector3.new(1000, 30, 1000)
+            descendant.Size = Vector3.new(1000, 300, 1000)
             enlargedCount += 1
         end
     end
@@ -551,13 +551,13 @@ local function applyHitboxEnlarger()
 
     local enlargedCount = 0
     if isTargetHitboxEntity(firstWeapon) then
-        firstWeapon.Size = Vector3.new(1000, 30, 1000)
+        firstWeapon.Size = Vector3.new(1000, 300, 1000)
         enlargedCount += 1
     end
 
     for _, descendant in ipairs(firstWeapon:GetDescendants()) do
         if isTargetHitboxEntity(descendant) then
-            descendant.Size = Vector3.new(1000, 30, 1000)
+            descendant.Size = Vector3.new(1000, 300, 1000)
             enlargedCount += 1
         end
     end
