@@ -807,6 +807,20 @@ title.TextSize = 16
 title.TextColor3 = uiTheme.text
 title.Text = "Performance / Stability"
 
+local quickKillButton = Instance.new("TextButton")
+quickKillButton.Parent = window
+quickKillButton.Size = UDim2.fromOffset(24, 24)
+quickKillButton.Position = UDim2.new(1, -34, 0, 12)
+quickKillButton.BackgroundColor3 = Color3.fromRGB(170, 65, 65)
+quickKillButton.BorderSizePixel = 0
+quickKillButton.Font = Enum.Font.GothamBold
+quickKillButton.TextSize = 14
+quickKillButton.TextColor3 = Color3.fromRGB(245, 245, 245)
+quickKillButton.Text = "X"
+quickKillButton.ZIndex = 20
+makeCorner(quickKillButton, 6)
+makeStroke(quickKillButton)
+
 local tabBar = Instance.new("Frame")
 tabBar.Parent = window
 tabBar.Size = UDim2.new(1, -20, 0, 30)
@@ -1876,10 +1890,9 @@ end
 
 _G.__MeerlyPURuntime.shutdown = requestShutdown
 
--- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
-makeButton("KILL SWITCH", function()
+quickKillButton.MouseButton1Click:Connect(function()
     requestShutdown("killswitch")
-end, "Utility")
+end)
 
 windowFocusedConnection = UserInputService.WindowFocused:Connect(function()
     windowFocused = true
