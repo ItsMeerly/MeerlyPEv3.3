@@ -12,6 +12,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local Stats = game:GetService("Stats")
 local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
@@ -72,16 +73,22 @@ local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
 local trackedWeaponPartConnections = makeWeakKeyTable()
 local trackedWeaponDamageState = makeWeakKeyTable()
+local trackedWeaponFxState = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
+local otherPlayerWeaponFxState = makeWeakKeyTable()
 
 local backgroundMode = false
 local windowFocused = true
 local disable3D = false
 local muteSounds = false
 local hideDisappearEntities = false
+local cullMobPartsEnabled = false
 local disappearOriginalName = "Disappear"
 local disappearRenamedName = "Disappear123"
 local renamedDisappearInstance = nil
+
+local mobsAssetsConnection = nil
+local hiddenMobPartsState = makeWeakKeyTable()
 
 local heartbeatLagThreshold = 1.5
 local watchdogThreshold = 4
@@ -304,6 +311,64 @@ local function setPartHiddenLocal(part, hide, stateTable)
     end
 end
 
+local function isWeaponFxInstance(instance)
+    return instance:IsA("ParticleEmitter")
+        or instance:IsA("Trail")
+        or instance:IsA("Beam")
+        or instance:IsA("Smoke")
+        or instance:IsA("Fire")
+        or instance:IsA("Sparkles")
+end
+
+local function setWeaponFxHiddenLocal(instance, hide, stateTable)
+    if not isWeaponFxInstance(instance) then
+        return
+    end
+
+    local state = stateTable[instance]
+    if not state then
+        state = {}
+        local okEnabled, enabled = pcall(function()
+            return instance.Enabled
+        end)
+        if okEnabled then
+            state.enabled = enabled
+        end
+
+        if instance:IsA("ParticleEmitter") then
+            local okRate, rate = pcall(function()
+                return instance.Rate
+            end)
+            if okRate then
+                state.rate = rate
+            end
+        end
+        stateTable[instance] = state
+    end
+
+    if hide then
+        pcall(function()
+            instance.Enabled = false
+        end)
+        if instance:IsA("ParticleEmitter") then
+            pcall(function()
+                instance.Rate = 0
+            end)
+        end
+    else
+        if state.enabled ~= nil then
+            pcall(function()
+                instance.Enabled = state.enabled
+            end)
+        end
+        if instance:IsA("ParticleEmitter") and state.rate ~= nil then
+            pcall(function()
+                instance.Rate = state.rate
+            end)
+        end
+    end
+end
+
 -- Slow-pass scan for non-local player weapons.
 -- Why: periodic scanning is cheaper than per-instance listeners across all players,
 -- and is good enough for background visual simplification.
@@ -311,6 +376,11 @@ local function applyOtherPlayersWeaponHiding()
     for part in pairs(otherPlayerWeaponPartState) do
         if (not part) or (not part.Parent) then
             otherPlayerWeaponPartState[part] = nil
+        end
+    end
+    for fx in pairs(otherPlayerWeaponFxState) do
+        if (not fx) or (not fx.Parent) then
+            otherPlayerWeaponFxState[fx] = nil
         end
     end
 
@@ -327,7 +397,12 @@ local function applyOtherPlayersWeaponHiding()
                         if descendant:IsA("BasePart") then
                             setPartHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponPartState)
                             hiddenCount += 1
+                        elseif isWeaponFxInstance(descendant) then
+                            setWeaponFxHiddenLocal(descendant, hideOtherPlayersWeapons, otherPlayerWeaponFxState)
                         end
+                    end
+                    if isWeaponFxInstance(child) then
+                        setWeaponFxHiddenLocal(child, hideOtherPlayersWeapons, otherPlayerWeaponFxState)
                     end
                 end
             end
@@ -340,7 +415,13 @@ local function applyOtherPlayersWeaponHiding()
                 setPartHiddenLocal(part, false, otherPlayerWeaponPartState)
             end
         end
+        for fx in pairs(otherPlayerWeaponFxState) do
+            if fx and fx.Parent then
+                setWeaponFxHiddenLocal(fx, false, otherPlayerWeaponFxState)
+            end
+        end
         otherPlayerWeaponPartState = makeWeakKeyTable()
+        otherPlayerWeaponFxState = makeWeakKeyTable()
     end
 
     return hiddenCount
@@ -508,6 +589,8 @@ end
 local function applyWeaponState(container)
     if container:IsA("BasePart") then
         applyWeaponPartState(container)
+    elseif isWeaponFxInstance(container) then
+        setWeaponFxHiddenLocal(container, hideTrackedWeaponParts, trackedWeaponFxState)
     end
 
     if container:GetAttribute("Damage") ~= nil then
@@ -517,6 +600,8 @@ local function applyWeaponState(container)
     for _, descendant in ipairs(container:GetDescendants()) do
         if descendant:IsA("BasePart") then
             applyWeaponPartState(descendant)
+        elseif isWeaponFxInstance(descendant) then
+            setWeaponFxHiddenLocal(descendant, hideTrackedWeaponParts, trackedWeaponFxState)
         end
         if descendant:GetAttribute("Damage") ~= nil then
             applyDamageState(descendant)
@@ -560,6 +645,7 @@ local function untrackWeapon(container)
         end
         trackedWeaponPartState[container] = nil
         trackedWeaponDamageState[container] = nil
+        trackedWeaponFxState[container] = nil
     end
 
     for _, descendant in ipairs(container:GetDescendants()) do
@@ -569,6 +655,7 @@ local function untrackWeapon(container)
         end
         trackedWeaponPartState[descendant] = nil
         trackedWeaponDamageState[descendant] = nil
+        trackedWeaponFxState[descendant] = nil
     end
 end
 
@@ -646,6 +733,7 @@ local function bindCharacterForWeapons(character)
     trackedWeaponPartState = makeWeakKeyTable()
     trackedWeaponPartConnections = makeWeakKeyTable()
     trackedWeaponDamageState = makeWeakKeyTable()
+    trackedWeaponFxState = makeWeakKeyTable()
     originalWalkSpeed = nil
 
     if weaponChildAddedConnection then
@@ -690,6 +778,12 @@ local function pruneTrackedWeaponStateTables()
     for instance in pairs(trackedWeaponDamageState) do
         if (not instance) or (not instance.Parent) then
             trackedWeaponDamageState[instance] = nil
+        end
+    end
+
+    for fx in pairs(trackedWeaponFxState) do
+        if (not fx) or (not fx.Parent) then
+            trackedWeaponFxState[fx] = nil
         end
     end
 end
@@ -801,6 +895,20 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 16
 title.TextColor3 = uiTheme.text
 title.Text = "Performance / Stability"
+
+local quickKillButton = Instance.new("TextButton")
+quickKillButton.Parent = window
+quickKillButton.Size = UDim2.fromOffset(24, 24)
+quickKillButton.Position = UDim2.new(1, -34, 0, 12)
+quickKillButton.BackgroundColor3 = Color3.fromRGB(170, 65, 65)
+quickKillButton.BorderSizePixel = 0
+quickKillButton.Font = Enum.Font.GothamBold
+quickKillButton.TextSize = 14
+quickKillButton.TextColor3 = Color3.fromRGB(245, 245, 245)
+quickKillButton.Text = "X"
+quickKillButton.ZIndex = 20
+makeCorner(quickKillButton, 6)
+makeStroke(quickKillButton)
 
 local tabBar = Instance.new("Frame")
 tabBar.Parent = window
@@ -987,7 +1095,7 @@ end)
 
 local tabPages = {}
 local tabButtons = {}
-local currentTabName = "Performance"
+local currentTabName = "OP Settings"
 local activeList = nil
 
 local function switchTab(name)
@@ -1040,15 +1148,13 @@ local function createTab(name)
     return page
 end
 
-createTab("Weapons")
-createTab("Player")
+createTab("OP Settings")
 createTab("Utility")
-createTab("Performance")
-createTab("Memory")
+createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "Weapons", "Player", "Utility", "Performance", "Memory", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -1069,7 +1175,7 @@ end
 updateTabButtonSizes()
 tabBar:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateTabButtonSizes)
 
-switchTab("Performance")
+switchTab("OP Settings")
 
 local function newRow(height, tabName)
     local parentList = tabPages[tabName or currentTabName] or activeList
@@ -1293,6 +1399,137 @@ local function makeButton(text, onClick, tabName)
     return btn
 end
 
+local function makeSlider(labelText, defaultValue, minValue, maxValue, onChange, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(44, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.40, -10, 1, 0)
+    label.Position = UDim2.fromOffset(10, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local track = Instance.new("Frame")
+    track.Parent = row
+    track.Size = UDim2.new(0.44, 0, 0, 6)
+    track.Position = UDim2.new(0.46, 0, 0.5, -3)
+    track.BackgroundColor3 = Color3.fromRGB(48, 48, 60)
+    track.BorderSizePixel = 0
+    makeCorner(track, 3)
+
+    local fill = Instance.new("Frame")
+    fill.Parent = track
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = uiTheme.accent
+    fill.BorderSizePixel = 0
+    makeCorner(fill, 3)
+
+    local knob = Instance.new("TextButton")
+    knob.Parent = row
+    knob.Size = UDim2.fromOffset(14, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+    knob.BorderSizePixel = 0
+    knob.Text = ""
+    knob.AutoButtonColor = false
+    makeCorner(knob, 7)
+
+    local dragging = false
+    local value = math.clamp(math.floor(tonumber(defaultValue) or minValue), minValue, maxValue)
+
+    local function updateVisuals()
+        local alpha = 0
+        if maxValue > minValue then
+            alpha = (value - minValue) / (maxValue - minValue)
+        end
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        local knobX = track.AbsolutePosition.X + (track.AbsoluteSize.X * alpha)
+        local knobY = track.AbsolutePosition.Y + (track.AbsoluteSize.Y / 2)
+        knob.Position = UDim2.fromOffset(math.floor(knobX - row.AbsolutePosition.X), math.floor(knobY - row.AbsolutePosition.Y))
+        label.Text = string.format("%s: %ds", labelText, value)
+    end
+
+    local function setFromAbsoluteX(absX)
+        local width = math.max(track.AbsoluteSize.X, 1)
+        local alpha = math.clamp((absX - track.AbsolutePosition.X) / width, 0, 1)
+        local raw = minValue + ((maxValue - minValue) * alpha)
+        local nextValue = math.clamp(math.floor(raw + 0.5), minValue, maxValue)
+        if nextValue ~= value then
+            value = nextValue
+            local ok, err = pcall(function()
+                onChange(value)
+            end)
+            if not ok then
+                warn(string.format("[MeerlyPerf] Slider callback failed (%s): %s", tostring(labelText), tostring(err)))
+                if log then
+                    log(string.format("Slider error (%s): %s", tostring(labelText), tostring(err)))
+                end
+            end
+        end
+        updateVisuals()
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    row:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateVisuals)
+    row:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateVisuals)
+    track:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateVisuals)
+    track:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateVisuals)
+
+    local ok, err = pcall(function()
+        onChange(value)
+    end)
+    if not ok and log then
+        log(string.format("Slider error (%s): %s", tostring(labelText), tostring(err)))
+    end
+
+    task.defer(updateVisuals)
+
+    return {
+        get = function()
+            return value
+        end,
+        set = function(v)
+            value = math.clamp(math.floor(tonumber(v) or value), minValue, maxValue)
+            local okSet, errSet = pcall(function()
+                onChange(value)
+            end)
+            if not okSet and log then
+                log(string.format("Slider error (%s): %s", tostring(labelText), tostring(errSet)))
+            end
+            updateVisuals()
+        end,
+    }
+end
+
 local function makeSectionLabel(text, tabName)
     local row = newRow(30, tabName)
     row.BackgroundTransparency = 1
@@ -1429,6 +1666,99 @@ local function setDisappearHider(enabled)
     end
 end
 
+local function isBossMobPart(part)
+    local cursor = part
+    while cursor and cursor ~= ReplicatedStorage do
+        local lowerName = string.lower(cursor.Name)
+        if lowerName == "boss" or lowerName == "bosses" or string.find(lowerName, "boss", 1, true) then
+            return true
+        end
+        cursor = cursor.Parent
+    end
+    return false
+end
+
+local function resolveMobsAssetsFolder()
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if not assets then
+        return nil, "ReplicatedStorage.Assets not found"
+    end
+
+    local mobs = assets:FindFirstChild("Mobs")
+    if not mobs then
+        return nil, "ReplicatedStorage.Assets.Mobs not found"
+    end
+
+    return mobs
+end
+
+local function hideMobPart(part)
+    if hiddenMobPartsState[part] or isBossMobPart(part) then
+        return false
+    end
+
+    if string.lower(part.Name) == "humanoidrootpart" then
+        return false
+    end
+
+    hiddenMobPartsState[part] = {
+        parent = part.Parent,
+    }
+    part.Parent = nil
+    return true
+end
+
+local function restoreHiddenMobParts()
+    local restored = 0
+    for part, state in pairs(hiddenMobPartsState) do
+        if part and part.Parent == nil and state and state.parent and state.parent.Parent then
+            pcall(function()
+                part.Parent = state.parent
+            end)
+            restored += 1
+        end
+        hiddenMobPartsState[part] = nil
+    end
+    return restored
+end
+
+local function applyMobPartsCull(enabled)
+    cullMobPartsEnabled = enabled
+
+    if mobsAssetsConnection then
+        mobsAssetsConnection:Disconnect()
+        mobsAssetsConnection = nil
+    end
+
+    local mobsFolder, reason = resolveMobsAssetsFolder()
+    if not mobsFolder then
+        log("Mob parts cull failed: " .. tostring(reason))
+        return
+    end
+
+    if enabled then
+        local hidden = 0
+        for _, obj in ipairs(mobsFolder:GetDescendants()) do
+            if obj:IsA("BasePart") and hideMobPart(obj) then
+                hidden += 1
+            end
+        end
+
+        mobsAssetsConnection = mobsFolder.DescendantAdded:Connect(function(obj)
+            if cullMobPartsEnabled and obj:IsA("BasePart") then
+                pcall(function()
+                    hideMobPart(obj)
+                end)
+            end
+        end)
+
+        log(string.format("Mob parts culled (hidden: %d, bosses ignored)", hidden))
+    else
+        local restored = restoreHiddenMobParts()
+        log(string.format("Mob parts cull disabled (restored: %d)", restored))
+    end
+end
+
 local function resolveOptionsListButton(buttonName)
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then
@@ -1478,49 +1808,99 @@ end
 
 -- ---- Feature wiring (UI -> behavior) ----
 
--- Utility tab: session safety / quality-of-life actions.
-makeToggle("Anti-AFK (presses Space every 10m)", _G.__MeerlyPerfState.antiAfkEnabled, function(v)
-    _G.__MeerlyPerfState.antiAfkEnabled = v
-    log(v and "Anti-AFK enabled" or "Anti-AFK disabled")
-end, "Utility")
-
-makeToggle("Watchdog", _G.__MeerlyPerfState.watchdogEnabled, function(v)
-    _G.__MeerlyPerfState.watchdogEnabled = v
-    log(v and "Watchdog enabled" or "Watchdog disabled")
-end, "Utility")
-
-makeToggle("Background Survival Mode", backgroundMode, function(v)
-    backgroundMode = v
-    log(v and "Background mode enabled" or "Background mode disabled")
-end, "Utility")
-
-makeToggle("Mute Game Sounds", muteSounds, function(v)
-    muteSounds = v
-    pcall(function() SoundService.RespectFilteringEnabled = true end)
-    pcall(function() SoundService.Volume = v and 0 or 1 end)
-    log(v and "Game sounds muted" or "Game sounds unmuted")
-end, "Utility")
-
-makeToggle("Disable 3D Rendering", disable3D, function(v)
-    disable3D = v
-    if RunService.Set3dRenderingEnabled then
-        pcall(function() RunService:Set3dRenderingEnabled(not v) end)
-        log(v and "3D rendering disabled" or "3D rendering enabled")
-    else
-        log("3D render toggle unsupported")
+-- OP Settings page.
+makeSectionLabel("Weapon Damage Override", "OP Settings")
+makeInputWithButton("", tostring(weaponDamageOverride), function(text)
+    local v = tonumber(text)
+    if v then
+        weaponDamageOverride = v
     end
-end, "Utility")
+    return tostring(weaponDamageOverride)
+end, "SCAN", function()
+    weaponDamageOverrideOnRescan = true
+    runSelfWeaponPass("Weapon damage override applied: " .. tostring(weaponDamageOverride), { applyDamageOnce = true })
+end, "OP Settings")
+
+makeToggle("Hitbox Enlarger", hitboxEnlargerEnabled, function(v)
+    hitboxEnlargerEnabled = v
+    runSelfWeaponPass(v and "Hitbox enlarger enabled" or "Hitbox enlarger disabled")
+end, "OP Settings")
 
 makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
     setDisappearHider(v)
-end, "Utility")
+end, "OP Settings")
 
-makeToggle("Show AutoRaidBtn", getOptionsListButtonVisible("AutoRaidBtn"), function(v)
+makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
+    aggressiveFxCullEnabled = v
+    applyAggressiveFxCull(v)
+end, "OP Settings")
+
+makeToggle("Cull Mob Parts - Custom Hide Mobs", cullMobPartsEnabled, function(v)
+    applyMobPartsCull(v)
+end, "OP Settings")
+
+makeSectionLabel("GamepassBypass:", "OP Settings")
+makeToggle("ShowAutoRaid", getOptionsListButtonVisible("AutoRaidBtn"), function(v)
     setOptionsListButtonVisible("AutoRaidBtn", v)
+end, "OP Settings")
+
+makeToggle("ShowHideMobs", getOptionsListButtonVisible("HideMobsBtn"), function(v)
+    setOptionsListButtonVisible("HideMobsBtn", v)
+end, "OP Settings")
+
+-- Utility page.
+makeSectionLabel("Game Utils", "Utility")
+makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
+    hideTrackedWeaponParts = v
+    runSelfWeaponPass(v and "Tracked weapon parts hidden (local visual only)" or "Tracked weapon parts shown")
 end, "Utility")
 
-makeToggle("Show HideMobsBtn", getOptionsListButtonVisible("HideMobsBtn"), function(v)
-    setOptionsListButtonVisible("HideMobsBtn", v)
+makeToggle("Hide Other's Weapon Parts", hideOtherPlayersWeapons, function(v)
+    hideOtherPlayersWeapons = v
+    local hiddenCount = applyOtherPlayersWeaponHiding()
+    if v then
+        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
+    else
+        log("Other-player weapon hide disabled")
+    end
+end, "Utility")
+
+makeSectionLabel("Quick Utils", "Utility")
+makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
+    memoryStatsEnabled = v
+    memoryGui.Enabled = v
+    log(v and "Memory stats enabled" or "Memory stats disabled")
+end, "Utility")
+
+makeToggle("FPS Cap", fpsCapEnabled, function(v)
+    fpsCapEnabled = v
+    if fpsCapEnabled then
+        if safeSetFPS(targetFPS) then
+            log("FPS cap set: " .. targetFPS)
+        else
+            log("FPS cap unsupported by executor")
+        end
+    else
+        safeSetFPS(0)
+        log("FPS cap removed")
+    end
+end, "Utility")
+
+makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
+    local val = tonumber(text)
+    if val and val >= 30 and val <= 240 then
+        targetFPS = math.floor(val)
+        if fpsCapEnabled then
+            safeSetFPS(targetFPS)
+            log("FPS cap updated: " .. targetFPS)
+        end
+    end
+    return tostring(targetFPS)
+end, "Utility")
+
+makeSlider("GC Sweep", gcSweepInterval, 10, 300, function(v)
+    gcSweepInterval = v
+    log(string.format("GC sweep interval set: %ds", gcSweepInterval))
 end, "Utility")
 
 makeButton("Rejoin Server", function()
@@ -1538,6 +1918,78 @@ makeButton("Rejoin Server", function()
         end
     end)
 end, "Utility")
+
+-- Settings page.
+makeSectionLabel("Performance", "Settings")
+makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
+    lowGraphicsEnabled = v
+    applyVisuals(v)
+    log(v and "Low graphics enabled" or "Low graphics disabled")
+end, "Settings")
+
+makeToggle("Streaming Optimisations", streamingOptimized, function(v)
+    streamingOptimized = v
+    if v then
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        pcall(function() settings().Network.IncomingReplicationLag = 0.1 end)
+        log("Streaming optimization enabled")
+    else
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+        log("Streaming optimization disabled")
+    end
+end, "Settings")
+
+makeToggle("Mute Game Sounds", muteSounds, function(v)
+    muteSounds = v
+    pcall(function() SoundService.RespectFilteringEnabled = true end)
+    pcall(function() SoundService.Volume = v and 0 or 1 end)
+    log(v and "Game sounds muted" or "Game sounds unmuted")
+end, "Settings")
+
+makeSectionLabel("AFK", "Settings")
+makeToggle("Anti-Afk", _G.__MeerlyPerfState.antiAfkEnabled, function(v)
+    _G.__MeerlyPerfState.antiAfkEnabled = v
+    log(v and "Anti-AFK enabled" or "Anti-AFK disabled")
+end, "Settings")
+
+makeToggle("Watchdog", _G.__MeerlyPerfState.watchdogEnabled, function(v)
+    _G.__MeerlyPerfState.watchdogEnabled = v
+    log(v and "Watchdog enabled" or "Watchdog disabled")
+end, "Settings")
+
+makeToggle("Background Survival Mode", backgroundMode, function(v)
+    backgroundMode = v
+    log(v and "Background mode enabled" or "Background mode disabled")
+end, "Settings")
+
+makeToggle("Disable 3D Rendering", disable3D, function(v)
+    disable3D = v
+    if RunService.Set3dRenderingEnabled then
+        pcall(function() RunService:Set3dRenderingEnabled(not v) end)
+        log(v and "3D rendering disabled" or "3D rendering enabled")
+    else
+        log("3D render toggle unsupported")
+    end
+end, "Settings")
+
+local modeButton
+modeButton = makeButton("Memory Action: Off", function()
+    local order = { "Off", "AutoRejoin", "AutoQuit" }
+    local idx = table.find(order, memoryGuardMode) or 1
+    idx = (idx % #order) + 1
+    memoryGuardMode = order[idx]
+    modeButton.Text = "Memory Action: " .. memoryGuardMode
+    log("Memory guard mode: " .. memoryGuardMode)
+end, "Settings")
+modeButton.Text = "Memory Action: " .. memoryGuardMode
+
+makeInput("Memory Cap (GB)", tostring(memoryGuardCapGB), function(text)
+    local v = tonumber(text)
+    if v and v >= 0.5 and v <= 128 then
+        memoryGuardCapGB = v
+    end
+    return tostring(memoryGuardCapGB)
+end, "Settings")
 
 local function teleportToWorldSpawn(spawnObject)
     local character = player.Character or player.CharacterAdded:Wait()
@@ -1564,7 +2016,7 @@ end
 
 local function populateTeleportsTab()
     clearTabRows("Teleports")
-    makeSectionLabel("World Teleports (workspace.Areas.<world>.SPAWNS.SPAWN)", "Teleports")
+    makeSectionLabel("Teleports", "Teleports")
     makeButton("Refresh World Spawns", function()
         populateTeleportsTab()
         log("World spawn list refreshed")
@@ -1595,156 +2047,6 @@ local function populateTeleportsTab()
 end
 
 populateTeleportsTab()
-
--- Performance tab: rendering and frame-time controls.
-makeToggle("FPS Cap", fpsCapEnabled, function(v)
-    fpsCapEnabled = v
-    if fpsCapEnabled then
-        if safeSetFPS(targetFPS) then
-            log("FPS cap set: " .. targetFPS)
-        else
-            log("FPS cap unsupported by executor")
-        end
-    else
-        safeSetFPS(0)
-        log("FPS cap removed")
-    end
-end, "Performance")
-
-makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
-    local val = tonumber(text)
-    if val and val >= 30 and val <= 240 then
-        targetFPS = math.floor(val)
-        if fpsCapEnabled then
-            safeSetFPS(targetFPS)
-            log("FPS cap updated: " .. targetFPS)
-        end
-    end
-    return tostring(targetFPS)
-end, "Performance")
-
-makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
-    lowGraphicsEnabled = v
-    applyVisuals(v)
-    log(v and "Low graphics enabled" or "Low graphics disabled")
-end, "Performance")
-
-makeToggle("Streaming Optimization", streamingOptimized, function(v)
-    streamingOptimized = v
-    if v then
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-        pcall(function() settings().Network.IncomingReplicationLag = 0.1 end)
-        log("Streaming optimization enabled")
-    else
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
-        log("Streaming optimization disabled")
-    end
-end, "Performance")
-
-makeToggle("Aggressive FX Cull", aggressiveFxCullEnabled, function(v)
-    aggressiveFxCullEnabled = v
-    applyAggressiveFxCull(v)
-end, "Performance")
-
--- Weapons tab: local and other-player weapon visual/attribute controls.
-makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
-    hideTrackedWeaponParts = v
-    runSelfWeaponPass(v and "Tracked weapon parts hidden (local visual only)" or "Tracked weapon parts shown")
-end, "Weapons")
-
-makeSectionLabel("Weapon Damage Override", "Weapons")
-makeInputWithButton("", tostring(weaponDamageOverride), function(text)
-    local v = tonumber(text)
-    if v then
-        weaponDamageOverride = v
-    end
-    return tostring(weaponDamageOverride)
-end, "SCAN", function()
-    weaponDamageOverrideOnRescan = true
-    runSelfWeaponPass("Weapon damage override applied: " .. tostring(weaponDamageOverride), { applyDamageOnce = true })
-end, "Weapons")
-
-makeToggle("Hitbox Enlarger", hitboxEnlargerEnabled, function(v)
-    hitboxEnlargerEnabled = v
-    runSelfWeaponPass(v and "Hitbox enlarger enabled" or "Hitbox enlarger disabled")
-end, "Weapons")
-
-makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
-    hideOtherPlayersWeapons = v
-    local hiddenCount = applyOtherPlayersWeaponHiding()
-    if v then
-        log(string.format("Other-player weapon hide enabled (pass: %ds, parts: %d)", otherPlayersHidePassSeconds, hiddenCount))
-    else
-        log("Other-player weapon hide disabled")
-    end
-end, "Weapons")
-
-makeInput("Other Weapon Pass Seconds (3-60)", tostring(otherPlayersHidePassSeconds), function(text)
-    local v = tonumber(text)
-    if v and v >= 3 and v <= 60 then
-        otherPlayersHidePassSeconds = math.floor(v)
-    end
-    return tostring(otherPlayersHidePassSeconds)
-end, "Weapons")
-
-makeButton("Rescan Weapons", function()
-    runSelfWeaponPass("Weapon rescan complete")
-    if weaponDamageOverrideOnRescan then
-        runSelfWeaponPass("Weapon damage overridden on rescan: " .. tostring(weaponDamageOverride), { rescan = false, applyDamageOnce = true })
-    end
-end, "Weapons")
-
--- Player tab: local humanoid movement overrides.
-makeToggle("Override WalkSpeed", walkSpeedOverrideEnabled, function(v)
-    walkSpeedOverrideEnabled = v
-    applyWalkSpeed()
-    log(v and ("WalkSpeed override enabled: " .. tostring(walkSpeedValue)) or "WalkSpeed override disabled")
-end, "Player")
-
-makeInput("WalkSpeed Value", tostring(walkSpeedValue), function(text)
-    local v = tonumber(text)
-    if v and v >= 1 and v <= 250 then
-        walkSpeedValue = v
-        if walkSpeedOverrideEnabled then
-            applyWalkSpeed()
-            log("WalkSpeed updated: " .. tostring(walkSpeedValue))
-        end
-    end
-    return tostring(walkSpeedValue)
-end, "Player")
-
--- Memory tab: telemetry + auto-recovery behavior when memory climbs.
-makeToggle("Memory Stats Floating UI", memoryStatsEnabled, function(v)
-    memoryStatsEnabled = v
-    memoryGui.Enabled = v
-    log(v and "Memory stats enabled" or "Memory stats disabled")
-end, "Memory")
-
-local modeButton
-modeButton = makeButton("Memory Action: Off", function()
-    local order = { "Off", "AutoRejoin", "AutoQuit" }
-    local idx = table.find(order, memoryGuardMode) or 1
-    idx = (idx % #order) + 1
-    memoryGuardMode = order[idx]
-    modeButton.Text = "Memory Action: " .. memoryGuardMode
-    log("Memory guard mode: " .. memoryGuardMode)
-end, "Memory")
-
-makeInput("Memory Cap (GB)", tostring(memoryGuardCapGB), function(text)
-    local v = tonumber(text)
-    if v and v >= 0.5 and v <= 128 then
-        memoryGuardCapGB = v
-    end
-    return tostring(memoryGuardCapGB)
-end, "Memory")
-
-makeInput("GC Sweep Seconds (10-120)", tostring(gcSweepInterval), function(text)
-    local v = tonumber(text)
-    if v and v >= 10 and v <= 120 then
-        gcSweepInterval = math.floor(v)
-    end
-    return tostring(gcSweepInterval)
-end, "Memory")
 
 local function requestShutdown(reason)
     if destroyRequested then return end
@@ -1787,6 +2089,11 @@ local function requestShutdown(reason)
         pcall(function() inputBeganConnection:Disconnect() end)
         inputBeganConnection = nil
     end
+    if cullMobPartsEnabled then
+        pcall(function()
+            applyMobPartsCull(false)
+        end)
+    end
     if hideDisappearEntities then
         pcall(function()
             setDisappearHider(false)
@@ -1807,10 +2114,9 @@ end
 
 _G.__MeerlyPURuntime.shutdown = requestShutdown
 
--- Hard shutdown path: disconnect loops/listeners and destroy UI safely.
-makeButton("KILL SWITCH", function()
+quickKillButton.MouseButton1Click:Connect(function()
     requestShutdown("killswitch")
-end, "Utility")
+end)
 
 windowFocusedConnection = UserInputService.WindowFocused:Connect(function()
     windowFocused = true
