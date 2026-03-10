@@ -432,6 +432,62 @@ local function applyHitboxEnlarger()
     end
 end
 
+local function isTargetHitboxEntity(part)
+    if not part:IsA("BasePart") or part.Name ~= "Hitbox" then
+        return false
+    end
+
+    local children = part:GetChildren()
+    if #children ~= 3 then
+        return false
+    end
+
+    local attachmentCount = 0
+    local trailCount = 0
+
+    for _, child in ipairs(children) do
+        if child:IsA("Attachment") and child.Name == "Attachment" then
+            attachmentCount += 1
+        elseif child:IsA("Trail") and child.Name == "Trail" then
+            trailCount += 1
+        else
+            return false
+        end
+    end
+
+    return attachmentCount == 2 and trailCount == 1
+end
+
+local function applyHitboxEnlarger()
+    if not hitboxEnlargerEnabled then
+        return
+    end
+
+    local firstWeapon = orderedTrackedWeapons[1]
+    if not firstWeapon or firstWeapon.Parent ~= trackedCharacter then
+        return
+    end
+
+    local enlargedCount = 0
+    if isTargetHitboxEntity(firstWeapon) then
+        firstWeapon.Size = Vector3.new(1000, 30, 1000)
+        enlargedCount += 1
+    end
+
+    for _, descendant in ipairs(firstWeapon:GetDescendants()) do
+        if isTargetHitboxEntity(descendant) then
+            descendant.Size = Vector3.new(1000, 30, 1000)
+            enlargedCount += 1
+        end
+    end
+
+    if enlargedCount > 0 then
+        log(string.format("Hitbox enlarger applied on %s (%d hitbox parts)", firstWeapon.Name, enlargedCount))
+    else
+        log("Hitbox enlarger found no matching Hitbox part on first tracked weapon")
+    end
+end
+
 -- Applies/restores Damage attribute overrides while preserving original values for clean rollback.
 local function applyDamageState(instance)
     if not weaponDamageOverridePassActive then
