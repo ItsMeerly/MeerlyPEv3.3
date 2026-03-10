@@ -1310,6 +1310,137 @@ local function makeButton(text, onClick, tabName)
     return btn
 end
 
+local function makeSlider(labelText, defaultValue, minValue, maxValue, onChange, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(44, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.40, -10, 1, 0)
+    label.Position = UDim2.fromOffset(10, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local track = Instance.new("Frame")
+    track.Parent = row
+    track.Size = UDim2.new(0.44, 0, 0, 6)
+    track.Position = UDim2.new(0.46, 0, 0.5, -3)
+    track.BackgroundColor3 = Color3.fromRGB(48, 48, 60)
+    track.BorderSizePixel = 0
+    makeCorner(track, 3)
+
+    local fill = Instance.new("Frame")
+    fill.Parent = track
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = uiTheme.accent
+    fill.BorderSizePixel = 0
+    makeCorner(fill, 3)
+
+    local knob = Instance.new("TextButton")
+    knob.Parent = row
+    knob.Size = UDim2.fromOffset(14, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+    knob.BorderSizePixel = 0
+    knob.Text = ""
+    knob.AutoButtonColor = false
+    makeCorner(knob, 7)
+
+    local dragging = false
+    local value = math.clamp(math.floor(tonumber(defaultValue) or minValue), minValue, maxValue)
+
+    local function updateVisuals()
+        local alpha = 0
+        if maxValue > minValue then
+            alpha = (value - minValue) / (maxValue - minValue)
+        end
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        local knobX = track.AbsolutePosition.X + (track.AbsoluteSize.X * alpha)
+        local knobY = track.AbsolutePosition.Y + (track.AbsoluteSize.Y / 2)
+        knob.Position = UDim2.fromOffset(math.floor(knobX - row.AbsolutePosition.X), math.floor(knobY - row.AbsolutePosition.Y))
+        label.Text = string.format("%s: %ds", labelText, value)
+    end
+
+    local function setFromAbsoluteX(absX)
+        local width = math.max(track.AbsoluteSize.X, 1)
+        local alpha = math.clamp((absX - track.AbsolutePosition.X) / width, 0, 1)
+        local raw = minValue + ((maxValue - minValue) * alpha)
+        local nextValue = math.clamp(math.floor(raw + 0.5), minValue, maxValue)
+        if nextValue ~= value then
+            value = nextValue
+            local ok, err = pcall(function()
+                onChange(value)
+            end)
+            if not ok then
+                warn(string.format("[MeerlyPerf] Slider callback failed (%s): %s", tostring(labelText), tostring(err)))
+                if log then
+                    log(string.format("Slider error (%s): %s", tostring(labelText), tostring(err)))
+                end
+            end
+        end
+        updateVisuals()
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromAbsoluteX(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    row:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateVisuals)
+    row:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateVisuals)
+    track:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateVisuals)
+    track:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateVisuals)
+
+    local ok, err = pcall(function()
+        onChange(value)
+    end)
+    if not ok and log then
+        log(string.format("Slider error (%s): %s", tostring(labelText), tostring(err)))
+    end
+
+    task.defer(updateVisuals)
+
+    return {
+        get = function()
+            return value
+        end,
+        set = function(v)
+            value = math.clamp(math.floor(tonumber(v) or value), minValue, maxValue)
+            local okSet, errSet = pcall(function()
+                onChange(value)
+            end)
+            if not okSet and log then
+                log(string.format("Slider error (%s): %s", tostring(labelText), tostring(errSet)))
+            end
+            updateVisuals()
+        end,
+    }
+end
+
 local function makeSectionLabel(text, tabName)
     local row = newRow(30, tabName)
     row.BackgroundTransparency = 1
@@ -1477,6 +1608,10 @@ local function hideMobPart(part)
         return false
     end
 
+    if string.lower(part.Name) == "humanoidrootpart" then
+        return false
+    end
+
     hiddenMobPartsState[part] = {
         parent = part.Parent,
     }
@@ -1616,12 +1751,12 @@ makeToggle("Cull Mob Parts - Custom Hide Mobs", cullMobPartsEnabled, function(v)
 end, "OP Settings")
 
 makeSectionLabel("GamepassBypass:", "OP Settings")
-makeButton("ShowAutoRaid", function()
-    setOptionsListButtonVisible("AutoRaidBtn", true)
+makeToggle("ShowAutoRaid", getOptionsListButtonVisible("AutoRaidBtn"), function(v)
+    setOptionsListButtonVisible("AutoRaidBtn", v)
 end, "OP Settings")
 
-makeButton("ShowHideMobs", function()
-    setOptionsListButtonVisible("HideMobsBtn", true)
+makeToggle("ShowHideMobs", getOptionsListButtonVisible("HideMobsBtn"), function(v)
+    setOptionsListButtonVisible("HideMobsBtn", v)
 end, "OP Settings")
 
 -- Utility page.
@@ -1674,9 +1809,9 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
     return tostring(targetFPS)
 end, "Utility")
 
-makeButton("GC Sweep", function()
-    collectgarbage("collect")
-    log("Manual GC sweep complete")
+makeSlider("GC Sweep", gcSweepInterval, 10, 300, function(v)
+    gcSweepInterval = v
+    log(string.format("GC sweep interval set: %ds", gcSweepInterval))
 end, "Utility")
 
 makeButton("Rejoin Server", function()
