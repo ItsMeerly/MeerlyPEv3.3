@@ -42,6 +42,7 @@ local hideTrackedWeaponParts = false
 local weaponDamageOverride = 25
 local weaponDamageOverrideOnRescan = false
 local weaponDamageOverridePassActive = false
+local hitboxEnlargerEnabled = false
 local hideOtherPlayersWeapons = false
 local otherPlayersHidePassSeconds = 10
 local walkSpeedOverrideEnabled = false
@@ -67,6 +68,7 @@ end
 
 local trackedCharacter = nil
 local trackedWeapons = makeWeakKeyTable()
+local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
 local trackedWeaponDamageState = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
@@ -187,12 +189,6 @@ local function disableFxObject(obj)
     if obj:IsA("ParticleEmitter") then
         obj.Enabled = false
         obj.Rate = 0
-    elseif obj:IsA("Trail") or obj:IsA("Beam") then
-        obj.Enabled = false
-    elseif obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-        obj.Enabled = false
-    elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
-        obj.Enabled = false
     end
 end
 
@@ -207,9 +203,7 @@ local function applyAggressiveFxCull(enabled)
 
         local disabledCount = 0
         for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
-                or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")
-                or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+            if obj:IsA("ParticleEmitter") then
                 disableFxObject(obj)
                 disabledCount += 1
             end
@@ -219,7 +213,7 @@ local function applyAggressiveFxCull(enabled)
             disableFxObject(obj)
         end)
 
-        log(string.format("Aggressive FX cull enabled (%d effects disabled)", disabledCount))
+        log(string.format("Aggressive FX cull enabled (%d particle emitters disabled)", disabledCount))
     else
         if fxCullConnection then
             fxCullConnection:Disconnect()
@@ -374,6 +368,62 @@ local function applyWeaponPartState(part)
     end
 end
 
+local function isTargetHitboxEntity(part)
+    if not part:IsA("BasePart") or part.Name ~= "Hitbox" then
+        return false
+    end
+
+    local children = part:GetChildren()
+    if #children ~= 3 then
+        return false
+    end
+
+    local attachmentCount = 0
+    local trailCount = 0
+
+    for _, child in ipairs(children) do
+        if child:IsA("Attachment") and child.Name == "Attachment" then
+            attachmentCount += 1
+        elseif child:IsA("Trail") and child.Name == "Trail" then
+            trailCount += 1
+        else
+            return false
+        end
+    end
+
+    return attachmentCount == 2 and trailCount == 1
+end
+
+local function applyHitboxEnlarger()
+    if not hitboxEnlargerEnabled then
+        return
+    end
+
+    local firstWeapon = orderedTrackedWeapons[1]
+    if not firstWeapon or firstWeapon.Parent ~= trackedCharacter then
+        return
+    end
+
+    local enlargedCount = 0
+    if isTargetHitboxEntity(firstWeapon) then
+        firstWeapon.Size = Vector3.new(1000, 30, 1000)
+        enlargedCount += 1
+    end
+
+    for _, descendant in ipairs(firstWeapon:GetDescendants()) do
+        if isTargetHitboxEntity(descendant) then
+            descendant.Size = Vector3.new(1000, 30, 1000)
+            enlargedCount += 1
+        end
+    end
+
+    if enlargedCount > 0 then
+        log(string.format("Hitbox enlarger applied on %s (%d hitbox parts)", firstWeapon.Name, enlargedCount))
+    else
+        log("Hitbox enlarger found no matching Hitbox part on first tracked weapon")
+    end
+end
+
 -- Applies/restores Damage attribute overrides while preserving original values for clean rollback.
 local function applyDamageState(instance)
     if not weaponDamageOverridePassActive then
@@ -419,6 +469,7 @@ local function trackWeapon(container)
     end
 
     trackedWeapons[container] = true
+    table.insert(orderedTrackedWeapons, container)
     applyWeaponState(container)
     log("Tracked weapon: " .. container.Name)
 end
@@ -431,6 +482,12 @@ local function untrackWeapon(container)
     end
 
     trackedWeapons[container] = nil
+
+    for i = #orderedTrackedWeapons, 1, -1 do
+        if orderedTrackedWeapons[i] == container then
+            table.remove(orderedTrackedWeapons, i)
+        end
+    end
 
     if container:IsA("BasePart") then
         trackedWeaponPartState[container] = nil
@@ -453,13 +510,17 @@ local function rescanCharacterWeapons(silent)
 
     local trackedCount = 0
     local currentlySeen = {}
+    local newOrderedWeapons = {}
     for _, child in ipairs(trackedCharacter:GetChildren()) do
         if isLikelyWeaponContainer(child) then
             currentlySeen[child] = true
+            table.insert(newOrderedWeapons, child)
             trackWeapon(child)
             trackedCount += 1
         end
     end
+
+    orderedTrackedWeapons = newOrderedWeapons
 
     for weapon in pairs(trackedWeapons) do
         if not currentlySeen[weapon] or weapon.Parent ~= trackedCharacter then
@@ -495,6 +556,7 @@ local function runSelfWeaponPass(message, opts)
         weaponDamageOverrideOnRescan = false
     end
 
+    applyHitboxEnlarger()
     weaponDamageOverridePassActive = false
 
     if message then
@@ -508,6 +570,7 @@ end
 local function bindCharacterForWeapons(character)
     trackedCharacter = character
     trackedWeapons = makeWeakKeyTable()
+    orderedTrackedWeapons = {}
     trackedWeaponPartState = makeWeakKeyTable()
     trackedWeaponDamageState = makeWeakKeyTable()
     originalWalkSpeed = nil
@@ -1062,10 +1125,15 @@ local function makeInputWithButton(labelText, defaultText, onCommit, buttonText,
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Text = labelText
 
+    local compactLayout = tostring(labelText or "") == ""
+    if compactLayout then
+        label.Visible = false
+    end
+
     local box = Instance.new("TextBox")
     box.Parent = row
-    box.Size = UDim2.new(0.31, -6, 1, -8)
-    box.Position = UDim2.new(0.37, 0, 0, 4)
+    box.Size = compactLayout and UDim2.new(0.62, -6, 1, -8) or UDim2.new(0.31, -6, 1, -8)
+    box.Position = compactLayout and UDim2.new(0.04, 0, 0, 4) or UDim2.new(0.37, 0, 0, 4)
     box.BackgroundColor3 = Color3.fromRGB(48, 48, 60)
     box.BorderSizePixel = 0
     box.ClearTextOnFocus = false
@@ -1500,15 +1568,21 @@ makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     runSelfWeaponPass(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
 end, "Weapons")
 
-makeInputWithButton("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
+makeSectionLabel("Weapon Damage Override", "Weapons")
+makeInputWithButton("", tostring(weaponDamageOverride), function(text)
     local v = tonumber(text)
     if v then
         weaponDamageOverride = v
     end
     return tostring(weaponDamageOverride)
-end, "Override Weapon Damage", function()
+end, "SCAN", function()
     weaponDamageOverrideOnRescan = true
-    log("Weapon damage override armed for next rescan: " .. tostring(weaponDamageOverride))
+    runSelfWeaponPass("Weapon damage override applied: " .. tostring(weaponDamageOverride), { applyDamageOnce = true })
+end, "Weapons")
+
+makeToggle("Hitbox Enlarger", hitboxEnlargerEnabled, function(v)
+    hitboxEnlargerEnabled = v
+    runSelfWeaponPass(v and "Hitbox enlarger enabled" or "Hitbox enlarger disabled")
 end, "Weapons")
 
 makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
