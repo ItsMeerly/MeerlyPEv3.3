@@ -318,7 +318,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports" }
+local tabNames = { "Features", "Teleports", "Auto Raid" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -576,7 +576,6 @@ local uiVisible = true
 local autoRebirth = false
 local autoEnlightenment = false
 local autoTranscendence = false
-local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
 local autoTranscendenceDelay = 5
@@ -585,9 +584,14 @@ local antiAfkInterval = 600
 local autoClickerEnabled = false
 local autoClickerCPS = 10
 local hidePlayersScanInterval = 10
+local autoRaidMasterEnabled = false
+local raidStarted = false
+local onGoingRaid = false
+local raidEnemyScanInterval = 2
+local raidPresenceScanInterval = 7
+local lastRaidPresenceScan = 0
 local raidOriginalPosition = nil
-local raidReturnPending = false
-local raidConnection = nil
+local raidTeleportedToLobby = false
 
 local hiddenObjectStates = {}
 
@@ -838,52 +842,67 @@ local function fireRemote(remoteName)
     log("Fired remote: " .. remoteName)
 end
 
-local function formatArgs(...)
-    local args = { ... }
-    if #args == 0 then
-        return "(no args)"
+local function getRaidTimerSeconds()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local raidTimer = hud and hud:FindFirstChild("RaidNextTimer")
+    local raw = raidTimer and raidTimer.Value
+
+    if raw == nil then
+        return nil
     end
 
-    local out = {}
-    for i, arg in ipairs(args) do
-        out[#out + 1] = string.format("arg%d=%s [%s]", i, tostring(arg), typeof(arg))
+    if typeof(raw) == "number" then
+        return raw
     end
-    return table.concat(out, ", ")
+
+    if typeof(raw) == "string" then
+        local m, sec = string.match(raw, "^(%d+):(%d+)$")
+        if m and sec then
+            return (tonumber(m) * 60) + tonumber(sec)
+        end
+        local asNumber = tonumber(raw)
+        if asNumber then
+            return asNumber
+        end
+    end
+
+    return nil
 end
 
-local function findRaidState(...)
-    local args = { ... }
-    for _, arg in ipairs(args) do
-        if typeof(arg) == "boolean" then
-            return arg
-        elseif typeof(arg) == "number" then
-            if arg == 0 then return false end
-            if arg == 1 then return true end
-        elseif typeof(arg) == "string" then
-            local lowered = string.lower(arg)
-            if lowered == "start" or lowered == "started" or lowered == "active" or lowered == "running" or lowered == "inprogress" or lowered == "in_progress" then
-                return true
-            elseif lowered == "stop" or lowered == "stopped" or lowered == "inactive" or lowered == "ended" or lowered == "finished" or lowered == "complete" then
-                return false
-            end
-        elseif typeof(arg) == "table" then
-            local candidates = {
-                arg.active,
-                arg.isActive,
-                arg.enabled,
-                arg.inProgress,
-                arg.isRaidActive,
-                arg.state,
-                arg.status,
-                arg.phase,
-            }
-            local nested = findRaidState(table.unpack(candidates))
-            if nested ~= nil then
-                return nested
+local function getRaidEnemiesAlive()
+    local raidEnemies = Workspace:FindFirstChild("RaidEnemies")
+    if not raidEnemies then
+        return false, nil
+    end
+
+    for _, enemy in ipairs(raidEnemies:GetChildren()) do
+        if enemy and enemy.Parent then
+            local hum = enemy:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health > 0 then
+                return true, enemy
             end
         end
     end
-    return nil
+
+    return false, nil
+end
+
+local function getRaidResultsVisible()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local results = hud and hud:FindFirstChild("RaidResultsScreen")
+    return results and results.Visible == true
+end
+
+local function moveToRaidEnemy(enemy)
+    if not enemy then return end
+    local character = localPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local targetPart = enemy:IsA("Model") and (enemy.PrimaryPart or enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChildWhichIsA("BasePart")) or (enemy:IsA("BasePart") and enemy or nil)
+    if not targetPart then return end
+
+    root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 4), targetPart.Position)
 end
 
 local function makeButtonGrid(buttons, columns, tabName)
@@ -899,62 +918,6 @@ local function makeButtonGrid(buttons, columns, tabName)
         end
         makeInlineButtons(rowButtons, tabName)
     end
-end
-
-local function connectRaidRemote()
-    local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
-    local raidRemote = remotesFolder and remotesFolder:FindFirstChild("RaidStateChanged")
-
-    if not raidRemote or not raidRemote:IsA("RemoteEvent") then
-        log("Auto Raid: RaidStateChanged missing or not RemoteEvent")
-        return
-    end
-
-    if raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
-    end
-
-    raidConnection = raidRemote.OnClientEvent:Connect(function(...)
-        local state = findRaidState(...)
-        log("RaidStateChanged received: " .. formatArgs(...))
-
-        if state == nil then
-            log("Auto Raid: no boolean state found in event args")
-            return
-        end
-
-        if state then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                raidOriginalPosition = root.CFrame
-                raidReturnPending = true
-                local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
-                if ok then
-                    teleportTo(lobbyTarget)
-                    log("Auto Raid: raid started, teleported to Lobby")
-                else
-                    log("Auto Raid: failed to resolve Lobby teleport")
-                end
-            else
-                log("Auto Raid: no HumanoidRootPart to save return position")
-            end
-        elseif raidReturnPending and raidOriginalPosition then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.CFrame = raidOriginalPosition
-                log("Auto Raid: raid ended, returned to original position")
-            else
-                log("Auto Raid: raid ended but no HumanoidRootPart found")
-            end
-            raidOriginalPosition = nil
-            raidReturnPending = false
-        end
-    end)
-
-    log("Auto Raid: listening to RaidStateChanged")
 end
 
 makeSectionLabel("General Actions", "Features")
@@ -1034,18 +997,6 @@ transcendenceSlider = makeSlider("Transcendence Timer", 1, 90, autoTranscendence
 end, "Features")
 transcendenceSlider.setVisible(autoTranscendence)
 
-makeToggle("Auto Raid", false, function(state)
-    autoRaid = state
-    if state then
-        connectRaidRemote()
-    elseif raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
-        raidOriginalPosition = nil
-        raidReturnPending = false
-        log("Auto Raid disabled")
-    end
-end, "Features")
 
 makeInlineButtons({
     { "Rebirth", function() fireRemote("PerformRebirth") end },
@@ -1100,6 +1051,89 @@ for _, data in ipairs(teleportLocations.secret) do
         teleportTo(target)
     end, "Teleports")
 end
+
+makeSectionLabel("Raid Automation", "Auto Raid")
+
+makeToggle("Auto Raid Master", false, function(state)
+    autoRaidMasterEnabled = state
+    if not state then
+        raidStarted = false
+        onGoingRaid = false
+        raidTeleportedToLobby = false
+        raidOriginalPosition = nil
+        lastRaidPresenceScan = 0
+    else
+        lastRaidPresenceScan = 0
+    end
+    log("Auto Raid master " .. (state and "enabled" or "disabled"))
+end, "Auto Raid")
+
+makeInput("Seek Enemies Scan (s)", raidEnemyScanInterval, function(text)
+    local value = tonumber(text) or raidEnemyScanInterval
+    raidEnemyScanInterval = math.clamp(math.floor(value), 1, 10)
+    return raidEnemyScanInterval
+end, "Auto Raid")
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled then
+            local raidTimerSeconds = getRaidTimerSeconds()
+            if raidTimerSeconds ~= nil and raidTimerSeconds < 6 then
+                raidStarted = true
+            end
+
+            if raidStarted then
+                if (os.clock() - lastRaidPresenceScan) >= raidPresenceScanInterval then
+                    local enemiesAlive = getRaidEnemiesAlive()
+                    onGoingRaid = enemiesAlive
+                    lastRaidPresenceScan = os.clock()
+                end
+
+                if onGoingRaid and not raidTeleportedToLobby then
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        raidOriginalPosition = root.CFrame
+                        task.wait(2)
+                        local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
+                        if ok then
+                            teleportTo(lobbyTarget)
+                            raidTeleportedToLobby = true
+                            log("Auto Raid: raid detected, teleported to Lobby")
+                        end
+                    end
+                elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
+                    task.wait(2)
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root and raidOriginalPosition then
+                        root.CFrame = raidOriginalPosition
+                        log("Auto Raid: returned to pre-raid position")
+                    end
+                    raidOriginalPosition = nil
+                    raidTeleportedToLobby = false
+                    raidStarted = false
+                end
+            end
+        end
+
+        task.wait(5)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled and raidStarted then
+            local enemiesAlive, firstEnemy = getRaidEnemiesAlive()
+            onGoingRaid = enemiesAlive
+            if enemiesAlive and firstEnemy then
+                moveToRaidEnemy(firstEnemy)
+            end
+        end
+
+        task.wait(math.max(raidEnemyScanInterval, 1))
+    end
+end)
 
 task.spawn(function()
     while screen.Parent do
