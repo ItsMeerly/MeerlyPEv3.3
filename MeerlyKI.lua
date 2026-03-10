@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -285,7 +286,9 @@ local function createTab(name)
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
-    page.ScrollBarThickness = 6
+    page.ScrollBarThickness = (name == "Teleports") and 10 or 6
+    page.ScrollBarImageColor3 = uiTheme.accent
+    page.ScrollBarImageTransparency = 0.15
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.CanvasSize = UDim2.new()
     page.Visible = false
@@ -315,7 +318,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports" }
+local tabNames = { "Features", "Teleports", "Auto Raid" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -573,17 +576,125 @@ local uiVisible = true
 local autoRebirth = false
 local autoEnlightenment = false
 local autoTranscendence = false
-local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
 local autoTranscendenceDelay = 5
+local antiAfkEnabled = false
+local antiAfkInterval = 600
+local autoClickerEnabled = false
+local autoClickerCPS = 10
+local hidePlayersScanInterval = 10
+local autoRaidMasterEnabled = false
+local raidStarted = false
+local onGoingRaid = false
+local raidEnemyScanInterval = 2
+local raidPresenceScanInterval = 7
+local lastRaidPresenceScan = 0
 local raidOriginalPosition = nil
-local raidReturnPending = false
-local raidConnection = nil
+local raidTeleportedToLobby = false
 
-local originalHiddenStates = {}
+local hiddenObjectStates = {}
+
+local function hideObject(obj)
+    if hiddenObjectStates[obj] then
+        return
+    end
+
+    local state = {}
+
+    if obj:IsA("BasePart") then
+        state.class = "BasePart"
+        state.localTransparencyModifier = obj.LocalTransparencyModifier
+        state.transparency = obj.Transparency
+        state.canCollide = obj.CanCollide
+        state.canTouch = obj.CanTouch
+        if obj.CanQuery ~= nil then
+            state.canQuery = obj.CanQuery
+        end
+        obj.LocalTransparencyModifier = 1
+        obj.Transparency = 1
+        obj.CanCollide = false
+        obj.CanTouch = false
+        pcall(function() obj.CanQuery = false end)
+    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+        state.class = "Gui"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        state.class = "Effect"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        state.class = "DecalTexture"
+        state.transparency = obj.Transparency
+        obj.Transparency = 1
+    elseif obj:IsA("Highlight") then
+        state.class = "Highlight"
+        state.enabled = obj.Enabled
+        state.fillTransparency = obj.FillTransparency
+        state.outlineTransparency = obj.OutlineTransparency
+        obj.Enabled = false
+        obj.FillTransparency = 1
+        obj.OutlineTransparency = 1
+    else
+        return
+    end
+
+    hiddenObjectStates[obj] = state
+end
+
+local function restoreObject(obj)
+    local state = hiddenObjectStates[obj]
+    if not state then
+        return
+    end
+
+    if state.class == "BasePart" then
+        obj.LocalTransparencyModifier = state.localTransparencyModifier or 0
+        obj.Transparency = state.transparency or 0
+        obj.CanCollide = state.canCollide == true
+        obj.CanTouch = state.canTouch == true
+        pcall(function()
+            if state.canQuery ~= nil then
+                obj.CanQuery = state.canQuery
+            end
+        end)
+    elseif state.class == "Gui" or state.class == "Effect" then
+        obj.Enabled = state.enabled ~= false
+    elseif state.class == "DecalTexture" then
+        obj.Transparency = state.transparency or 0
+    elseif state.class == "Highlight" then
+        obj.Enabled = state.enabled ~= false
+        obj.FillTransparency = state.fillTransparency or 0
+        obj.OutlineTransparency = state.outlineTransparency or 0
+    end
+
+    hiddenObjectStates[obj] = nil
+end
+
+local function applyHideOnCharacter(character, hide)
+    if not character then return end
+    for _, obj in ipairs(character:GetDescendants()) do
+        if hide then
+            hideObject(obj)
+        else
+            restoreObject(obj)
+        end
+    end
+end
+
+local function restoreAllHiddenObjects()
+    for obj in pairs(hiddenObjectStates) do
+        if obj and obj.Parent then
+            restoreObject(obj)
+        else
+            hiddenObjectStates[obj] = nil
+        end
+    end
+end
 
 local function getHumanoid()
+
     local character = localPlayer.Character
     if not character then return nil end
     return character:FindFirstChildOfClass("Humanoid")
@@ -606,42 +717,27 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
 
-end)
-
-local function applyHideOnCharacter(character, hide)
-    if not character then return end
-    for _, obj in ipairs(character:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if hide then
-                if not originalHiddenStates[obj] then
-                    originalHiddenStates[obj] = { transp = obj.LocalTransparencyModifier, coll = obj.CanCollide }
-                end
-                obj.LocalTransparencyModifier = 1
-                obj.CanCollide = false
-            else
-                local state = originalHiddenStates[obj]
-                if state then
-                    obj.LocalTransparencyModifier = state.transp
-                    obj.CanCollide = state.coll
-                    originalHiddenStates[obj] = nil
-                else
-                    obj.LocalTransparencyModifier = 0
-                end
-            end
-        elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") or obj:IsA("ParticleEmitter") then
-            obj.Enabled = not hide
-        end
+    if input.KeyCode == Enum.KeyCode.F6 then
+        autoClickerEnabled = not autoClickerEnabled
+        log("Auto Clicker " .. (autoClickerEnabled and "enabled" or "disabled") .. " (F6)")
+        return
     end
-end
+
+end)
 
 local function setHideOtherPlayers(state)
     hideOthersEnabled = state
+
+    if not state then
+        restoreAllHiddenObjects()
+    end
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= localPlayer then
             applyHideOnCharacter(plr.Character, state)
         end
     end
-    log(state and "Other players hidden" or "Other players restored")
+    log(state and "Other players hidden (including FX/parts/accessories)" or "Other players restored")
 end
 
 Players.PlayerAdded:Connect(function(plr)
@@ -654,6 +750,19 @@ Players.PlayerAdded:Connect(function(plr)
     end)
 end)
 
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and hideOthersEnabled then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer then
+                    applyHideOnCharacter(plr.Character, true)
+                end
+            end
+        end
+        task.wait(hidePlayersScanInterval)
+    end
+end)
+
 local teleportLocations = {
     quickActions = {
         { "The Lobby", function() return workspace.SpawnLocation end },
@@ -662,6 +771,13 @@ local teleportLocations = {
         { "The Sanctum", function() return workspace.Rooms.Room3:GetChildren()[334] end },
         { "The Chamber", function() return workspace.Rooms.Room4:GetChildren()[120] end },
         { "The Observatory", function() return workspace.Rooms.Room5.FloorTile_40_5 end },
+    },
+    autoScrolls = {
+        { "Knowledge Scrolls", function() return workspace.ScrollAltar.ScrollAltar end },
+        { "Tome Scrolls", function() return workspace:GetChildren()[64].ScrollAltar end },
+        { "Rune Scrolls", function() return workspace:GetChildren()[61].ScrollAltar.ScrollAltar end },
+        { "Essence Scrolls", function() return workspace:GetChildren()[63].ScrollAltar end },
+        { "Starlight Scrolls", function() return workspace:GetChildren()[62].ScrollAltar end },
     },
     secret = {
         { "Observatory Roof", function() return workspace.Rooms.Room5.DomeApex end },
@@ -726,83 +842,82 @@ local function fireRemote(remoteName)
     log("Fired remote: " .. remoteName)
 end
 
-local function formatArgs(...)
-    local args = { ... }
-    if #args == 0 then
-        return "(no args)"
+local function getRaidTimerSeconds()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local raidTimer = hud and hud:FindFirstChild("RaidNextTimer")
+    local raw = raidTimer and raidTimer.Value
+
+    if raw == nil then
+        return nil
     end
 
-    local out = {}
-    for i, arg in ipairs(args) do
-        out[#out + 1] = string.format("arg%d=%s [%s]", i, tostring(arg), typeof(arg))
+    if typeof(raw) == "number" then
+        return raw
     end
-    return table.concat(out, ", ")
-end
 
-local function findRaidState(...)
-    local args = { ... }
-    for _, arg in ipairs(args) do
-        if typeof(arg) == "boolean" then
-            return arg
+    if typeof(raw) == "string" then
+        local m, sec = string.match(raw, "^(%d+):(%d+)$")
+        if m and sec then
+            return (tonumber(m) * 60) + tonumber(sec)
+        end
+        local asNumber = tonumber(raw)
+        if asNumber then
+            return asNumber
         end
     end
+
     return nil
 end
 
-local function connectRaidRemote()
-    local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
-    local raidRemote = remotesFolder and remotesFolder:FindFirstChild("RaidStateChanged")
-
-    if not raidRemote or not raidRemote:IsA("RemoteEvent") then
-        log("Auto Raid: RaidStateChanged missing or not RemoteEvent")
-        return
+local function getRaidEnemiesAlive()
+    local raidEnemies = Workspace:FindFirstChild("RaidEnemies")
+    if not raidEnemies then
+        return false, nil
     end
 
-    if raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
+    for _, enemy in ipairs(raidEnemies:GetChildren()) do
+        if enemy and enemy.Parent then
+            local hum = enemy:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health > 0 then
+                return true, enemy
+            end
+        end
     end
 
-    raidConnection = raidRemote.OnClientEvent:Connect(function(...)
-        local state = findRaidState(...)
-        log("RaidStateChanged received: " .. formatArgs(...))
+    return false, nil
+end
 
-        if state == nil then
-            log("Auto Raid: no boolean state found in event args")
-            return
+local function getRaidResultsVisible()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local results = hud and hud:FindFirstChild("RaidResultsScreen")
+    return results and results.Visible == true
+end
+
+local function moveToRaidEnemy(enemy)
+    if not enemy then return end
+    local character = localPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local targetPart = enemy:IsA("Model") and (enemy.PrimaryPart or enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChildWhichIsA("BasePart")) or (enemy:IsA("BasePart") and enemy or nil)
+    if not targetPart then return end
+
+    root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 4), targetPart.Position)
+end
+
+local function makeButtonGrid(buttons, columns, tabName)
+    local columnCount = math.max(1, columns or 2)
+    local rows = math.ceil(#buttons / columnCount)
+
+    for rowIndex = 1, rows do
+        local rowButtons = {}
+        local startIdx = ((rowIndex - 1) * columnCount) + 1
+        local endIdx = math.min(startIdx + columnCount - 1, #buttons)
+        for i = startIdx, endIdx do
+            rowButtons[#rowButtons + 1] = buttons[i]
         end
-
-        if state then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                raidOriginalPosition = root.CFrame
-                raidReturnPending = true
-                local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
-                if ok then
-                    teleportTo(lobbyTarget)
-                    log("Auto Raid: raid started, teleported to Lobby")
-                else
-                    log("Auto Raid: failed to resolve Lobby teleport")
-                end
-            else
-                log("Auto Raid: no HumanoidRootPart to save return position")
-            end
-        elseif raidReturnPending and raidOriginalPosition then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.CFrame = raidOriginalPosition
-                log("Auto Raid: raid ended, returned to original position")
-            else
-                log("Auto Raid: raid ended but no HumanoidRootPart found")
-            end
-            raidOriginalPosition = nil
-            raidReturnPending = false
-        end
-    end)
-
-    log("Auto Raid: listening to RaidStateChanged")
+        makeInlineButtons(rowButtons, tabName)
+    end
 end
 
 makeSectionLabel("General Actions", "Features")
@@ -824,6 +939,18 @@ end, "Features")
 
 makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
+end, "Features")
+
+makeToggle("Anti-AFK (SPACE / 10 min)", false, function(state)
+    antiAfkEnabled = state
+    log("Anti-AFK " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeInput("Auto Clicker CPS (F6)", autoClickerCPS, function(text)
+    local value = tonumber(text) or autoClickerCPS
+    autoClickerCPS = math.clamp(math.floor(value), 1, 20)
+    log("Auto Clicker CPS set to " .. autoClickerCPS)
+    return autoClickerCPS
 end, "Features")
 
 makeSectionLabel("Remote Bypass", "Features")
@@ -870,18 +997,6 @@ transcendenceSlider = makeSlider("Transcendence Timer", 1, 90, autoTranscendence
 end, "Features")
 transcendenceSlider.setVisible(autoTranscendence)
 
-makeToggle("Auto Raid", false, function(state)
-    autoRaid = state
-    if state then
-        connectRaidRemote()
-    elseif raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
-        raidOriginalPosition = nil
-        raidReturnPending = false
-        log("Auto Raid disabled")
-    end
-end, "Features")
 
 makeInlineButtons({
     { "Rebirth", function() fireRemote("PerformRebirth") end },
@@ -893,7 +1008,7 @@ makeButton("Toggle Music", function()
     fireRemote("ToggleMusic")
 end, "Features")
 
-makeSectionLabel("Quick Actions", "Teleports")
+makeSectionLabel("General Actions", "Teleports")
 for _, data in ipairs(teleportLocations.quickActions) do
     local name, resolver = data[1], data[2]
     makeButton("Teleport: " .. name, function()
@@ -905,6 +1020,24 @@ for _, data in ipairs(teleportLocations.quickActions) do
         teleportTo(target)
     end, "Teleports")
 end
+
+makeSectionLabel("Auto Scrolls", "Teleports")
+local scrollButtons = {}
+for _, data in ipairs(teleportLocations.autoScrolls) do
+    local name, resolver = data[1], data[2]
+    scrollButtons[#scrollButtons + 1] = {
+        name,
+        function()
+            local ok, target = pcall(resolver)
+            if not ok then
+                log("Teleport resolver error for " .. name)
+                return
+            end
+            teleportTo(target)
+        end,
+    }
+end
+makeButtonGrid(scrollButtons, 2, "Teleports")
 
 makeSectionLabel("Secret", "Teleports")
 for _, data in ipairs(teleportLocations.secret) do
@@ -919,12 +1052,120 @@ for _, data in ipairs(teleportLocations.secret) do
     end, "Teleports")
 end
 
+makeSectionLabel("Raid Automation", "Auto Raid")
+
+makeToggle("Auto Raid Master", false, function(state)
+    autoRaidMasterEnabled = state
+    if not state then
+        raidStarted = false
+        onGoingRaid = false
+        raidTeleportedToLobby = false
+        raidOriginalPosition = nil
+        lastRaidPresenceScan = 0
+    else
+        lastRaidPresenceScan = 0
+    end
+    log("Auto Raid master " .. (state and "enabled" or "disabled"))
+end, "Auto Raid")
+
+makeInput("Seek Enemies Scan (s)", raidEnemyScanInterval, function(text)
+    local value = tonumber(text) or raidEnemyScanInterval
+    raidEnemyScanInterval = math.clamp(math.floor(value), 1, 10)
+    return raidEnemyScanInterval
+end, "Auto Raid")
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled then
+            local raidTimerSeconds = getRaidTimerSeconds()
+            if raidTimerSeconds ~= nil and raidTimerSeconds < 6 then
+                raidStarted = true
+            end
+
+            if raidStarted then
+                if (os.clock() - lastRaidPresenceScan) >= raidPresenceScanInterval then
+                    local enemiesAlive = getRaidEnemiesAlive()
+                    onGoingRaid = enemiesAlive
+                    lastRaidPresenceScan = os.clock()
+                end
+
+                if onGoingRaid and not raidTeleportedToLobby then
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        raidOriginalPosition = root.CFrame
+                        task.wait(2)
+                        local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
+                        if ok then
+                            teleportTo(lobbyTarget)
+                            raidTeleportedToLobby = true
+                            log("Auto Raid: raid detected, teleported to Lobby")
+                        end
+                    end
+                elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
+                    task.wait(2)
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root and raidOriginalPosition then
+                        root.CFrame = raidOriginalPosition
+                        log("Auto Raid: returned to pre-raid position")
+                    end
+                    raidOriginalPosition = nil
+                    raidTeleportedToLobby = false
+                    raidStarted = false
+                end
+            end
+        end
+
+        task.wait(5)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled and raidStarted then
+            local enemiesAlive, firstEnemy = getRaidEnemiesAlive()
+            onGoingRaid = enemiesAlive
+            if enemiesAlive and firstEnemy then
+                moveToRaidEnemy(firstEnemy)
+            end
+        end
+
+        task.wait(math.max(raidEnemyScanInterval, 1))
+    end
+end)
+
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRebirth then
             fireRemote("PerformRebirth")
         end
         task.wait(autoRebirthDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and antiAfkEnabled then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+            log("Anti-AFK: sent virtual SPACE input")
+        end
+        task.wait(antiAfkInterval)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoClickerEnabled then
+            local mousePos = UserInputService:GetMouseLocation()
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 0)
+            task.wait(1 / math.max(autoClickerCPS, 1))
+        else
+            task.wait(0.1)
+        end
     end
 end)
 
