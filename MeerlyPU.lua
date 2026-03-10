@@ -39,8 +39,9 @@ local lowGraphicsEnabled = false
 local streamingOptimized = false
 local aggressiveFxCullEnabled = false
 local hideTrackedWeaponParts = false
-local weaponDamageOverrideEnabled = false
 local weaponDamageOverride = 25
+local weaponDamageOverrideOnRescan = false
+local weaponDamageOverridePassActive = false
 local hideOtherPlayersWeapons = false
 local otherPlayersHidePassSeconds = 10
 local walkSpeedOverrideEnabled = false
@@ -375,18 +376,16 @@ end
 
 -- Applies/restores Damage attribute overrides while preserving original values for clean rollback.
 local function applyDamageState(instance)
-    if weaponDamageOverrideEnabled then
-        local state = trackedWeaponDamageState[instance]
-        if state == nil then
-            state = instance:GetAttribute("Damage")
-            trackedWeaponDamageState[instance] = state
-        end
-        instance:SetAttribute("Damage", weaponDamageOverride)
-    else
-        if trackedWeaponDamageState[instance] ~= nil then
-            instance:SetAttribute("Damage", trackedWeaponDamageState[instance])
-        end
+    if not weaponDamageOverridePassActive then
+        return
     end
+
+    local state = trackedWeaponDamageState[instance]
+    if state == nil then
+        state = instance:GetAttribute("Damage")
+        trackedWeaponDamageState[instance] = state
+    end
+    instance:SetAttribute("Damage", weaponDamageOverride)
 end
 
 -- Applies current local weapon policies (hide parts + damage override)
@@ -470,6 +469,36 @@ local function rescanCharacterWeapons(silent)
 
     if not silent then
         log(string.format("Weapon scan complete: %d tracked", trackedCount))
+    end
+end
+
+-- Runs a local weapon maintenance pass.
+-- Why: centralizing this prevents nil callback errors and keeps toggle/button actions consistent.
+local function runSelfWeaponPass(message, opts)
+    opts = opts or {}
+
+    if opts.rescan ~= false then
+        rescanCharacterWeapons(true)
+    end
+
+    weaponDamageOverridePassActive = opts.applyDamageOnce == true
+
+    for weapon in pairs(trackedWeapons) do
+        if weapon and weapon.Parent == trackedCharacter then
+            applyWeaponState(weapon)
+        else
+            untrackWeapon(weapon)
+        end
+    end
+
+    if opts.applyDamageOnce then
+        weaponDamageOverrideOnRescan = false
+    end
+
+    weaponDamageOverridePassActive = false
+
+    if message then
+        log(message)
     end
 end
 
@@ -1015,6 +1044,81 @@ local function makeInput(labelText, defaultText, onCommit, tabName)
     return box
 end
 
+-- Input row with a right-side action button.
+-- What: commits text as usual and exposes a companion click action in the same row.
+-- Why: weapon damage override is an action workflow, not a persistent ON/OFF mode.
+local function makeInputWithButton(labelText, defaultText, onCommit, buttonText, onButtonClick, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(34, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.36, -10, 1, 0)
+    label.Position = UDim2.fromOffset(10, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+
+    local box = Instance.new("TextBox")
+    box.Parent = row
+    box.Size = UDim2.new(0.31, -6, 1, -8)
+    box.Position = UDim2.new(0.37, 0, 0, 4)
+    box.BackgroundColor3 = Color3.fromRGB(48, 48, 60)
+    box.BorderSizePixel = 0
+    box.ClearTextOnFocus = false
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 12
+    box.TextColor3 = uiTheme.text
+    box.Text = tostring(defaultText or "")
+    makeCorner(box, 5)
+
+    local button = Instance.new("TextButton")
+    button.Parent = row
+    button.Size = UDim2.new(0.28, -8, 1, -8)
+    button.Position = UDim2.new(0.69, 0, 0, 4)
+    button.BackgroundColor3 = uiTheme.accent
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 11
+    button.TextColor3 = Color3.fromRGB(10, 10, 12)
+    button.Text = buttonText
+    makeCorner(button, 5)
+
+    local function commit()
+        local ok, newText = pcall(function()
+            return onCommit(box.Text)
+        end)
+        if ok and newText ~= nil then
+            box.Text = tostring(newText)
+        elseif not ok then
+            warn(string.format("[MeerlyPerf] Input callback failed (%s): %s", tostring(labelText), tostring(newText)))
+            if log then
+                log(string.format("Input error (%s): %s", tostring(labelText), tostring(newText)))
+            end
+        end
+    end
+
+    box.FocusLost:Connect(function()
+        commit()
+    end)
+
+    button.MouseButton1Click:Connect(function()
+        commit()
+        local ok, err = pcall(onButtonClick)
+        if not ok then
+            warn(string.format("[MeerlyPerf] Button callback failed (%s): %s", tostring(buttonText), tostring(err)))
+            if log then
+                log(string.format("Button error (%s): %s", tostring(buttonText), tostring(err)))
+            end
+        end
+    end)
+
+    return row, box, button
+end
+
 -- Generic action button row factory.
 -- Why: one pathway for action rows makes spacing/layout consistent everywhere.
 local function makeButton(text, onClick, tabName)
@@ -1396,21 +1500,15 @@ makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     runSelfWeaponPass(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
 end, "Weapons")
 
-makeToggle("Override Weapon Damage", weaponDamageOverrideEnabled, function(v)
-    weaponDamageOverrideEnabled = v
-    runSelfWeaponPass(v and ("Weapon damage override enabled: " .. tostring(weaponDamageOverride)) or "Weapon damage override disabled")
-end, "Weapons")
-
-makeInput("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
+makeInputWithButton("Weapon Damage Value", tostring(weaponDamageOverride), function(text)
     local v = tonumber(text)
     if v then
         weaponDamageOverride = v
-        if weaponDamageOverrideEnabled then
-            runSelfWeaponPass(nil)
-            log("Weapon damage override updated: " .. tostring(weaponDamageOverride))
-        end
     end
     return tostring(weaponDamageOverride)
+end, "Override Weapon Damage", function()
+    weaponDamageOverrideOnRescan = true
+    log("Weapon damage override armed for next rescan: " .. tostring(weaponDamageOverride))
 end, "Weapons")
 
 makeToggle("Hide Other Players Weapons (Slow Pass)", hideOtherPlayersWeapons, function(v)
@@ -1433,6 +1531,9 @@ end, "Weapons")
 
 makeButton("Rescan Weapons", function()
     runSelfWeaponPass("Weapon rescan complete")
+    if weaponDamageOverrideOnRescan then
+        runSelfWeaponPass("Weapon damage overridden on rescan: " .. tostring(weaponDamageOverride), { rescan = false, applyDamageOnce = true })
+    end
 end, "Weapons")
 
 -- Player tab: local humanoid movement overrides.
@@ -1695,7 +1796,7 @@ end)
 task.spawn(function()
     while running do
         task.wait(0.5)
-        if hideTrackedWeaponParts or weaponDamageOverrideEnabled then
+        if hideTrackedWeaponParts then
             rescanCharacterWeapons(true)
             for weapon in pairs(trackedWeapons) do
                 applyWeaponState(weapon)
