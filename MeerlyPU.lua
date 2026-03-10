@@ -70,6 +70,7 @@ local trackedCharacter = nil
 local trackedWeapons = makeWeakKeyTable()
 local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
+local trackedWeaponPartConnections = makeWeakKeyTable()
 local trackedWeaponDamageState = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
 
@@ -189,6 +190,8 @@ local function disableFxObject(obj)
     if obj:IsA("ParticleEmitter") then
         obj.Enabled = false
         obj.Rate = 0
+    elseif obj:IsA("Trail") then
+        obj.Enabled = false
     end
 end
 
@@ -203,7 +206,7 @@ local function applyAggressiveFxCull(enabled)
 
         local disabledCount = 0
         for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ParticleEmitter") then
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
                 disableFxObject(obj)
                 disabledCount += 1
             end
@@ -213,7 +216,7 @@ local function applyAggressiveFxCull(enabled)
             disableFxObject(obj)
         end)
 
-        log(string.format("Aggressive FX cull enabled (%d particle emitters disabled)", disabledCount))
+        log(string.format("Aggressive FX cull enabled (%d emitters/trails disabled)", disabledCount))
     else
         if fxCullConnection then
             fxCullConnection:Disconnect()
@@ -352,19 +355,80 @@ local function applyWeaponPartState(part)
     local state = trackedWeaponPartState[part]
     if not state then
         state = {
-            transparency = part.Transparency,
-            canCollide = part.CanCollide,
+            localTransparencyModifier = part.LocalTransparencyModifier,
         }
         trackedWeaponPartState[part] = state
     end
 
+    local reconnect = trackedWeaponPartConnections[part] == nil
+    if reconnect then
+        trackedWeaponPartConnections[part] = part:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(function()
+            if hideTrackedWeaponParts and part.Parent and part.LocalTransparencyModifier ~= 1 then
+                part.LocalTransparencyModifier = 1
+            end
+        end)
+    end
+
     if hideTrackedWeaponParts then
         part.LocalTransparencyModifier = 1
-        part.CanCollide = false
     else
-        part.LocalTransparencyModifier = 0
-        part.Transparency = state.transparency
-        part.CanCollide = state.canCollide
+        part.LocalTransparencyModifier = state.localTransparencyModifier or 0
+    end
+end
+
+local function isTargetHitboxEntity(part)
+    if not part:IsA("BasePart") or part.Name ~= "Hitbox" then
+        return false
+    end
+
+    local children = part:GetChildren()
+    if #children ~= 3 then
+        return false
+    end
+
+    local attachmentCount = 0
+    local trailCount = 0
+
+    for _, child in ipairs(children) do
+        if child:IsA("Attachment") and child.Name == "Attachment" then
+            attachmentCount += 1
+        elseif child:IsA("Trail") and child.Name == "Trail" then
+            trailCount += 1
+        else
+            return false
+        end
+    end
+
+    return attachmentCount == 2 and trailCount == 1
+end
+
+local function applyHitboxEnlarger()
+    if not hitboxEnlargerEnabled then
+        return
+    end
+
+    local firstWeapon = orderedTrackedWeapons[1]
+    if not firstWeapon or firstWeapon.Parent ~= trackedCharacter then
+        return
+    end
+
+    local enlargedCount = 0
+    if isTargetHitboxEntity(firstWeapon) then
+        firstWeapon.Size = Vector3.new(1000, 30, 1000)
+        enlargedCount += 1
+    end
+
+    for _, descendant in ipairs(firstWeapon:GetDescendants()) do
+        if isTargetHitboxEntity(descendant) then
+            descendant.Size = Vector3.new(1000, 30, 1000)
+            enlargedCount += 1
+        end
+    end
+
+    if enlargedCount > 0 then
+        log(string.format("Hitbox enlarger applied on %s (%d hitbox parts)", firstWeapon.Name, enlargedCount))
+    else
+        log("Hitbox enlarger found no matching Hitbox part on first tracked weapon")
     end
 end
 
@@ -490,11 +554,19 @@ local function untrackWeapon(container)
     end
 
     if container:IsA("BasePart") then
+        if trackedWeaponPartConnections[container] then
+            trackedWeaponPartConnections[container]:Disconnect()
+            trackedWeaponPartConnections[container] = nil
+        end
         trackedWeaponPartState[container] = nil
         trackedWeaponDamageState[container] = nil
     end
 
     for _, descendant in ipairs(container:GetDescendants()) do
+        if trackedWeaponPartConnections[descendant] then
+            trackedWeaponPartConnections[descendant]:Disconnect()
+            trackedWeaponPartConnections[descendant] = nil
+        end
         trackedWeaponPartState[descendant] = nil
         trackedWeaponDamageState[descendant] = nil
     end
@@ -572,6 +644,7 @@ local function bindCharacterForWeapons(character)
     trackedWeapons = makeWeakKeyTable()
     orderedTrackedWeapons = {}
     trackedWeaponPartState = makeWeakKeyTable()
+    trackedWeaponPartConnections = makeWeakKeyTable()
     trackedWeaponDamageState = makeWeakKeyTable()
     originalWalkSpeed = nil
 
@@ -599,7 +672,18 @@ end
 local function pruneTrackedWeaponStateTables()
     for part in pairs(trackedWeaponPartState) do
         if (not part) or (not part.Parent) then
+            if trackedWeaponPartConnections[part] then
+                trackedWeaponPartConnections[part]:Disconnect()
+                trackedWeaponPartConnections[part] = nil
+            end
             trackedWeaponPartState[part] = nil
+        end
+    end
+
+    for part in pairs(trackedWeaponPartConnections) do
+        if (not part) or (not part.Parent) then
+            trackedWeaponPartConnections[part]:Disconnect()
+            trackedWeaponPartConnections[part] = nil
         end
     end
 
@@ -1565,7 +1649,7 @@ end, "Performance")
 -- Weapons tab: local and other-player weapon visual/attribute controls.
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
-    runSelfWeaponPass(v and "Tracked weapon parts hidden" or "Tracked weapon parts shown")
+    runSelfWeaponPass(v and "Tracked weapon parts hidden (local visual only)" or "Tracked weapon parts shown")
 end, "Weapons")
 
 makeSectionLabel("Weapon Damage Override", "Weapons")
