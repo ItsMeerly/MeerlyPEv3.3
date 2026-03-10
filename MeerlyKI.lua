@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -577,6 +578,10 @@ local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
 local autoTranscendenceDelay = 5
+local antiAfkEnabled = false
+local antiAfkInterval = 600
+local autoClickerEnabled = false
+local autoClickerCPS = 10
 local raidOriginalPosition = nil
 local raidReturnPending = false
 local raidConnection = nil
@@ -603,6 +608,12 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.Semicolon then
         uiVisible = not uiVisible
         window.Visible = uiVisible
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.F6 then
+        autoClickerEnabled = not autoClickerEnabled
+        log("Auto Clicker " .. (autoClickerEnabled and "enabled" or "disabled") .. " (F6)")
         return
     end
 
@@ -662,6 +673,13 @@ local teleportLocations = {
         { "The Sanctum", function() return workspace.Rooms.Room3:GetChildren()[334] end },
         { "The Chamber", function() return workspace.Rooms.Room4:GetChildren()[120] end },
         { "The Observatory", function() return workspace.Rooms.Room5.FloorTile_40_5 end },
+    },
+    autoScrolls = {
+        { "Knowledge Scrolls", function() return workspace.ScrollAltar.ScrollAltar end },
+        { "Tome Scrolls", function() return workspace:GetChildren()[64].ScrollAltar end },
+        { "Rune Scrolls", function() return workspace:GetChildren()[61].ScrollAltar.ScrollAltar end },
+        { "Essence Scrolls", function() return workspace:GetChildren()[63].ScrollAltar end },
+        { "Starlight Scrolls", function() return workspace:GetChildren()[62].ScrollAltar end },
     },
     secret = {
         { "Observatory Roof", function() return workspace.Rooms.Room5.DomeApex end },
@@ -744,9 +762,49 @@ local function findRaidState(...)
     for _, arg in ipairs(args) do
         if typeof(arg) == "boolean" then
             return arg
+        elseif typeof(arg) == "number" then
+            if arg == 0 then return false end
+            if arg == 1 then return true end
+        elseif typeof(arg) == "string" then
+            local lowered = string.lower(arg)
+            if lowered == "start" or lowered == "started" or lowered == "active" or lowered == "running" or lowered == "inprogress" or lowered == "in_progress" then
+                return true
+            elseif lowered == "stop" or lowered == "stopped" or lowered == "inactive" or lowered == "ended" or lowered == "finished" or lowered == "complete" then
+                return false
+            end
+        elseif typeof(arg) == "table" then
+            local candidates = {
+                arg.active,
+                arg.isActive,
+                arg.enabled,
+                arg.inProgress,
+                arg.isRaidActive,
+                arg.state,
+                arg.status,
+                arg.phase,
+            }
+            local nested = findRaidState(table.unpack(candidates))
+            if nested ~= nil then
+                return nested
+            end
         end
     end
     return nil
+end
+
+local function makeButtonGrid(buttons, columns, tabName)
+    local columnCount = math.max(1, columns or 2)
+    local rows = math.ceil(#buttons / columnCount)
+
+    for rowIndex = 1, rows do
+        local rowButtons = {}
+        local startIdx = ((rowIndex - 1) * columnCount) + 1
+        local endIdx = math.min(startIdx + columnCount - 1, #buttons)
+        for i = startIdx, endIdx do
+            rowButtons[#rowButtons + 1] = buttons[i]
+        end
+        makeInlineButtons(rowButtons, tabName)
+    end
 end
 
 local function connectRaidRemote()
@@ -826,6 +884,25 @@ makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
 end, "Features")
 
+makeToggle("Anti-AFK (SPACE / 10 min)", false, function(state)
+    antiAfkEnabled = state
+    log("Anti-AFK " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+local autoClickerSlider
+makeToggle("Auto Clicker (F6 Hotkey)", false, function(state)
+    autoClickerEnabled = state
+    if autoClickerSlider then
+        autoClickerSlider.setVisible(state)
+    end
+    log("Auto Clicker " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+autoClickerSlider = makeSlider("Auto Clicker CPS", 1, 20, autoClickerCPS, function(value)
+    autoClickerCPS = value
+end, "Features")
+autoClickerSlider.setVisible(autoClickerEnabled)
+
 makeSectionLabel("Remote Bypass", "Features")
 
 local rebirthSlider
@@ -893,7 +970,7 @@ makeButton("Toggle Music", function()
     fireRemote("ToggleMusic")
 end, "Features")
 
-makeSectionLabel("Quick Actions", "Teleports")
+makeSectionLabel("General Actions", "Teleports")
 for _, data in ipairs(teleportLocations.quickActions) do
     local name, resolver = data[1], data[2]
     makeButton("Teleport: " .. name, function()
@@ -905,6 +982,24 @@ for _, data in ipairs(teleportLocations.quickActions) do
         teleportTo(target)
     end, "Teleports")
 end
+
+makeSectionLabel("Auto Scrolls", "Teleports")
+local scrollButtons = {}
+for _, data in ipairs(teleportLocations.autoScrolls) do
+    local name, resolver = data[1], data[2]
+    scrollButtons[#scrollButtons + 1] = {
+        name,
+        function()
+            local ok, target = pcall(resolver)
+            if not ok then
+                log("Teleport resolver error for " .. name)
+                return
+            end
+            teleportTo(target)
+        end,
+    }
+end
+makeButtonGrid(scrollButtons, 2, "Teleports")
 
 makeSectionLabel("Secret", "Teleports")
 for _, data in ipairs(teleportLocations.secret) do
@@ -925,6 +1020,31 @@ task.spawn(function()
             fireRemote("PerformRebirth")
         end
         task.wait(autoRebirthDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and antiAfkEnabled then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+            log("Anti-AFK: sent virtual SPACE input")
+        end
+        task.wait(antiAfkInterval)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoClickerEnabled then
+            local mousePos = UserInputService:GetMouseLocation()
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 0)
+            task.wait(1 / math.max(autoClickerCPS, 1))
+        else
+            task.wait(0.1)
+        end
     end
 end)
 
