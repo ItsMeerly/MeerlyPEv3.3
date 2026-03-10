@@ -458,6 +458,34 @@ local function makeButton(text, callback, tabName)
     return button
 end
 
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+local function makeInlineButtons(buttons, tabName)
+    local row = newRow(34, tabName)
+    local gap = 6
+    local count = #buttons
+    local totalGap = (count - 1) * gap
+    local widthScale = 1 / count
+    local widthOffset = -math.floor((8 + totalGap) / count)
+
+    for idx, data in ipairs(buttons) do
+        local btn = Instance.new("TextButton")
+        btn.Parent = row
+        btn.Size = UDim2.new(widthScale, widthOffset, 1, -8)
+        btn.Position = UDim2.new((idx - 1) * widthScale, 4 + ((idx - 1) * gap), 0, 4)
+        btn.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 12
+        btn.TextColor3 = uiTheme.text
+        btn.Text = data[1]
+        makeCorner(btn, 5)
+        makeStroke(btn)
+        btn.MouseButton1Click:Connect(data[2])
+    end
+end
+
+=======
+>>>>>>> main
 local function makeSlider(labelText, minValue, maxValue, defaultValue, onChanged, tabName)
     local row = newRow(52, tabName)
 
@@ -535,6 +563,12 @@ local function makeSlider(labelText, minValue, maxValue, defaultValue, onChanged
             updateVisuals()
             onChanged(value)
         end,
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+        setVisible = function(state)
+            row.Visible = state == true
+        end,
+=======
+>>>>>>> main
     }
 end
 
@@ -545,9 +579,19 @@ local uiVisible = true
 local autoRebirth = false
 local autoEnlightenment = false
 local autoTranscendence = false
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
 local autoTranscendenceDelay = 5
+local raidOriginalPosition = nil
+local raidReturnPending = false
+local raidConnection = nil
+=======
+local autoRebirthDelay = 5
+local autoEnlightenmentDelay = 5
+local autoTranscendenceDelay = 5
+>>>>>>> main
 
 local originalHiddenStates = {}
 
@@ -694,6 +738,87 @@ local function fireRemote(remoteName)
     log("Fired remote: " .. remoteName)
 end
 
+local function formatArgs(...)
+    local args = { ... }
+    if #args == 0 then
+        return "(no args)"
+    end
+
+    local out = {}
+    for i, arg in ipairs(args) do
+        out[#out + 1] = string.format("arg%d=%s [%s]", i, tostring(arg), typeof(arg))
+    end
+    return table.concat(out, ", ")
+end
+
+local function findRaidState(...)
+    local args = { ... }
+    for _, arg in ipairs(args) do
+        if typeof(arg) == "boolean" then
+            return arg
+        end
+    end
+    return nil
+end
+
+local function connectRaidRemote()
+    local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+    local raidRemote = remotesFolder and remotesFolder:FindFirstChild("RaidStateChanged")
+
+    if not raidRemote or not raidRemote:IsA("RemoteEvent") then
+        log("Auto Raid: RaidStateChanged missing or not RemoteEvent")
+        return
+    end
+
+    if raidConnection then
+        raidConnection:Disconnect()
+        raidConnection = nil
+    end
+
+    raidConnection = raidRemote.OnClientEvent:Connect(function(...)
+        local state = findRaidState(...)
+        log("RaidStateChanged received: " .. formatArgs(...))
+
+        if state == nil then
+            log("Auto Raid: no boolean state found in event args")
+            return
+        end
+
+        if state then
+            local character = localPlayer.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            if root then
+                raidOriginalPosition = root.CFrame
+                raidReturnPending = true
+                local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
+                if ok then
+                    teleportTo(lobbyTarget)
+                    log("Auto Raid: raid started, teleported to Lobby")
+                else
+                    log("Auto Raid: failed to resolve Lobby teleport")
+                end
+            else
+                log("Auto Raid: no HumanoidRootPart to save return position")
+            end
+        elseif raidReturnPending and raidOriginalPosition then
+            local character = localPlayer.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.CFrame = raidOriginalPosition
+                log("Auto Raid: raid ended, returned to original position")
+            else
+                log("Auto Raid: raid ended but no HumanoidRootPart found")
+            end
+            raidOriginalPosition = nil
+            raidReturnPending = false
+        end
+    end)
+
+    log("Auto Raid: listening to RaidStateChanged")
+end
+
+makeSectionLabel("General Actions", "Features")
+
 makeInput("WalkSpeed Value", walkSpeedValue, function(text)
     local value = tonumber(text) or 16
     walkSpeedValue = math.clamp(math.floor(value), 1, 300)
@@ -712,7 +837,78 @@ end, "Features")
 makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
 end, "Features")
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
 
+makeSectionLabel("Remote Bypass", "Features")
+
+local rebirthSlider
+makeToggle("Auto Rebirth", false, function(state)
+    autoRebirth = state
+    if rebirthSlider then
+        rebirthSlider.setVisible(state)
+    end
+    log("Auto Rebirth " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+rebirthSlider = makeSlider("Rebirth Timer", 1, 90, autoRebirthDelay, function(value)
+    autoRebirthDelay = value
+end, "Features")
+rebirthSlider.setVisible(autoRebirth)
+
+local enlightenmentSlider
+makeToggle("Auto Enlightenment", false, function(state)
+    autoEnlightenment = state
+    if enlightenmentSlider then
+        enlightenmentSlider.setVisible(state)
+    end
+    log("Auto Enlightenment " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+enlightenmentSlider = makeSlider("Enlightenment Timer", 1, 90, autoEnlightenmentDelay, function(value)
+    autoEnlightenmentDelay = value
+end, "Features")
+enlightenmentSlider.setVisible(autoEnlightenment)
+
+local transcendenceSlider
+makeToggle("Auto Transcendence", false, function(state)
+    autoTranscendence = state
+    if transcendenceSlider then
+        transcendenceSlider.setVisible(state)
+    end
+    log("Auto Transcendence " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+transcendenceSlider = makeSlider("Transcendence Timer", 1, 90, autoTranscendenceDelay, function(value)
+    autoTranscendenceDelay = value
+end, "Features")
+transcendenceSlider.setVisible(autoTranscendence)
+
+makeToggle("Auto Raid", false, function(state)
+    autoRaid = state
+    if state then
+        connectRaidRemote()
+    elseif raidConnection then
+        raidConnection:Disconnect()
+        raidConnection = nil
+        raidOriginalPosition = nil
+        raidReturnPending = false
+        log("Auto Raid disabled")
+    end
+end, "Features")
+
+makeInlineButtons({
+    { "Rebirth", function() fireRemote("PerformRebirth") end },
+    { "Enlighten", function() fireRemote("PerformEnlightenment") end },
+    { "Transcend", function() fireRemote("PerformTranscendence") end },
+}, "Features")
+
+makeButton("Toggle Music", function()
+    fireRemote("ToggleMusic")
+end, "Features")
+
+=======
+
+>>>>>>> main
 makeSectionLabel("Quick Actions", "Teleports")
 for _, data in ipairs(teleportLocations.quickActions) do
     local name, resolver = data[1], data[2]
@@ -739,6 +935,8 @@ for _, data in ipairs(teleportLocations.secret) do
     end, "Teleports")
 end
 
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+=======
 makeButton("Dev Grant Currency", function()
     fireRemote("DevGrantCurrency")
 end, "Features")
@@ -774,6 +972,7 @@ makeSlider("Transcendence Timer", 1, 90, autoTranscendenceDelay, function(value)
     autoTranscendenceDelay = value
 end, "Features")
 
+>>>>>>> main
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRebirth then
@@ -782,6 +981,26 @@ task.spawn(function()
         task.wait(autoRebirthDelay)
     end
 end)
+<<<<<<< codex/modify-meerlyki.lua-for-features-update-206a7t
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoEnlightenment then
+            fireRemote("PerformEnlightenment")
+        end
+        task.wait(autoEnlightenmentDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoTranscendence then
+            fireRemote("PerformTranscendence")
+        end
+        task.wait(autoTranscendenceDelay)
+    end
+end)
+=======
 
 task.spawn(function()
     while screen.Parent do
@@ -812,6 +1031,7 @@ end, "Features")
 makeButton("Perform Transcendence", function()
     fireRemote("PerformTranscendence")
 end, "Features")
+>>>>>>> main
 
 quickKillButton.MouseButton1Click:Connect(function()
     screen:Destroy()
