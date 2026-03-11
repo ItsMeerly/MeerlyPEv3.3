@@ -594,6 +594,7 @@ local lastRaidPresenceScan = 0
 local raidReturnTeleportResolver = nil
 local raidReturnTeleportName = nil
 local raidTeleportedToLobby = false
+local raidReturnPending = false
 local autoSkillsEnabled = false
 local autoSkillBeam = false
 local autoSkillSlam = false
@@ -1223,6 +1224,7 @@ makeToggle("Auto Raid Master", false, function(state)
         raidStarted = false
         onGoingRaid = false
         raidTeleportedToLobby = false
+        raidReturnPending = false
         raidReturnTeleportResolver = nil
         raidReturnTeleportName = nil
         lastRaidPresenceScan = 0
@@ -1283,19 +1285,24 @@ task.spawn(function()
                         log("Auto Raid: raid detected, teleported to Lobby")
                     end
                 elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
-                    task.wait(2)
-                    if raidReturnTeleportResolver then
-                        local ok, returnTarget = pcall(raidReturnTeleportResolver)
-                        if ok and returnTarget then
-                            teleportTo(returnTarget)
-                            log("Auto Raid: returned to " .. tostring(raidReturnTeleportName or "closest location"))
-                        end
-                    end
-                    raidReturnTeleportResolver = nil
-                    raidReturnTeleportName = nil
-                    raidTeleportedToLobby = false
-                    raidStarted = false
+                    raidReturnPending = true
                 end
+            end
+
+            -- absolute last action in this loop: return teleport after raid has ended
+            if raidReturnPending and (not raidStarted) and (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
+                task.wait(2)
+                if raidReturnTeleportResolver then
+                    local ok, returnTarget = pcall(raidReturnTeleportResolver)
+                    if ok and returnTarget then
+                        teleportTo(returnTarget)
+                        log("Auto Raid: returned to " .. tostring(raidReturnTeleportName or "closest location"))
+                    end
+                end
+                raidReturnTeleportResolver = nil
+                raidReturnTeleportName = nil
+                raidTeleportedToLobby = false
+                raidReturnPending = false
             end
         end
 
