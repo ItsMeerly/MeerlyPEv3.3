@@ -1323,7 +1323,7 @@ local macroPresets = {
         { t = 4.0, type = "hold", a = "Forward", duration = 1.5 },
         { t = 5.0, type = "hold", a = "Right", duration = 1.25 },
         { t = 5.75, type = "hold", a = "Backwards", duration = 1.35 },
-        { t = 6.5, type = "hold", a = "Left", duration = 1.1 },
+        { t = 6.5, type = "hold", a = "Left", duration = 0.9 },
         { t = 7.0, type = "hold", a = "Forward", duration = 1 },
         { t = 7.5, type = "hold", a = "Right", duration = 0.75 },
         { t = 7.85, type = "hold", a = "Backwards", duration = 0.75 },
