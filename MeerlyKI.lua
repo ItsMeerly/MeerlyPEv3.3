@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -285,7 +286,9 @@ local function createTab(name)
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
-    page.ScrollBarThickness = 6
+    page.ScrollBarThickness = (name == "Teleports") and 10 or 6
+    page.ScrollBarImageColor3 = uiTheme.accent
+    page.ScrollBarImageTransparency = 0.15
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.CanvasSize = UDim2.new()
     page.Visible = false
@@ -315,7 +318,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports" }
+local tabNames = { "Features", "Teleports", "Auto Raid" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -573,17 +576,137 @@ local uiVisible = true
 local autoRebirth = false
 local autoEnlightenment = false
 local autoTranscendence = false
-local autoRaid = false
 local autoRebirthDelay = 5
 local autoEnlightenmentDelay = 5
 local autoTranscendenceDelay = 5
-local raidOriginalPosition = nil
-local raidReturnPending = false
-local raidConnection = nil
+local antiAfkEnabled = false
+local antiAfkInterval = 600
+local autoClickerEnabled = false
+local autoClickerCPS = 10
+local hidePlayersScanInterval = 10
+local autoRaidMasterEnabled = false
+local raidStarted = false
+local onGoingRaid = false
+local raidEnemyScanInterval = 2
+local raidSeekEnabled = false
+local raidPresenceScanInterval = 7
+local lastRaidPresenceScan = 0
+local raidReturnTeleportResolver = nil
+local raidReturnTeleportName = nil
+local raidTeleportedToLobby = false
+local autoSkillsEnabled = false
+local autoSkillBeam = false
+local autoSkillSlam = false
+local autoSkillNova = false
+local beamCooldown = 9
+local slamCooldown = 4
+local novaCooldown = 21
+local lastBeamCast = 0
+local lastSlamCast = 0
+local lastNovaCast = 0
 
-local originalHiddenStates = {}
+local hiddenObjectStates = {}
+
+local function hideObject(obj)
+    if hiddenObjectStates[obj] then
+        return
+    end
+
+    local state = {}
+
+    if obj:IsA("BasePart") then
+        state.class = "BasePart"
+        state.localTransparencyModifier = obj.LocalTransparencyModifier
+        state.transparency = obj.Transparency
+        state.canCollide = obj.CanCollide
+        state.canTouch = obj.CanTouch
+        if obj.CanQuery ~= nil then
+            state.canQuery = obj.CanQuery
+        end
+        obj.LocalTransparencyModifier = 1
+        obj.Transparency = 1
+        obj.CanCollide = false
+        obj.CanTouch = false
+        pcall(function() obj.CanQuery = false end)
+    elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") then
+        state.class = "Gui"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        state.class = "Effect"
+        state.enabled = obj.Enabled
+        obj.Enabled = false
+    elseif obj:IsA("Decal") or obj:IsA("Texture") then
+        state.class = "DecalTexture"
+        state.transparency = obj.Transparency
+        obj.Transparency = 1
+    elseif obj:IsA("Highlight") then
+        state.class = "Highlight"
+        state.enabled = obj.Enabled
+        state.fillTransparency = obj.FillTransparency
+        state.outlineTransparency = obj.OutlineTransparency
+        obj.Enabled = false
+        obj.FillTransparency = 1
+        obj.OutlineTransparency = 1
+    else
+        return
+    end
+
+    hiddenObjectStates[obj] = state
+end
+
+local function restoreObject(obj)
+    local state = hiddenObjectStates[obj]
+    if not state then
+        return
+    end
+
+    if state.class == "BasePart" then
+        obj.LocalTransparencyModifier = state.localTransparencyModifier or 0
+        obj.Transparency = state.transparency or 0
+        obj.CanCollide = state.canCollide == true
+        obj.CanTouch = state.canTouch == true
+        pcall(function()
+            if state.canQuery ~= nil then
+                obj.CanQuery = state.canQuery
+            end
+        end)
+    elseif state.class == "Gui" or state.class == "Effect" then
+        obj.Enabled = state.enabled ~= false
+    elseif state.class == "DecalTexture" then
+        obj.Transparency = state.transparency or 0
+    elseif state.class == "Highlight" then
+        obj.Enabled = state.enabled ~= false
+        obj.FillTransparency = state.fillTransparency or 0
+        obj.OutlineTransparency = state.outlineTransparency or 0
+    end
+
+    hiddenObjectStates[obj] = nil
+end
+
+local function applyHideOnCharacter(character, hide)
+    if not character then return end
+    for _, obj in ipairs(character:GetDescendants()) do
+        if hide then
+            hideObject(obj)
+        else
+            restoreObject(obj)
+        end
+    end
+end
+
+local function restoreAllHiddenObjects()
+    for obj in pairs(hiddenObjectStates) do
+        if obj and obj.Parent then
+            restoreObject(obj)
+        else
+            hiddenObjectStates[obj] = nil
+        end
+    end
+end
 
 local function getHumanoid()
+
     local character = localPlayer.Character
     if not character then return nil end
     return character:FindFirstChildOfClass("Humanoid")
@@ -606,42 +729,27 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
 
-end)
-
-local function applyHideOnCharacter(character, hide)
-    if not character then return end
-    for _, obj in ipairs(character:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if hide then
-                if not originalHiddenStates[obj] then
-                    originalHiddenStates[obj] = { transp = obj.LocalTransparencyModifier, coll = obj.CanCollide }
-                end
-                obj.LocalTransparencyModifier = 1
-                obj.CanCollide = false
-            else
-                local state = originalHiddenStates[obj]
-                if state then
-                    obj.LocalTransparencyModifier = state.transp
-                    obj.CanCollide = state.coll
-                    originalHiddenStates[obj] = nil
-                else
-                    obj.LocalTransparencyModifier = 0
-                end
-            end
-        elseif obj:IsA("BillboardGui") or obj:IsA("SurfaceGui") or obj:IsA("ParticleEmitter") then
-            obj.Enabled = not hide
-        end
+    if input.KeyCode == Enum.KeyCode.F6 then
+        autoClickerEnabled = not autoClickerEnabled
+        log("Auto Clicker " .. (autoClickerEnabled and "enabled" or "disabled") .. " (F6)")
+        return
     end
-end
+
+end)
 
 local function setHideOtherPlayers(state)
     hideOthersEnabled = state
+
+    if not state then
+        restoreAllHiddenObjects()
+    end
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= localPlayer then
             applyHideOnCharacter(plr.Character, state)
         end
     end
-    log(state and "Other players hidden" or "Other players restored")
+    log(state and "Other players hidden (including FX/parts/accessories)" or "Other players restored")
 end
 
 Players.PlayerAdded:Connect(function(plr)
@@ -654,6 +762,19 @@ Players.PlayerAdded:Connect(function(plr)
     end)
 end)
 
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and hideOthersEnabled then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer then
+                    applyHideOnCharacter(plr.Character, true)
+                end
+            end
+        end
+        task.wait(hidePlayersScanInterval)
+    end
+end)
+
 local teleportLocations = {
     quickActions = {
         { "The Lobby", function() return workspace.SpawnLocation end },
@@ -662,6 +783,13 @@ local teleportLocations = {
         { "The Sanctum", function() return workspace.Rooms.Room3:GetChildren()[334] end },
         { "The Chamber", function() return workspace.Rooms.Room4:GetChildren()[120] end },
         { "The Observatory", function() return workspace.Rooms.Room5.FloorTile_40_5 end },
+    },
+    autoScrolls = {
+        { "Knowledge Scrolls", function() return workspace.ScrollAltar.ScrollAltar end },
+        { "Tome Scrolls", function() return workspace:GetChildren()[64].ScrollAltar end },
+        { "Rune Scrolls", function() return workspace:GetChildren()[61].ScrollAltar.ScrollAltar end },
+        { "Essence Scrolls", function() return workspace:GetChildren()[63].ScrollAltar end },
+        { "Starlight Scrolls", function() return workspace:GetChildren()[62].ScrollAltar end },
     },
     secret = {
         { "Observatory Roof", function() return workspace.Rooms.Room5.DomeApex end },
@@ -726,83 +854,233 @@ local function fireRemote(remoteName)
     log("Fired remote: " .. remoteName)
 end
 
-local function formatArgs(...)
-    local args = { ... }
-    if #args == 0 then
-        return "(no args)"
+local function isRaidTimerVisible()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local raidTimer = hud and hud:FindFirstChild("RaidNextTimer")
+    if not raidTimer then
+        return nil
     end
-
-    local out = {}
-    for i, arg in ipairs(args) do
-        out[#out + 1] = string.format("arg%d=%s [%s]", i, tostring(arg), typeof(arg))
-    end
-    return table.concat(out, ", ")
+    return raidTimer.Visible == true
 end
 
-local function findRaidState(...)
-    local args = { ... }
-    for _, arg in ipairs(args) do
-        if typeof(arg) == "boolean" then
-            return arg
+local function getRaidEnemiesAlive()
+    local raidEnemies = Workspace:FindFirstChild("RaidEnemies")
+    if not raidEnemies then
+        return false, nil
+    end
+
+    for _, enemy in ipairs(raidEnemies:GetChildren()) do
+        if enemy and enemy.Parent then
+            local hum = enemy:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health > 0 then
+                return true, enemy
+            end
         end
     end
-    return nil
+
+    return false, nil
 end
 
-local function connectRaidRemote()
-    local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
-    local raidRemote = remotesFolder and remotesFolder:FindFirstChild("RaidStateChanged")
+local function getRaidResultsVisible()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local results = hud and hud:FindFirstChild("RaidResultsScreen")
+    return results and results.Visible == true
+end
 
-    if not raidRemote or not raidRemote:IsA("RemoteEvent") then
-        log("Auto Raid: RaidStateChanged missing or not RemoteEvent")
-        return
+local function ensureRaidSpellBarActive()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local spellBar = hud and hud:FindFirstChild("RaidSpellBar")
+    if not spellBar then
+        return false
     end
 
-    if raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
-    end
-
-    raidConnection = raidRemote.OnClientEvent:Connect(function(...)
-        local state = findRaidState(...)
-        log("RaidStateChanged received: " .. formatArgs(...))
-
-        if state == nil then
-            log("Auto Raid: no boolean state found in event args")
-            return
-        end
-
-        if state then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                raidOriginalPosition = root.CFrame
-                raidReturnPending = true
-                local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
-                if ok then
-                    teleportTo(lobbyTarget)
-                    log("Auto Raid: raid started, teleported to Lobby")
-                else
-                    log("Auto Raid: failed to resolve Lobby teleport")
-                end
-            else
-                log("Auto Raid: no HumanoidRootPart to save return position")
-            end
-        elseif raidReturnPending and raidOriginalPosition then
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.CFrame = raidOriginalPosition
-                log("Auto Raid: raid ended, returned to original position")
-            else
-                log("Auto Raid: raid ended but no HumanoidRootPart found")
-            end
-            raidOriginalPosition = nil
-            raidReturnPending = false
+    spellBar.Visible = true
+    pcall(function()
+        if spellBar:IsA("GuiObject") then
+            spellBar.Active = true
         end
     end)
 
-    log("Auto Raid: listening to RaidStateChanged")
+    return true
+end
+
+local function resolveClosestGeneralTeleport()
+    local character = localPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return nil, nil
+    end
+
+    local closestDistance = math.huge
+    local closestName = nil
+    local closestResolver = nil
+
+    for _, data in ipairs(teleportLocations.quickActions) do
+        local name, resolver = data[1], data[2]
+        local ok, target = pcall(resolver)
+        if ok and target then
+            local targetPos
+            if target:IsA("BasePart") then
+                targetPos = target.Position
+            elseif target:IsA("Model") then
+                targetPos = target:GetPivot().Position
+            end
+
+            if targetPos then
+                local distance = (root.Position - targetPos).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestName = name
+                    closestResolver = resolver
+                end
+            end
+        end
+    end
+
+    return closestName, closestResolver
+end
+
+local function moveToRaidEnemy(enemy)
+    if not enemy then return end
+    local character = localPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    local targetPart = enemy:IsA("Model") and (enemy.PrimaryPart or enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChildWhichIsA("BasePart")) or (enemy:IsA("BasePart") and enemy or nil)
+    if not targetPart then return end
+
+    humanoid:MoveTo(targetPart.Position)
+end
+
+local function pressRaidSkill(keyCode)
+    VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+end
+
+local function makeButtonGrid(buttons, columns, tabName)
+    local columnCount = math.max(1, columns or 2)
+    local rows = math.ceil(#buttons / columnCount)
+
+    for rowIndex = 1, rows do
+        local rowButtons = {}
+        local startIdx = ((rowIndex - 1) * columnCount) + 1
+        local endIdx = math.min(startIdx + columnCount - 1, #buttons)
+        for i = startIdx, endIdx do
+            rowButtons[#rowButtons + 1] = buttons[i]
+        end
+        makeInlineButtons(rowButtons, tabName)
+    end
+end
+
+local function makeInputToggleRow(labelText, defaultText, defaultToggle, onCommit, onToggle, tabName)
+    local row = newRow(34, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.42, -8, 1, 0)
+    label.Position = UDim2.fromOffset(8, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+
+    local box = Instance.new("TextBox")
+    box.Parent = row
+    box.Size = UDim2.new(0.24, -4, 1, -8)
+    box.Position = UDim2.new(0.42, 0, 0, 4)
+    box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    box.BorderSizePixel = 0
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 12
+    box.TextColor3 = uiTheme.text
+    box.ClearTextOnFocus = false
+    makeCorner(box, 5)
+
+    local toggle = Instance.new("TextButton")
+    toggle.Parent = row
+    toggle.Size = UDim2.new(0.24, -4, 1, -8)
+    toggle.Position = UDim2.new(0.74, 0, 0, 4)
+    toggle.BorderSizePixel = 0
+    toggle.Font = Enum.Font.GothamBold
+    toggle.TextSize = 12
+    makeCorner(toggle, 5)
+
+    local toggleState = defaultToggle == true
+    local function refreshToggle()
+        toggle.Text = toggleState and "ON" or "OFF"
+        toggle.BackgroundColor3 = toggleState and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+        toggle.TextColor3 = toggleState and Color3.fromRGB(10, 10, 12) or uiTheme.text
+    end
+
+    toggle.MouseButton1Click:Connect(function()
+        toggleState = not toggleState
+        refreshToggle()
+        onToggle(toggleState)
+    end)
+
+    box.FocusLost:Connect(function()
+        box.Text = tostring(onCommit(box.Text))
+    end)
+
+    box.Text = tostring(onCommit(defaultText))
+    refreshToggle()
+    onToggle(toggleState)
+
+    return {
+        setToggle = function(v)
+            toggleState = v == true
+            refreshToggle()
+            onToggle(toggleState)
+        end,
+        getToggle = function()
+            return toggleState
+        end,
+    }
+end
+
+local function makeSkillToggleRow(tabName)
+    local row = newRow(34, tabName)
+    local entries = {
+        { name = "Beam", stateRef = function() return autoSkillBeam end, setRef = function(v) autoSkillBeam = v end },
+        { name = "Slam", stateRef = function() return autoSkillSlam end, setRef = function(v) autoSkillSlam = v end },
+        { name = "Nova", stateRef = function() return autoSkillNova end, setRef = function(v) autoSkillNova = v end },
+    }
+
+    local gap = 6
+    local count = #entries
+    local widthScale = 1 / count
+    local widthOffset = -math.floor((8 + ((count - 1) * gap)) / count)
+
+    for idx, entry in ipairs(entries) do
+        local btn = Instance.new("TextButton")
+        btn.Parent = row
+        btn.Size = UDim2.new(widthScale, widthOffset, 1, -8)
+        btn.Position = UDim2.new((idx - 1) * widthScale, 4 + ((idx - 1) * gap), 0, 4)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 12
+        makeCorner(btn, 5)
+        makeStroke(btn)
+
+        local function refresh()
+            local state = entry.stateRef()
+            btn.Text = string.format("%s: %s", entry.name, state and "ON" or "OFF")
+            btn.BackgroundColor3 = state and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+            btn.TextColor3 = state and Color3.fromRGB(10, 10, 12) or uiTheme.text
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            entry.setRef(not entry.stateRef())
+            refresh()
+        end)
+
+        refresh()
+    end
+
+    return row
 end
 
 makeSectionLabel("General Actions", "Features")
@@ -824,6 +1102,18 @@ end, "Features")
 
 makeToggle("Hide Other Players", false, function(state)
     setHideOtherPlayers(state)
+end, "Features")
+
+makeToggle("Anti-AFK (SPACE / 10 min)", false, function(state)
+    antiAfkEnabled = state
+    log("Anti-AFK " .. (state and "enabled" or "disabled"))
+end, "Features")
+
+makeInput("Auto Clicker CPS (F6)", autoClickerCPS, function(text)
+    local value = tonumber(text) or autoClickerCPS
+    autoClickerCPS = math.clamp(math.floor(value), 1, 20)
+    log("Auto Clicker CPS set to " .. autoClickerCPS)
+    return autoClickerCPS
 end, "Features")
 
 makeSectionLabel("Remote Bypass", "Features")
@@ -870,18 +1160,6 @@ transcendenceSlider = makeSlider("Transcendence Timer", 1, 90, autoTranscendence
 end, "Features")
 transcendenceSlider.setVisible(autoTranscendence)
 
-makeToggle("Auto Raid", false, function(state)
-    autoRaid = state
-    if state then
-        connectRaidRemote()
-    elseif raidConnection then
-        raidConnection:Disconnect()
-        raidConnection = nil
-        raidOriginalPosition = nil
-        raidReturnPending = false
-        log("Auto Raid disabled")
-    end
-end, "Features")
 
 makeInlineButtons({
     { "Rebirth", function() fireRemote("PerformRebirth") end },
@@ -893,7 +1171,7 @@ makeButton("Toggle Music", function()
     fireRemote("ToggleMusic")
 end, "Features")
 
-makeSectionLabel("Quick Actions", "Teleports")
+makeSectionLabel("General Actions", "Teleports")
 for _, data in ipairs(teleportLocations.quickActions) do
     local name, resolver = data[1], data[2]
     makeButton("Teleport: " .. name, function()
@@ -905,6 +1183,24 @@ for _, data in ipairs(teleportLocations.quickActions) do
         teleportTo(target)
     end, "Teleports")
 end
+
+makeSectionLabel("Auto Scrolls", "Teleports")
+local scrollButtons = {}
+for _, data in ipairs(teleportLocations.autoScrolls) do
+    local name, resolver = data[1], data[2]
+    scrollButtons[#scrollButtons + 1] = {
+        name,
+        function()
+            local ok, target = pcall(resolver)
+            if not ok then
+                log("Teleport resolver error for " .. name)
+                return
+            end
+            teleportTo(target)
+        end,
+    }
+end
+makeButtonGrid(scrollButtons, 2, "Teleports")
 
 makeSectionLabel("Secret", "Teleports")
 for _, data in ipairs(teleportLocations.secret) do
@@ -919,12 +1215,163 @@ for _, data in ipairs(teleportLocations.secret) do
     end, "Teleports")
 end
 
+makeSectionLabel("Raid Automation", "Auto Raid")
+
+makeToggle("Auto Raid Master", false, function(state)
+    autoRaidMasterEnabled = state
+    if not state then
+        raidStarted = false
+        onGoingRaid = false
+        raidTeleportedToLobby = false
+        raidReturnTeleportResolver = nil
+        raidReturnTeleportName = nil
+        lastRaidPresenceScan = 0
+    else
+        lastRaidPresenceScan = 0
+    end
+    log("Auto Raid master " .. (state and "enabled" or "disabled"))
+end, "Auto Raid")
+
+makeInputToggleRow("Seek Enemies Scan /s", raidEnemyScanInterval, raidSeekEnabled, function(text)
+    local value = tonumber(text) or raidEnemyScanInterval
+    raidEnemyScanInterval = math.clamp(math.floor(value), 1, 10)
+    return raidEnemyScanInterval
+end, function(state)
+    raidSeekEnabled = state
+end, "Auto Raid")
+
+makeToggle("Auto Skills", false, function(state)
+    autoSkillsEnabled = state
+end, "Auto Raid")
+
+makeSkillToggleRow("Auto Raid")
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled then
+            local raidTimerVisible = isRaidTimerVisible()
+            if raidTimerVisible ~= nil then
+                raidStarted = (raidTimerVisible == false)
+                if raidTimerVisible then
+                    onGoingRaid = false
+                end
+            end
+
+            if raidStarted then
+                if (os.clock() - lastRaidPresenceScan) >= raidPresenceScanInterval then
+                    local enemiesAlive = getRaidEnemiesAlive()
+                    onGoingRaid = enemiesAlive
+                    lastRaidPresenceScan = os.clock()
+                end
+
+                if onGoingRaid then
+                    ensureRaidSpellBarActive()
+                end
+
+                if onGoingRaid and not raidTeleportedToLobby then
+                    local closestName, closestResolver = resolveClosestGeneralTeleport()
+                    if closestResolver then
+                        raidReturnTeleportResolver = closestResolver
+                        raidReturnTeleportName = closestName
+                    end
+
+                    task.wait(2)
+                    local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
+                    if ok then
+                        teleportTo(lobbyTarget)
+                        raidTeleportedToLobby = true
+                        log("Auto Raid: raid detected, teleported to Lobby")
+                    end
+                elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
+                    task.wait(2)
+                    if raidReturnTeleportResolver then
+                        local ok, returnTarget = pcall(raidReturnTeleportResolver)
+                        if ok and returnTarget then
+                            teleportTo(returnTarget)
+                            log("Auto Raid: returned to " .. tostring(raidReturnTeleportName or "closest location"))
+                        end
+                    end
+                    raidReturnTeleportResolver = nil
+                    raidReturnTeleportName = nil
+                    raidTeleportedToLobby = false
+                    raidStarted = false
+                end
+            end
+        end
+
+        task.wait(5)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled and raidStarted and raidSeekEnabled then
+            local enemiesAlive, firstEnemy = getRaidEnemiesAlive()
+            onGoingRaid = enemiesAlive
+            if enemiesAlive and firstEnemy then
+                moveToRaidEnemy(firstEnemy)
+            end
+        end
+
+        task.wait(math.max(raidEnemyScanInterval, 1))
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled and raidStarted and onGoingRaid and autoSkillsEnabled then
+            if ensureRaidSpellBarActive() then
+                local now = os.clock()
+                if autoSkillBeam and (now - lastBeamCast) >= beamCooldown then
+                    pressRaidSkill(Enum.KeyCode.E)
+                    lastBeamCast = now
+                end
+                if autoSkillSlam and (now - lastSlamCast) >= slamCooldown then
+                    pressRaidSkill(Enum.KeyCode.R)
+                    lastSlamCast = now
+                end
+                if autoSkillNova and (now - lastNovaCast) >= novaCooldown then
+                    pressRaidSkill(Enum.KeyCode.T)
+                    lastNovaCast = now
+                end
+            end
+        end
+
+        task.wait(0.1)
+    end
+end)
+
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRebirth then
             fireRemote("PerformRebirth")
         end
         task.wait(autoRebirthDelay)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and antiAfkEnabled then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+            log("Anti-AFK: sent virtual SPACE input")
+        end
+        task.wait(antiAfkInterval)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoClickerEnabled then
+            local mousePos = UserInputService:GetMouseLocation()
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 0)
+            task.wait(1 / math.max(autoClickerCPS, 1))
+        else
+            task.wait(0.1)
+        end
     end
 end)
 
