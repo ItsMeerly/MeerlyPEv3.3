@@ -198,7 +198,7 @@ keyInput.Font = Enum.Font.Gotham
 keyInput.TextSize = 13
 keyInput.TextColor3 = uiTheme.text
 keyInput.PlaceholderText = "Paste key here"
-keyInput.ClearTextOnFocus = false
+keyInput.ClearTextOnFocus = true
 makeCorner(keyInput, 6)
 makeStroke(keyInput)
 
