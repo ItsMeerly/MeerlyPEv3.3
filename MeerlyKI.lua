@@ -319,7 +319,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports", "Auto Raid", "Auto Trials" }
+local tabNames = { "Features", "Teleports", "Auto Raid", "Auto Trials", "Macro Executor" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -598,8 +598,6 @@ local raidLastKnownPosition = nil
 local raidTeleportedToLobby = false
 local raidReturnPending = false
 local raidReturnReadyAt = 0
-local autoTomeEnabled = false
-local autoTomeSuspendedByRaid = false
 local autoSkillsEnabled = false
 local autoSkillBeam = false
 local autoSkillSlam = false
@@ -610,6 +608,16 @@ local novaCooldown = 21
 local lastBeamCast = 0
 local lastSlamCast = 0
 local lastNovaCast = 0
+local macroRecording = false
+local macroPlaying = false
+local macroLoopEnabled = false
+local macroMode = "Custom"
+local macroEvents = {}
+local macroStartClock = 0
+local macroInputToAction = nil
+local macroPausedByRaid = false
+local macroResumeAfterRaid = false
+local macroOriginalWalkSpeed = nil
 
 local hiddenObjectStates = {}
 
@@ -741,6 +749,51 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
 
+    if input.KeyCode == Enum.KeyCode.F7 then
+        if macroPlaying then
+            log("Macro: stop playback before recording")
+            return
+        end
+        if macroMode ~= "Custom" then
+            log("Macro: switch to Custom to record")
+            return
+        end
+
+        macroRecording = not macroRecording
+        if macroRecording then
+            macroEvents = {}
+            macroStartClock = os.clock()
+            log("Macro recording started")
+        else
+            log("Macro recording stopped (" .. #macroEvents .. " events)")
+        end
+        return
+    end
+
+    local actionName = macroInputToAction and macroInputToAction[input.KeyCode]
+    if actionName and macroRecording and macroMode == "Custom" then
+        macroEvents[#macroEvents + 1] = {
+            t = os.clock() - macroStartClock,
+            type = "action",
+            a = actionName,
+            d = 1,
+        }
+    end
+
+end)
+
+UserInputService.InputEnded:Connect(function(input, gp)
+    if gp then return end
+
+    local actionName = macroInputToAction and macroInputToAction[input.KeyCode]
+    if actionName and macroRecording and macroMode == "Custom" then
+        macroEvents[#macroEvents + 1] = {
+            t = os.clock() - macroStartClock,
+            type = "action",
+            a = actionName,
+            d = 0,
+        }
+    end
 end)
 
 local function setHideOtherPlayers(state)
@@ -958,183 +1011,10 @@ local function moveToRaidEnemy(enemy)
     humanoid:MoveTo(targetPart.Position)
 end
 
-local function resolveEntityWalkPosition(entity)
-    if not entity then
-        return nil
-    end
-
-    if entity:IsA("BasePart") then
-        return entity.Position
-    end
-
-    if entity:IsA("Model") then
-        local part = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            return part.Position
-        end
-    end
-
-    local descendantPart = entity:FindFirstChildWhichIsA("BasePart", true)
-    return descendantPart and descendantPart.Position or nil
-end
-
-local function collectPartsInTrialRange(partFilter)
-    local children = Workspace:GetChildren()
-    local startNode = children[70]
-    local endNode = Workspace:FindFirstChild("TotalKnowledge")
-    if not startNode or not endNode then
-        return {}
-    end
-
-    local startIndex, endIndex
-    for idx, child in ipairs(children) do
-        if child == startNode then
-            startIndex = idx
-        end
-        if child == endNode then
-            endIndex = idx
-            break
-        end
-    end
-
-    if not startIndex or not endIndex then
-        return {}
-    end
-
-    local low = math.min(startIndex, endIndex)
-    local high = math.max(startIndex, endIndex)
-
-    local found = {}
-    local seen = {}
-
-    local function maybeAddPart(part)
-        if not part or not part:IsA("BasePart") or seen[part] then
-            return
-        end
-
-        if partFilter and not partFilter(part) then
-            return
-        end
-
-        seen[part] = true
-        found[#found + 1] = part
-    end
-
-    for idx = low, high do
-        local node = children[idx]
-        if node then
-            maybeAddPart(node)
-            for _, descendant in ipairs(node:GetDescendants()) do
-                maybeAddPart(descendant)
-            end
-        end
-    end
-
-    return found
-end
-
-local function isPointInsidePartBounds(boundsPart, worldPoint, yPadding)
-    if not boundsPart or not boundsPart:IsA("BasePart") or not worldPoint then
-        return false
-    end
-
-    local localPoint = boundsPart.CFrame:PointToObjectSpace(worldPoint)
-    local halfSize = boundsPart.Size * 0.5
-    local verticalPadding = math.max(0, yPadding or 0)
-
-    return math.abs(localPoint.X) <= halfSize.X
-        and localPoint.Y >= (-halfSize.Y)
-        and localPoint.Y <= (halfSize.Y + verticalPadding)
-        and math.abs(localPoint.Z) <= halfSize.Z
-end
-
-local function collectAutoTomeParts(originPosition)
-    local collectBounds = Workspace:FindFirstChild("BookCascade") and Workspace.BookCascade:FindFirstChild("collect")
-    if not (collectBounds and collectBounds:IsA("BasePart")) then
-        log("Auto Tome: missing workspace.BookCascade.collect")
-        return {}
-    end
-
-    local upperYPadding = math.max(6, collectBounds.Size.Y * 1.5)
-    local tomeParts = collectPartsInTrialRange(function(part)
-        return string.lower(string.sub(part.Name, 1, 4)) == "tome" and isPointInsidePartBounds(collectBounds, part.Position, upperYPadding)
-    end)
-
-    table.sort(tomeParts, function(a, b)
-        if not originPosition then
-            return a.Name < b.Name
-        end
-        local da = (a.Position - originPosition).Magnitude
-        local db = (b.Position - originPosition).Magnitude
-        if da == db then
-            return a.Name < b.Name
-        end
-        return da < db
-    end)
-
-    return tomeParts
-end
-
 local function pressRaidSkill(keyCode)
     VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
     task.wait(0.05)
     VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-end
-
-local function walkTowardsPosition(targetPosition, timeout)
-    local character = localPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not root or not targetPosition then
-        return false
-    end
-
-    local maxTime = timeout or 3
-    local startedAt = os.clock()
-
-    while (os.clock() - startedAt) < maxTime do
-        humanoid:MoveTo(targetPosition)
-        local moved = false
-        local connection
-        connection = humanoid.MoveToFinished:Connect(function(success)
-            moved = success
-        end)
-
-        local probeStart = os.clock()
-        while (os.clock() - probeStart) < 0.8 do
-            local currentCharacter = localPlayer.Character
-            local currentRoot = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
-            if not currentRoot then
-                if connection then connection:Disconnect() end
-                return false
-            end
-
-            local dist = (currentRoot.Position - targetPosition).Magnitude
-            if dist <= 7 or moved then
-                if connection then connection:Disconnect() end
-                return true
-            end
-            task.wait(0.08)
-        end
-
-        if connection then
-            connection:Disconnect()
-        end
-
-        local currentRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if currentRoot then
-            local direction = targetPosition - currentRoot.Position
-            local distance = direction.Magnitude
-            if distance > 0 then
-                local step = math.min(10, math.max(3, distance * 0.2))
-                currentRoot.CFrame = CFrame.new(currentRoot.Position + (direction.Unit * step), targetPosition)
-            end
-        end
-
-        task.wait(0.05)
-    end
-
-    return false
 end
 
 local function makeButtonGrid(buttons, columns, tabName)
@@ -1401,6 +1281,8 @@ makeToggle("Auto Raid Master", false, function(state)
     if not state then
         raidStarted = false
         onGoingRaid = false
+        macroPausedByRaid = false
+        macroResumeAfterRaid = false
         raidTeleportedToLobby = false
         raidReturnPending = false
         raidReturnReadyAt = 0
@@ -1428,14 +1310,340 @@ end, "Auto Raid")
 
 makeSkillToggleRow("Auto Raid")
 
-makeSectionLabel("Trial Automation", "Auto Trials")
-makeToggle("Auto Tome", false, function(state)
-    autoTomeEnabled = state
-    if not state then
-        autoTomeSuspendedByRaid = false
+makeSectionLabel("Macro Executor", "Macro Executor")
+
+local macroPresets = {
+    ["Custom"] = nil,
+    ["Tome Trial"] = {
+        { t = 0.0, type = "teleport", target = "BookCascade" },
+        { t = 0.25, type = "hold", a = "Forward", duration = 0.75 },
+        { t = 1.0, type = "hold", a = "Right", duration = 0.5 },
+        { t = 1.5, type = "hold", a = "Backwards", duration = 1.5 },
+        { t = 3.0, type = "hold", a = "Left", duration = 1.0 },
+        { t = 4.0, type = "hold", a = "Forward", duration = 1.0 },
+        { t = 5.0, type = "hold", a = "Right", duration = 0.75 },
+        { t = 5.75, type = "hold", a = "Backwards", duration = 0.75 },
+        { t = 6.5, type = "hold", a = "Left", duration = 0.5 },
+        { t = 7.0, type = "hold", a = "Forward", duration = 0.5 },
+        { t = 7.5, type = "hold", a = "Right", duration = 0.35 },
+        { t = 7.85, type = "hold", a = "Backwards", duration = 0.35 },
+        { t = 8.2, type = "hold", a = "Left", duration = 0.35 },
+        { t = 8.55, type = "hold", a = "Forward", duration = 0.5 },
+        { t = 9.05, type = "wait", duration = 0.25 },
+    },
+    ["Rune Trial"] = {
+        { t = 0, type = "teleport", trial = "Rune Trial" },
+    },
+    ["Essence Trial"] = {
+        { t = 0, type = "teleport", trial = "Essence Trial" },
+    },
+    ["Starlight Trial"] = {
+        { t = 0, type = "teleport", trial = "Starlight Trial" },
+    },
+}
+
+local function isPresetMacro(modeName)
+    return modeName ~= "Custom"
+end
+
+local setMacroStatus
+
+local function applyMacroWalkSpeedProfile(enable)
+    local character = localPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        return
     end
-    log("Auto Tome " .. (state and "enabled" or "disabled"))
-end, "Auto Trials")
+
+    if enable and macroMode == "Tome Trial" then
+        if macroOriginalWalkSpeed == nil then
+            macroOriginalWalkSpeed = humanoid.WalkSpeed
+        end
+        humanoid.WalkSpeed = 25
+    elseif not enable and macroOriginalWalkSpeed ~= nil then
+        humanoid.WalkSpeed = macroOriginalWalkSpeed
+        macroOriginalWalkSpeed = nil
+    end
+end
+
+local function stopMacroExecution(reason)
+    macroRecording = false
+    macroPlaying = false
+    macroPausedByRaid = false
+    macroResumeAfterRaid = false
+    applyMacroWalkSpeedProfile(false)
+    if reason then
+        setMacroStatus(reason)
+    end
+end
+
+local function resolveMacroTeleportTarget(event)
+    if event.target == "BookCascade" then
+        local bookCascade = Workspace:FindFirstChild("BookCascade")
+        if bookCascade and (bookCascade:IsA("BasePart") or bookCascade:IsA("Model")) then
+            return bookCascade
+        end
+        if bookCascade then
+            return bookCascade:FindFirstChildWhichIsA("BasePart", true)
+        end
+    end
+    return nil
+end
+
+local macroActionKeycodes = {
+    Forward = Enum.KeyCode.W,
+    Backwards = Enum.KeyCode.S,
+    Left = Enum.KeyCode.A,
+    Right = Enum.KeyCode.D,
+    Jump = Enum.KeyCode.Space,
+}
+
+macroInputToAction = {
+    [Enum.KeyCode.W] = "Forward",
+    [Enum.KeyCode.Up] = "Forward",
+    [Enum.KeyCode.S] = "Backwards",
+    [Enum.KeyCode.Down] = "Backwards",
+    [Enum.KeyCode.A] = "Left",
+    [Enum.KeyCode.Left] = "Left",
+    [Enum.KeyCode.D] = "Right",
+    [Enum.KeyCode.Right] = "Right",
+    [Enum.KeyCode.Space] = "Jump",
+    [Enum.KeyCode.ButtonA] = "Jump",
+    [Enum.KeyCode.DPadUp] = "Forward",
+    [Enum.KeyCode.DPadDown] = "Backwards",
+    [Enum.KeyCode.DPadLeft] = "Left",
+    [Enum.KeyCode.DPadRight] = "Right",
+}
+
+local function cloneEvents(source)
+    local copy = {}
+    for _, e in ipairs(source or {}) do
+        copy[#copy + 1] = { t = e.t, type = e.type, trial = e.trial, target = e.target, a = e.a, d = e.d, duration = e.duration }
+    end
+    return copy
+end
+
+local function setMacroMode(modeName)
+    stopMacroExecution(nil)
+    macroMode = modeName
+    if modeName ~= "Custom" then
+        macroEvents = cloneEvents(macroPresets[modeName])
+    end
+    log("Macro mode set to " .. modeName)
+end
+
+local macroStatus = "Idle"
+local macroStatusLabelRow = newRow(34, "Macro Executor")
+local macroStatusLabel = Instance.new("TextLabel")
+macroStatusLabel.Parent = macroStatusLabelRow
+macroStatusLabel.Size = UDim2.new(1, -12, 1, 0)
+macroStatusLabel.Position = UDim2.fromOffset(10, 0)
+macroStatusLabel.BackgroundTransparency = 1
+macroStatusLabel.Font = Enum.Font.Gotham
+macroStatusLabel.TextSize = 12
+macroStatusLabel.TextColor3 = uiTheme.subtle
+macroStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+macroStatusLabel.Text = "Status: Idle"
+
+setMacroStatus = function(text)
+    macroStatus = text
+    macroStatusLabel.Text = "Status: " .. text
+end
+
+makeSectionLabel("Custom Macro", "Macro Executor")
+makeButton("Use Custom Macro", function()
+    setMacroMode("Custom")
+    setMacroStatus("Custom mode")
+end, "Macro Executor")
+
+makeToggle("Loop Playback", false, function(state)
+    macroLoopEnabled = state
+end, "Macro Executor")
+
+local function appendMacroAction(actionName, pressed)
+    if not macroRecording or macroMode ~= "Custom" then
+        return
+    end
+    macroEvents[#macroEvents + 1] = {
+        t = os.clock() - macroStartClock,
+        type = "action",
+        a = actionName,
+        d = pressed and 1 or 0,
+    }
+end
+
+makeSectionLabel("Manual Input (Mobile / Touch)", "Macro Executor")
+makeInlineButtons({
+    { "Forward", function() appendMacroAction("Forward", true); appendMacroAction("Forward", false) end },
+    { "Backwards", function() appendMacroAction("Backwards", true); appendMacroAction("Backwards", false) end },
+    { "Left", function() appendMacroAction("Left", true); appendMacroAction("Left", false) end },
+}, "Macro Executor")
+makeInlineButtons({
+    { "Right", function() appendMacroAction("Right", true); appendMacroAction("Right", false) end },
+    { "Jump", function() appendMacroAction("Jump", true); appendMacroAction("Jump", false) end },
+}, "Macro Executor")
+
+local playMacroOnce
+
+local function startMacroPlayback(startStatus)
+    if macroRecording then
+        setMacroStatus("Stop recording before playback")
+        return false
+    end
+    if #macroEvents == 0 then
+        setMacroStatus("No events to play")
+        return false
+    end
+    if macroPlaying then
+        return false
+    end
+
+    macroPlaying = true
+    macroPausedByRaid = false
+    macroResumeAfterRaid = false
+    applyMacroWalkSpeedProfile(true)
+    local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
+    setMacroStatus(startStatus or ("Playing " .. #macroEvents .. " events" .. (shouldLoop and " [LOOP]" or "")))
+
+    task.spawn(function()
+        while macroPlaying and screen.Parent do
+            playMacroOnce()
+            if not shouldLoop then
+                break
+            end
+            task.wait(0.1)
+        end
+        macroPlaying = false
+        applyMacroWalkSpeedProfile(false)
+        if not macroPausedByRaid then
+            setMacroStatus("Idle")
+        end
+    end)
+
+    return true
+end
+
+playMacroOnce = function()
+    local startClock = os.clock()
+    for _, event in ipairs(macroEvents) do
+        if not macroPlaying then
+            break
+        end
+
+        local targetClock = startClock + (tonumber(event.t) or 0)
+        while macroPlaying and os.clock() < targetClock do
+            task.wait()
+        end
+
+        if not macroPlaying then
+            break
+        end
+
+        if event.type == "teleport" then
+            local target = resolveMacroTeleportTarget(event)
+            if target then
+                teleportTo(target)
+            else
+                log("Macro teleport placeholder: " .. tostring(event.trial or event.target or "unknown"))
+            end
+        elseif event.type == "hold" then
+            local keycode = macroActionKeycodes[event.a]
+            local duration = math.max(0, tonumber(event.duration) or 0)
+            if keycode then
+                VirtualInputManager:SendKeyEvent(true, keycode, false, game)
+                local releaseAt = os.clock() + duration
+                while macroPlaying and os.clock() < releaseAt do
+                    task.wait()
+                end
+                VirtualInputManager:SendKeyEvent(false, keycode, false, game)
+            end
+        elseif event.type == "wait" then
+            local waitFor = math.max(0, tonumber(event.duration) or 0)
+            local endAt = os.clock() + waitFor
+            while macroPlaying and os.clock() < endAt do
+                task.wait()
+            end
+        elseif event.type == "action" then
+            local keycode = macroActionKeycodes[event.a]
+            if keycode then
+                VirtualInputManager:SendKeyEvent(event.d == 1, keycode, false, game)
+            end
+        end
+    end
+end
+
+makeInlineButtons({
+    { "Record", function()
+        if macroMode ~= "Custom" then
+            setMacroStatus("Switch to Custom to record")
+            return
+        end
+        if macroPlaying then
+            setMacroStatus("Stop playback before recording")
+            return
+        end
+
+        macroRecording = not macroRecording
+        if macroRecording then
+            macroEvents = {}
+            macroStartClock = os.clock()
+            setMacroStatus("Recording...")
+        else
+            setMacroStatus("Recorded " .. #macroEvents .. " events")
+        end
+    end },
+    { "Play", function()
+        startMacroPlayback()
+    end },
+    { "Stop", function()
+        stopMacroExecution("Stopped")
+    end },
+}, "Macro Executor")
+
+makeButton("Clear Macro", function()
+    if macroPlaying or macroRecording then
+        setMacroStatus("Stop first, then clear")
+        return
+    end
+    macroEvents = {}
+    setMacroStatus("Cleared")
+end, "Macro Executor")
+
+
+makeSectionLabel("Trial Presets", "Auto Trials")
+
+local function playTrialPreset(presetName)
+    setMacroMode(presetName)
+    startMacroPlayback("Playing " .. presetName)
+end
+
+local function stopTrialPreset(presetName)
+    if macroMode == presetName and macroPlaying then
+        stopMacroExecution("Stopped " .. presetName)
+    else
+        setMacroStatus(presetName .. " is not playing")
+    end
+end
+
+makeInlineButtons({
+    { "Play Tome Trial", function() playTrialPreset("Tome Trial") end },
+    { "Stop Tome Trial", function() stopTrialPreset("Tome Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Rune Trial", function() playTrialPreset("Rune Trial") end },
+    { "Stop Rune Trial", function() stopTrialPreset("Rune Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Essence Trial", function() playTrialPreset("Essence Trial") end },
+    { "Stop Essence Trial", function() stopTrialPreset("Essence Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Starlight Trial", function() playTrialPreset("Starlight Trial") end },
+    { "Stop Starlight Trial", function() stopTrialPreset("Starlight Trial") end },
+}, "Auto Trials")
 
 task.spawn(function()
     while screen.Parent do
@@ -1460,9 +1668,12 @@ task.spawn(function()
                 end
 
                 if onGoingRaid and not raidTeleportedToLobby then
-                    if autoTomeEnabled and not autoTomeSuspendedByRaid then
-                        autoTomeSuspendedByRaid = true
-                        log("Auto Tome paused during raid")
+                    if autoRaidMasterEnabled and macroPlaying and isPresetMacro(macroMode) then
+                        macroPausedByRaid = true
+                        macroResumeAfterRaid = true
+                        macroPlaying = false
+                        applyMacroWalkSpeedProfile(false)
+                        setMacroStatus("Paused for raid")
                     end
 
                     local character = localPlayer.Character
@@ -1532,10 +1743,12 @@ task.spawn(function()
                 raidTeleportedToLobby = false
                 raidReturnPending = false
 
-                if autoTomeEnabled and autoTomeSuspendedByRaid then
-                    autoTomeSuspendedByRaid = false
-                    log("Auto Tome resumed after raid return")
+                if macroResumeAfterRaid and isPresetMacro(macroMode) and #macroEvents > 0 then
+                    macroResumeAfterRaid = false
+                    macroPausedByRaid = false
+                    startMacroPlayback("Resumed after raid")
                 end
+
             end
         end
 
@@ -1543,30 +1756,6 @@ task.spawn(function()
     end
 end)
 
-task.spawn(function()
-    while screen.Parent do
-        if keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid then
-            local humanoid = getHumanoid()
-            local character = localPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if humanoid and root then
-                local tomeParts = collectAutoTomeParts(root.Position)
-                for _, tomePart in ipairs(tomeParts) do
-                    if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
-                        break
-                    end
-
-                    local targetPosition = resolveEntityWalkPosition(tomePart)
-                    if targetPosition then
-                        walkTowardsPosition(targetPosition, 2.8)
-                    end
-                end
-            end
-        end
-
-        task.wait(1)
-    end
-end)
 
 task.spawn(function()
     while screen.Parent do
