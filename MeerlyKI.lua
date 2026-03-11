@@ -1002,19 +1002,30 @@ local function collectAutoTomeParts()
 
     local found = {}
     local seen = {}
+
+    local function maybeAddPart(part)
+        if not part or not part:IsA("BasePart") then
+            return
+        end
+
+        if string.lower(string.sub(part.Name, 1, 4)) ~= "tome" then
+            return
+        end
+
+        if seen[part] then
+            return
+        end
+
+        seen[part] = true
+        found[#found + 1] = part
+    end
+
     for idx = startIndex, endIndex do
         local node = children[idx]
-        if node and string.lower(string.sub(node.Name, 1, 4)) == "tome" then
-            if node:IsA("BasePart") and not seen[node] then
-                found[#found + 1] = node
-                seen[node] = true
-            end
-
+        if node then
+            maybeAddPart(node)
             for _, descendant in ipairs(node:GetDescendants()) do
-                if descendant:IsA("BasePart") and not seen[descendant] then
-                    found[#found + 1] = descendant
-                    seen[descendant] = true
-                end
+                maybeAddPart(descendant)
             end
         end
     end
