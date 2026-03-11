@@ -591,8 +591,19 @@ local raidEnemyScanInterval = 2
 local raidSeekEnabled = false
 local raidPresenceScanInterval = 7
 local lastRaidPresenceScan = 0
-local raidOriginalPosition = nil
+local raidReturnTeleportResolver = nil
+local raidReturnTeleportName = nil
 local raidTeleportedToLobby = false
+local autoSkillsEnabled = false
+local autoSkillBeam = false
+local autoSkillSlam = false
+local autoSkillNova = false
+local beamCooldown = 9
+local slamCooldown = 4
+local novaCooldown = 21
+local lastBeamCast = 0
+local lastSlamCast = 0
+local lastNovaCast = 0
 
 local hiddenObjectStates = {}
 
@@ -876,16 +887,75 @@ local function getRaidResultsVisible()
     return results and results.Visible == true
 end
 
+local function ensureRaidSpellBarActive()
+    local hud = localPlayer:FindFirstChild("PlayerGui") and localPlayer.PlayerGui:FindFirstChild("HUD")
+    local spellBar = hud and hud:FindFirstChild("RaidSpellBar")
+    if not spellBar then
+        return false
+    end
+
+    spellBar.Visible = true
+    pcall(function()
+        if spellBar:IsA("GuiObject") then
+            spellBar.Active = true
+        end
+    end)
+
+    return true
+end
+
+local function resolveClosestGeneralTeleport()
+    local character = localPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return nil, nil
+    end
+
+    local closestDistance = math.huge
+    local closestName = nil
+    local closestResolver = nil
+
+    for _, data in ipairs(teleportLocations.quickActions) do
+        local name, resolver = data[1], data[2]
+        local ok, target = pcall(resolver)
+        if ok and target then
+            local targetPos
+            if target:IsA("BasePart") then
+                targetPos = target.Position
+            elseif target:IsA("Model") then
+                targetPos = target:GetPivot().Position
+            end
+
+            if targetPos then
+                local distance = (root.Position - targetPos).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestName = name
+                    closestResolver = resolver
+                end
+            end
+        end
+    end
+
+    return closestName, closestResolver
+end
+
 local function moveToRaidEnemy(enemy)
     if not enemy then return end
     local character = localPlayer.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
 
     local targetPart = enemy:IsA("Model") and (enemy.PrimaryPart or enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChildWhichIsA("BasePart")) or (enemy:IsA("BasePart") and enemy or nil)
     if not targetPart then return end
 
-    root.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, 3, 4), targetPart.Position)
+    humanoid:MoveTo(targetPart.Position)
+end
+
+local function pressRaidSkill(keyCode)
+    VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
 end
 
 local function makeButtonGrid(buttons, columns, tabName)
@@ -969,6 +1039,48 @@ local function makeInputToggleRow(labelText, defaultText, defaultToggle, onCommi
             return toggleState
         end,
     }
+end
+
+local function makeSkillToggleRow(tabName)
+    local row = newRow(34, tabName)
+    local entries = {
+        { name = "Beam", stateRef = function() return autoSkillBeam end, setRef = function(v) autoSkillBeam = v end },
+        { name = "Slam", stateRef = function() return autoSkillSlam end, setRef = function(v) autoSkillSlam = v end },
+        { name = "Nova", stateRef = function() return autoSkillNova end, setRef = function(v) autoSkillNova = v end },
+    }
+
+    local gap = 6
+    local count = #entries
+    local widthScale = 1 / count
+    local widthOffset = -math.floor((8 + ((count - 1) * gap)) / count)
+
+    for idx, entry in ipairs(entries) do
+        local btn = Instance.new("TextButton")
+        btn.Parent = row
+        btn.Size = UDim2.new(widthScale, widthOffset, 1, -8)
+        btn.Position = UDim2.new((idx - 1) * widthScale, 4 + ((idx - 1) * gap), 0, 4)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 12
+        makeCorner(btn, 5)
+        makeStroke(btn)
+
+        local function refresh()
+            local state = entry.stateRef()
+            btn.Text = string.format("%s: %s", entry.name, state and "ON" or "OFF")
+            btn.BackgroundColor3 = state and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+            btn.TextColor3 = state and Color3.fromRGB(10, 10, 12) or uiTheme.text
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            entry.setRef(not entry.stateRef())
+            refresh()
+        end)
+
+        refresh()
+    end
+
+    return row
 end
 
 makeSectionLabel("General Actions", "Features")
@@ -1111,7 +1223,8 @@ makeToggle("Auto Raid Master", false, function(state)
         raidStarted = false
         onGoingRaid = false
         raidTeleportedToLobby = false
-        raidOriginalPosition = nil
+        raidReturnTeleportResolver = nil
+        raidReturnTeleportName = nil
         lastRaidPresenceScan = 0
     else
         lastRaidPresenceScan = 0
@@ -1126,6 +1239,12 @@ makeInputToggleRow("Seek Enemies Scan /s", raidEnemyScanInterval, raidSeekEnable
 end, function(state)
     raidSeekEnabled = state
 end, "Auto Raid")
+
+makeToggle("Auto Skills", false, function(state)
+    autoSkillsEnabled = state
+end, "Auto Raid")
+
+makeSkillToggleRow("Auto Raid")
 
 task.spawn(function()
     while screen.Parent do
@@ -1145,28 +1264,35 @@ task.spawn(function()
                     lastRaidPresenceScan = os.clock()
                 end
 
+                if onGoingRaid then
+                    ensureRaidSpellBarActive()
+                end
+
                 if onGoingRaid and not raidTeleportedToLobby then
-                    local character = localPlayer.Character
-                    local root = character and character:FindFirstChild("HumanoidRootPart")
-                    if root then
-                        raidOriginalPosition = root.CFrame
-                        task.wait(2)
-                        local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
-                        if ok then
-                            teleportTo(lobbyTarget)
-                            raidTeleportedToLobby = true
-                            log("Auto Raid: raid detected, teleported to Lobby")
-                        end
+                    local closestName, closestResolver = resolveClosestGeneralTeleport()
+                    if closestResolver then
+                        raidReturnTeleportResolver = closestResolver
+                        raidReturnTeleportName = closestName
+                    end
+
+                    task.wait(2)
+                    local ok, lobbyTarget = pcall(teleportLocations.quickActions[1][2])
+                    if ok then
+                        teleportTo(lobbyTarget)
+                        raidTeleportedToLobby = true
+                        log("Auto Raid: raid detected, teleported to Lobby")
                     end
                 elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
                     task.wait(2)
-                    local character = localPlayer.Character
-                    local root = character and character:FindFirstChild("HumanoidRootPart")
-                    if root and raidOriginalPosition then
-                        root.CFrame = raidOriginalPosition
-                        log("Auto Raid: returned to pre-raid position")
+                    if raidReturnTeleportResolver then
+                        local ok, returnTarget = pcall(raidReturnTeleportResolver)
+                        if ok and returnTarget then
+                            teleportTo(returnTarget)
+                            log("Auto Raid: returned to " .. tostring(raidReturnTeleportName or "closest location"))
+                        end
                     end
-                    raidOriginalPosition = nil
+                    raidReturnTeleportResolver = nil
+                    raidReturnTeleportName = nil
                     raidTeleportedToLobby = false
                     raidStarted = false
                 end
@@ -1188,6 +1314,30 @@ task.spawn(function()
         end
 
         task.wait(math.max(raidEnemyScanInterval, 1))
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoRaidMasterEnabled and raidStarted and onGoingRaid and autoSkillsEnabled then
+            if ensureRaidSpellBarActive() then
+                local now = os.clock()
+                if autoSkillBeam and (now - lastBeamCast) >= beamCooldown then
+                    pressRaidSkill(Enum.KeyCode.E)
+                    lastBeamCast = now
+                end
+                if autoSkillSlam and (now - lastSlamCast) >= slamCooldown then
+                    pressRaidSkill(Enum.KeyCode.R)
+                    lastSlamCast = now
+                end
+                if autoSkillNova and (now - lastNovaCast) >= novaCooldown then
+                    pressRaidSkill(Enum.KeyCode.T)
+                    lastNovaCast = now
+                end
+            end
+        end
+
+        task.wait(0.1)
     end
 end)
 
