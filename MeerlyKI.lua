@@ -319,7 +319,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports", "Auto Raid" }
+local tabNames = { "Features", "Teleports", "Auto Raid", "Auto Trials" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -597,6 +597,8 @@ local raidReturnTeleportName = nil
 local raidLastKnownPosition = nil
 local raidTeleportedToLobby = false
 local raidReturnPending = false
+local autoTomeEnabled = false
+local autoTomeSuspendedByRaid = false
 local autoSkillsEnabled = false
 local autoSkillBeam = false
 local autoSkillSlam = false
@@ -955,6 +957,82 @@ local function moveToRaidEnemy(enemy)
     humanoid:MoveTo(targetPart.Position)
 end
 
+local function resolveEntityWalkPosition(entity)
+    if not entity then
+        return nil
+    end
+
+    if entity:IsA("BasePart") then
+        return entity.Position
+    end
+
+    if entity:IsA("Model") then
+        local part = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChildWhichIsA("BasePart", true)
+        if part then
+            return part.Position
+        end
+    end
+
+    local descendantPart = entity:FindFirstChildWhichIsA("BasePart", true)
+    return descendantPart and descendantPart.Position or nil
+end
+
+local function collectAutoTomeParts()
+    local children = Workspace:GetChildren()
+    local startNode = children[70]
+    local endNode = Workspace:FindFirstChild("TotalKnowledge")
+    if not startNode or not endNode then
+        return {}
+    end
+
+    local startIndex, endIndex
+    for idx, child in ipairs(children) do
+        if child == startNode then
+            startIndex = idx
+        end
+        if child == endNode then
+            endIndex = idx
+            break
+        end
+    end
+
+    if not startIndex or not endIndex or endIndex < startIndex then
+        return {}
+    end
+
+    local found = {}
+    local seen = {}
+
+    local function maybeAddPart(part)
+        if not part or not part:IsA("BasePart") then
+            return
+        end
+
+        if string.lower(string.sub(part.Name, 1, 4)) ~= "tome" then
+            return
+        end
+
+        if seen[part] then
+            return
+        end
+
+        seen[part] = true
+        found[#found + 1] = part
+    end
+
+    for idx = startIndex, endIndex do
+        local node = children[idx]
+        if node then
+            maybeAddPart(node)
+            for _, descendant in ipairs(node:GetDescendants()) do
+                maybeAddPart(descendant)
+            end
+        end
+    end
+
+    return found
+end
+
 local function pressRaidSkill(keyCode)
     VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
     task.wait(0.05)
@@ -1251,6 +1329,15 @@ end, "Auto Raid")
 
 makeSkillToggleRow("Auto Raid")
 
+makeSectionLabel("Trial Automation", "Auto Trials")
+makeToggle("Auto Tome", false, function(state)
+    autoTomeEnabled = state
+    if not state then
+        autoTomeSuspendedByRaid = false
+    end
+    log("Auto Tome " .. (state and "enabled" or "disabled"))
+end, "Auto Trials")
+
 task.spawn(function()
     while screen.Parent do
         if keyAccepted and autoRaidMasterEnabled then
@@ -1274,6 +1361,11 @@ task.spawn(function()
                 end
 
                 if onGoingRaid and not raidTeleportedToLobby then
+                    if autoTomeEnabled and not autoTomeSuspendedByRaid then
+                        autoTomeSuspendedByRaid = true
+                        log("Auto Tome paused during raid")
+                    end
+
                     local character = localPlayer.Character
                     local root = character and character:FindFirstChild("HumanoidRootPart")
                     if root then
@@ -1324,10 +1416,72 @@ task.spawn(function()
                 raidLastKnownPosition = nil
                 raidTeleportedToLobby = false
                 raidReturnPending = false
+
+                if autoTomeEnabled and autoTomeSuspendedByRaid then
+                    autoTomeSuspendedByRaid = false
+                    log("Auto Tome resumed after raid return")
+                end
             end
         end
 
         task.wait(5)
+    end
+end)
+
+task.spawn(function()
+    while screen.Parent do
+        if keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid then
+            local humanoid = getHumanoid()
+            local character = localPlayer.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            if humanoid and root then
+                local tomeParts = collectAutoTomeParts()
+                for _, tomePart in ipairs(tomeParts) do
+                    if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
+                        break
+                    end
+
+                    local targetPosition = resolveEntityWalkPosition(tomePart)
+                    if targetPosition then
+                        humanoid:MoveTo(targetPosition)
+
+                        local reached = false
+                        local connection
+                        connection = humanoid.MoveToFinished:Connect(function(success)
+                            reached = success
+                        end)
+
+                        local startedAt = os.clock()
+                        while (os.clock() - startedAt) < 2.5 do
+                            if not screen.Parent then
+                                break
+                            end
+
+                            if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
+                                break
+                            end
+
+                            local currentCharacter = localPlayer.Character
+                            local currentRoot = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+                            if not currentRoot then
+                                break
+                            end
+
+                            if reached or ((currentRoot.Position - targetPosition).Magnitude <= 7) then
+                                break
+                            end
+                            task.wait(0.1)
+                        end
+
+                        if connection then
+                            connection:Disconnect()
+                        end
+                    end
+                end
+            end
+        end
+
+        task.wait(1)
     end
 end)
 
