@@ -319,7 +319,7 @@ local function createTab(name)
     return page
 end
 
-local tabNames = { "Features", "Teleports", "Auto Raid", "Macro Executor" }
+local tabNames = { "Features", "Teleports", "Auto Raid", "Auto Trials", "Macro Executor" }
 for _, tab in ipairs(tabNames) do
     createTab(tab)
 end
@@ -1317,17 +1317,17 @@ local macroPresets = {
     ["Tome Trial"] = {
         { t = 0.0, type = "teleport", target = "BookCascade" },
         { t = 0.25, type = "hold", a = "Forward", duration = 0.75 },
-        { t = 1.0, type = "hold", a = "Right", duration = 0.75 },
-        { t = 1.5, type = "hold", a = "Backwards", duration = 1.6 },
-        { t = 3.0, type = "hold", a = "Left", duration = 1.5 },
-        { t = 4.0, type = "hold", a = "Forward", duration = 1.5 },
-        { t = 5.0, type = "hold", a = "Right", duration = 1.25 },
-        { t = 5.75, type = "hold", a = "Backwards", duration = 1.35 },
-        { t = 6.5, type = "hold", a = "Left", duration = 0.9 },
-        { t = 7.0, type = "hold", a = "Forward", duration = 1 },
-        { t = 7.5, type = "hold", a = "Right", duration = 0.75 },
-        { t = 7.85, type = "hold", a = "Backwards", duration = 0.75 },
-        { t = 8.2, type = "hold", a = "Left", duration = 0.5 },
+        { t = 1.0, type = "hold", a = "Right", duration = 0.5 },
+        { t = 1.5, type = "hold", a = "Backwards", duration = 1.5 },
+        { t = 3.0, type = "hold", a = "Left", duration = 1.0 },
+        { t = 4.0, type = "hold", a = "Forward", duration = 1.0 },
+        { t = 5.0, type = "hold", a = "Right", duration = 0.75 },
+        { t = 5.75, type = "hold", a = "Backwards", duration = 0.75 },
+        { t = 6.5, type = "hold", a = "Left", duration = 0.5 },
+        { t = 7.0, type = "hold", a = "Forward", duration = 0.5 },
+        { t = 7.5, type = "hold", a = "Right", duration = 0.35 },
+        { t = 7.85, type = "hold", a = "Backwards", duration = 0.35 },
+        { t = 8.2, type = "hold", a = "Left", duration = 0.35 },
         { t = 8.55, type = "hold", a = "Forward", duration = 0.5 },
         { t = 9.05, type = "wait", duration = 0.25 },
     },
@@ -1450,15 +1450,7 @@ setMacroStatus = function(text)
     macroStatusLabel.Text = "Status: " .. text
 end
 
-makeSectionLabel("Mode", "Macro Executor")
-makeInlineButtons({
-    { "Tome Trial", function() setMacroMode("Tome Trial"); setMacroStatus("Loaded Tome Trial") end },
-    { "Rune Trial", function() setMacroMode("Rune Trial"); setMacroStatus("Loaded Rune Trial") end },
-}, "Macro Executor")
-makeInlineButtons({
-    { "Essence Trial", function() setMacroMode("Essence Trial"); setMacroStatus("Loaded Essence Trial") end },
-    { "Starlight Trial", function() setMacroMode("Starlight Trial"); setMacroStatus("Loaded Starlight Trial") end },
-}, "Macro Executor")
+makeSectionLabel("Custom Macro", "Macro Executor")
 makeButton("Use Custom Macro", function()
     setMacroMode("Custom")
     setMacroStatus("Custom mode")
@@ -1491,7 +1483,47 @@ makeInlineButtons({
     { "Jump", function() appendMacroAction("Jump", true); appendMacroAction("Jump", false) end },
 }, "Macro Executor")
 
-local function playMacroOnce()
+local playMacroOnce
+
+local function startMacroPlayback(startStatus)
+    if macroRecording then
+        setMacroStatus("Stop recording before playback")
+        return false
+    end
+    if #macroEvents == 0 then
+        setMacroStatus("No events to play")
+        return false
+    end
+    if macroPlaying then
+        return false
+    end
+
+    macroPlaying = true
+    macroPausedByRaid = false
+    macroResumeAfterRaid = false
+    applyMacroWalkSpeedProfile(true)
+    local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
+    setMacroStatus(startStatus or ("Playing " .. #macroEvents .. " events" .. (shouldLoop and " [LOOP]" or "")))
+
+    task.spawn(function()
+        while macroPlaying and screen.Parent do
+            playMacroOnce()
+            if not shouldLoop then
+                break
+            end
+            task.wait(0.1)
+        end
+        macroPlaying = false
+        applyMacroWalkSpeedProfile(false)
+        if not macroPausedByRaid then
+            setMacroStatus("Idle")
+        end
+    end)
+
+    return true
+end
+
+playMacroOnce = function()
     local startClock = os.clock()
     for _, event in ipairs(macroEvents) do
         if not macroPlaying then
@@ -1561,38 +1593,7 @@ makeInlineButtons({
         end
     end },
     { "Play", function()
-        if macroRecording then
-            setMacroStatus("Stop recording before playback")
-            return
-        end
-        if #macroEvents == 0 then
-            setMacroStatus("No events to play")
-            return
-        end
-        if macroPlaying then
-            return
-        end
-
-        macroPlaying = true
-        macroPausedByRaid = false
-        macroResumeAfterRaid = false
-        applyMacroWalkSpeedProfile(true)
-        local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
-        setMacroStatus("Playing " .. #macroEvents .. " events" .. (shouldLoop and " [LOOP]" or ""))
-        task.spawn(function()
-            while macroPlaying and screen.Parent do
-                playMacroOnce()
-                if not shouldLoop then
-                    break
-                end
-                task.wait(0.1)
-            end
-            macroPlaying = false
-            applyMacroWalkSpeedProfile(false)
-            if not macroPausedByRaid then
-                setMacroStatus("Idle")
-            end
-        end)
+        startMacroPlayback()
     end },
     { "Stop", function()
         stopMacroExecution("Stopped")
@@ -1607,6 +1608,42 @@ makeButton("Clear Macro", function()
     macroEvents = {}
     setMacroStatus("Cleared")
 end, "Macro Executor")
+
+
+makeSectionLabel("Trial Presets", "Auto Trials")
+
+local function playTrialPreset(presetName)
+    setMacroMode(presetName)
+    startMacroPlayback("Playing " .. presetName)
+end
+
+local function stopTrialPreset(presetName)
+    if macroMode == presetName and macroPlaying then
+        stopMacroExecution("Stopped " .. presetName)
+    else
+        setMacroStatus(presetName .. " is not playing")
+    end
+end
+
+makeInlineButtons({
+    { "Play Tome Trial", function() playTrialPreset("Tome Trial") end },
+    { "Stop Tome Trial", function() stopTrialPreset("Tome Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Rune Trial", function() playTrialPreset("Rune Trial") end },
+    { "Stop Rune Trial", function() stopTrialPreset("Rune Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Essence Trial", function() playTrialPreset("Essence Trial") end },
+    { "Stop Essence Trial", function() stopTrialPreset("Essence Trial") end },
+}, "Auto Trials")
+
+makeInlineButtons({
+    { "Play Starlight Trial", function() playTrialPreset("Starlight Trial") end },
+    { "Stop Starlight Trial", function() stopTrialPreset("Starlight Trial") end },
+}, "Auto Trials")
 
 task.spawn(function()
     while screen.Parent do
@@ -1709,24 +1746,7 @@ task.spawn(function()
                 if macroResumeAfterRaid and isPresetMacro(macroMode) and #macroEvents > 0 then
                     macroResumeAfterRaid = false
                     macroPausedByRaid = false
-                    applyMacroWalkSpeedProfile(true)
-                    macroPlaying = true
-                    local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
-                    setMacroStatus("Resumed after raid")
-                    task.spawn(function()
-                        while macroPlaying and screen.Parent do
-                            playMacroOnce()
-                            if not shouldLoop then
-                                break
-                            end
-                            task.wait(0.1)
-                        end
-                        macroPlaying = false
-                        applyMacroWalkSpeedProfile(false)
-                        if not macroPausedByRaid then
-                            setMacroStatus("Idle")
-                        end
-                    end)
+                    startMacroPlayback("Resumed after raid")
                 end
 
             end
