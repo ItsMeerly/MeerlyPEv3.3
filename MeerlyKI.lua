@@ -286,11 +286,12 @@ local function createTab(name)
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
-    page.ScrollBarThickness = (name == "Teleports") and 10 or 6
+    page.ScrollBarThickness = (name == "Teleports") and 12 or 6
     page.ScrollBarImageColor3 = uiTheme.accent
-    page.ScrollBarImageTransparency = 0.15
+    page.ScrollBarImageTransparency = (name == "Teleports") and 0 or 0.15
+    page.ScrollingDirection = Enum.ScrollingDirection.Y
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.CanvasSize = UDim2.new()
+    page.CanvasSize = (name == "Teleports") and UDim2.new(0, 0, 1, 1) or UDim2.new()
     page.Visible = false
 
     local layout = Instance.new("UIListLayout")
