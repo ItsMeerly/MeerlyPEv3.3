@@ -597,6 +597,7 @@ local raidReturnTeleportName = nil
 local raidLastKnownPosition = nil
 local raidTeleportedToLobby = false
 local raidReturnPending = false
+local raidReturnReadyAt = 0
 local autoTomeEnabled = false
 local autoTomeSuspendedByRaid = false
 local autoSkillsEnabled = false
@@ -977,7 +978,7 @@ local function resolveEntityWalkPosition(entity)
     return descendantPart and descendantPart.Position or nil
 end
 
-local function collectAutoTomeParts()
+local function collectPartsInTrialRange(partFilter)
     local children = Workspace:GetChildren()
     local startNode = children[70]
     local endNode = Workspace:FindFirstChild("TotalKnowledge")
@@ -996,23 +997,22 @@ local function collectAutoTomeParts()
         end
     end
 
-    if not startIndex or not endIndex or endIndex < startIndex then
+    if not startIndex or not endIndex then
         return {}
     end
+
+    local low = math.min(startIndex, endIndex)
+    local high = math.max(startIndex, endIndex)
 
     local found = {}
     local seen = {}
 
     local function maybeAddPart(part)
-        if not part or not part:IsA("BasePart") then
+        if not part or not part:IsA("BasePart") or seen[part] then
             return
         end
 
-        if string.lower(string.sub(part.Name, 1, 4)) ~= "tome" then
-            return
-        end
-
-        if seen[part] then
+        if partFilter and not partFilter(part) then
             return
         end
 
@@ -1020,7 +1020,7 @@ local function collectAutoTomeParts()
         found[#found + 1] = part
     end
 
-    for idx = startIndex, endIndex do
+    for idx = low, high do
         local node = children[idx]
         if node then
             maybeAddPart(node)
@@ -1033,10 +1033,78 @@ local function collectAutoTomeParts()
     return found
 end
 
+local function collectAutoTomeParts()
+    local tomeParts = collectPartsInTrialRange(function(part)
+        return string.lower(string.sub(part.Name, 1, 4)) == "tome"
+    end)
+
+    if #tomeParts > 0 then
+        return tomeParts
+    end
+
+    return collectPartsInTrialRange(nil)
+end
+
 local function pressRaidSkill(keyCode)
     VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
     task.wait(0.05)
     VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+end
+
+local function walkTowardsPosition(targetPosition, timeout)
+    local character = localPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not root or not targetPosition then
+        return false
+    end
+
+    local maxTime = timeout or 3
+    local startedAt = os.clock()
+
+    while (os.clock() - startedAt) < maxTime do
+        humanoid:MoveTo(targetPosition)
+        local moved = false
+        local connection
+        connection = humanoid.MoveToFinished:Connect(function(success)
+            moved = success
+        end)
+
+        local probeStart = os.clock()
+        while (os.clock() - probeStart) < 0.8 do
+            local currentCharacter = localPlayer.Character
+            local currentRoot = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+            if not currentRoot then
+                if connection then connection:Disconnect() end
+                return false
+            end
+
+            local dist = (currentRoot.Position - targetPosition).Magnitude
+            if dist <= 7 or moved then
+                if connection then connection:Disconnect() end
+                return true
+            end
+            task.wait(0.08)
+        end
+
+        if connection then
+            connection:Disconnect()
+        end
+
+        local currentRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if currentRoot then
+            local direction = targetPosition - currentRoot.Position
+            local distance = direction.Magnitude
+            if distance > 0 then
+                local step = math.min(10, math.max(3, distance * 0.2))
+                currentRoot.CFrame = CFrame.new(currentRoot.Position + (direction.Unit * step), targetPosition)
+            end
+        end
+
+        task.wait(0.05)
+    end
+
+    return false
 end
 
 local function makeButtonGrid(buttons, columns, tabName)
@@ -1305,6 +1373,7 @@ makeToggle("Auto Raid Master", false, function(state)
         onGoingRaid = false
         raidTeleportedToLobby = false
         raidReturnPending = false
+        raidReturnReadyAt = 0
         raidReturnTeleportResolver = nil
         raidReturnTeleportName = nil
         raidLastKnownPosition = nil
@@ -1385,14 +1454,17 @@ task.spawn(function()
                         raidTeleportedToLobby = true
                         log("Auto Raid: raid detected, teleported to Lobby")
                     end
-                elseif (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
+                elseif (not onGoingRaid) and raidTeleportedToLobby then
                     raidReturnPending = true
+                    if raidReturnReadyAt <= 0 then
+                        raidReturnReadyAt = os.clock() + (getRaidResultsVisible() and 1.5 or 0.8)
+                    end
                 end
             end
 
             -- absolute last action in this loop: return teleport after raid has ended
-            if raidReturnPending and (not raidStarted) and (not onGoingRaid) and raidTeleportedToLobby and getRaidResultsVisible() then
-                task.wait(2)
+            if raidReturnPending and (not raidStarted) and (not onGoingRaid) and raidTeleportedToLobby and os.clock() >= raidReturnReadyAt then
+                task.wait(0.5)
                 if raidReturnTeleportResolver then
                     local ok, returnTarget = pcall(raidReturnTeleportResolver)
                     if ok and returnTarget then
@@ -1402,15 +1474,28 @@ task.spawn(function()
                 end
 
                 if raidLastKnownPosition then
-                    task.wait(0.3)
-                    local character = localPlayer.Character
-                    local root = character and character:FindFirstChild("HumanoidRootPart")
-                    if root then
-                        root.CFrame = raidLastKnownPosition
+                    local restored = false
+                    for _ = 1, 20 do
+                        local character = localPlayer.Character
+                        local root = character and character:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            root.CFrame = raidLastKnownPosition
+                            task.wait(0.12)
+                            root.CFrame = raidLastKnownPosition
+                            restored = true
+                            break
+                        end
+                        task.wait(0.15)
+                    end
+
+                    if restored then
                         log("Auto Raid: restored last known position in room")
+                    else
+                        log("Auto Raid: failed to restore last known position")
                     end
                 end
 
+                raidReturnReadyAt = 0
                 raidReturnTeleportResolver = nil
                 raidReturnTeleportName = nil
                 raidLastKnownPosition = nil
@@ -1443,39 +1528,7 @@ task.spawn(function()
 
                     local targetPosition = resolveEntityWalkPosition(tomePart)
                     if targetPosition then
-                        humanoid:MoveTo(targetPosition)
-
-                        local reached = false
-                        local connection
-                        connection = humanoid.MoveToFinished:Connect(function(success)
-                            reached = success
-                        end)
-
-                        local startedAt = os.clock()
-                        while (os.clock() - startedAt) < 2.5 do
-                            if not screen.Parent then
-                                break
-                            end
-
-                            if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
-                                break
-                            end
-
-                            local currentCharacter = localPlayer.Character
-                            local currentRoot = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
-                            if not currentRoot then
-                                break
-                            end
-
-                            if reached or ((currentRoot.Position - targetPosition).Magnitude <= 7) then
-                                break
-                            end
-                            task.wait(0.1)
-                        end
-
-                        if connection then
-                            connection:Disconnect()
-                        end
+                        walkTowardsPosition(targetPosition, 2.8)
                     end
                 end
             end
