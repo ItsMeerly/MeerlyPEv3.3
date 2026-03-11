@@ -593,6 +593,7 @@ local raidPresenceScanInterval = 7
 local lastRaidPresenceScan = 0
 local raidReturnTeleportResolver = nil
 local raidReturnTeleportName = nil
+local raidLastKnownPosition = nil
 local raidTeleportedToLobby = false
 local raidReturnPending = false
 local autoSkillsEnabled = false
@@ -1227,6 +1228,7 @@ makeToggle("Auto Raid Master", false, function(state)
         raidReturnPending = false
         raidReturnTeleportResolver = nil
         raidReturnTeleportName = nil
+        raidLastKnownPosition = nil
         lastRaidPresenceScan = 0
     else
         lastRaidPresenceScan = 0
@@ -1271,6 +1273,12 @@ task.spawn(function()
                 end
 
                 if onGoingRaid and not raidTeleportedToLobby then
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        raidLastKnownPosition = root.CFrame
+                    end
+
                     local closestName, closestResolver = resolveClosestGeneralTeleport()
                     if closestResolver then
                         raidReturnTeleportResolver = closestResolver
@@ -1299,8 +1307,20 @@ task.spawn(function()
                         log("Auto Raid: returned to " .. tostring(raidReturnTeleportName or "closest location"))
                     end
                 end
+
+                if raidLastKnownPosition then
+                    task.wait(0.3)
+                    local character = localPlayer.Character
+                    local root = character and character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        root.CFrame = raidLastKnownPosition
+                        log("Auto Raid: restored last known position in room")
+                    end
+                end
+
                 raidReturnTeleportResolver = nil
                 raidReturnTeleportName = nil
+                raidLastKnownPosition = nil
                 raidTeleportedToLobby = false
                 raidReturnPending = false
             end
