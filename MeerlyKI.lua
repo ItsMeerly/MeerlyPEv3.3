@@ -615,6 +615,9 @@ local macroMode = "Custom"
 local macroEvents = {}
 local macroStartClock = 0
 local macroInputToAction = nil
+local macroPausedByRaid = false
+local macroResumeAfterRaid = false
+local macroOriginalWalkSpeed = nil
 
 local hiddenObjectStates = {}
 
@@ -1278,6 +1281,8 @@ makeToggle("Auto Raid Master", false, function(state)
     if not state then
         raidStarted = false
         onGoingRaid = false
+        macroPausedByRaid = false
+        macroResumeAfterRaid = false
         raidTeleportedToLobby = false
         raidReturnPending = false
         raidReturnReadyAt = 0
@@ -1310,7 +1315,21 @@ makeSectionLabel("Macro Executor", "Macro Executor")
 local macroPresets = {
     ["Custom"] = nil,
     ["Tome Trial"] = {
-        { t = 0, type = "teleport", trial = "Tome Trial" },
+        { t = 0.0, type = "teleport", target = "BookCascade" },
+        { t = 0.5, type = "hold", a = "Forward", duration = 1.5 },
+        { t = 2.0, type = "hold", a = "Right", duration = 1.0 },
+        { t = 3.0, type = "hold", a = "Backwards", duration = 3.0 },
+        { t = 6.0, type = "hold", a = "Left", duration = 2.0 },
+        { t = 8.0, type = "hold", a = "Forward", duration = 2.0 },
+        { t = 10.0, type = "hold", a = "Right", duration = 1.5 },
+        { t = 11.5, type = "hold", a = "Backwards", duration = 1.5 },
+        { t = 13.0, type = "hold", a = "Left", duration = 1.0 },
+        { t = 14.0, type = "hold", a = "Forward", duration = 1.0 },
+        { t = 15.0, type = "hold", a = "Right", duration = 0.7 },
+        { t = 15.7, type = "hold", a = "Backwards", duration = 0.7 },
+        { t = 16.4, type = "hold", a = "Left", duration = 0.7 },
+        { t = 17.1, type = "hold", a = "Forward", duration = 1.0 },
+        { t = 18.1, type = "wait", duration = 0.5 },
     },
     ["Rune Trial"] = {
         { t = 0, type = "teleport", trial = "Rune Trial" },
@@ -1322,6 +1341,54 @@ local macroPresets = {
         { t = 0, type = "teleport", trial = "Starlight Trial" },
     },
 }
+
+local function isPresetMacro(modeName)
+    return modeName ~= "Custom"
+end
+
+local setMacroStatus
+
+local function applyMacroWalkSpeedProfile(enable)
+    local character = localPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        return
+    end
+
+    if enable and macroMode == "Tome Trial" then
+        if macroOriginalWalkSpeed == nil then
+            macroOriginalWalkSpeed = humanoid.WalkSpeed
+        end
+        humanoid.WalkSpeed = 25
+    elseif not enable and macroOriginalWalkSpeed ~= nil then
+        humanoid.WalkSpeed = macroOriginalWalkSpeed
+        macroOriginalWalkSpeed = nil
+    end
+end
+
+local function stopMacroExecution(reason)
+    macroRecording = false
+    macroPlaying = false
+    macroPausedByRaid = false
+    macroResumeAfterRaid = false
+    applyMacroWalkSpeedProfile(false)
+    if reason then
+        setMacroStatus(reason)
+    end
+end
+
+local function resolveMacroTeleportTarget(event)
+    if event.target == "BookCascade" then
+        local bookCascade = Workspace:FindFirstChild("BookCascade")
+        if bookCascade and (bookCascade:IsA("BasePart") or bookCascade:IsA("Model")) then
+            return bookCascade
+        end
+        if bookCascade then
+            return bookCascade:FindFirstChildWhichIsA("BasePart", true)
+        end
+    end
+    return nil
+end
 
 local macroActionKeycodes = {
     Forward = Enum.KeyCode.W,
@@ -1351,12 +1418,13 @@ macroInputToAction = {
 local function cloneEvents(source)
     local copy = {}
     for _, e in ipairs(source or {}) do
-        copy[#copy + 1] = { t = e.t, type = e.type, trial = e.trial, a = e.a, d = e.d }
+        copy[#copy + 1] = { t = e.t, type = e.type, trial = e.trial, target = e.target, a = e.a, d = e.d, duration = e.duration }
     end
     return copy
 end
 
 local function setMacroMode(modeName)
+    stopMacroExecution(nil)
     macroMode = modeName
     if modeName ~= "Custom" then
         macroEvents = cloneEvents(macroPresets[modeName])
@@ -1377,7 +1445,7 @@ macroStatusLabel.TextColor3 = uiTheme.subtle
 macroStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 macroStatusLabel.Text = "Status: Idle"
 
-local function setMacroStatus(text)
+setMacroStatus = function(text)
     macroStatus = text
     macroStatusLabel.Text = "Status: " .. text
 end
@@ -1440,8 +1508,29 @@ local function playMacroOnce()
         end
 
         if event.type == "teleport" then
-            -- positional teleport placeholder per preset; fill target later
-            log("Macro teleport placeholder: " .. tostring(event.trial or "unknown trial"))
+            local target = resolveMacroTeleportTarget(event)
+            if target then
+                teleportTo(target)
+            else
+                log("Macro teleport placeholder: " .. tostring(event.trial or event.target or "unknown"))
+            end
+        elseif event.type == "hold" then
+            local keycode = macroActionKeycodes[event.a]
+            local duration = math.max(0, tonumber(event.duration) or 0)
+            if keycode then
+                VirtualInputManager:SendKeyEvent(true, keycode, false, game)
+                local releaseAt = os.clock() + duration
+                while macroPlaying and os.clock() < releaseAt do
+                    task.wait()
+                end
+                VirtualInputManager:SendKeyEvent(false, keycode, false, game)
+            end
+        elseif event.type == "wait" then
+            local waitFor = math.max(0, tonumber(event.duration) or 0)
+            local endAt = os.clock() + waitFor
+            while macroPlaying and os.clock() < endAt do
+                task.wait()
+            end
         elseif event.type == "action" then
             local keycode = macroActionKeycodes[event.a]
             if keycode then
@@ -1485,23 +1574,28 @@ makeInlineButtons({
         end
 
         macroPlaying = true
-        setMacroStatus("Playing " .. #macroEvents .. " events" .. (macroLoopEnabled and " [LOOP]" or ""))
+        macroPausedByRaid = false
+        macroResumeAfterRaid = false
+        applyMacroWalkSpeedProfile(true)
+        local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
+        setMacroStatus("Playing " .. #macroEvents .. " events" .. (shouldLoop and " [LOOP]" or ""))
         task.spawn(function()
             while macroPlaying and screen.Parent do
                 playMacroOnce()
-                if not macroLoopEnabled then
+                if not shouldLoop then
                     break
                 end
                 task.wait(0.1)
             end
             macroPlaying = false
-            setMacroStatus("Idle")
+            applyMacroWalkSpeedProfile(false)
+            if not macroPausedByRaid then
+                setMacroStatus("Idle")
+            end
         end)
     end },
     { "Stop", function()
-        macroRecording = false
-        macroPlaying = false
-        setMacroStatus("Stopped")
+        stopMacroExecution("Stopped")
     end },
 }, "Macro Executor")
 
@@ -1537,6 +1631,14 @@ task.spawn(function()
                 end
 
                 if onGoingRaid and not raidTeleportedToLobby then
+                    if autoRaidMasterEnabled and macroPlaying and isPresetMacro(macroMode) then
+                        macroPausedByRaid = true
+                        macroResumeAfterRaid = true
+                        macroPlaying = false
+                        applyMacroWalkSpeedProfile(false)
+                        setMacroStatus("Paused for raid")
+                    end
+
                     local character = localPlayer.Character
                     local root = character and character:FindFirstChild("HumanoidRootPart")
                     if root then
@@ -1603,6 +1705,29 @@ task.spawn(function()
                 raidLastKnownPosition = nil
                 raidTeleportedToLobby = false
                 raidReturnPending = false
+
+                if macroResumeAfterRaid and isPresetMacro(macroMode) and #macroEvents > 0 then
+                    macroResumeAfterRaid = false
+                    macroPausedByRaid = false
+                    applyMacroWalkSpeedProfile(true)
+                    macroPlaying = true
+                    local shouldLoop = macroLoopEnabled or isPresetMacro(macroMode)
+                    setMacroStatus("Resumed after raid")
+                    task.spawn(function()
+                        while macroPlaying and screen.Parent do
+                            playMacroOnce()
+                            if not shouldLoop then
+                                break
+                            end
+                            task.wait(0.1)
+                        end
+                        macroPlaying = false
+                        applyMacroWalkSpeedProfile(false)
+                        if not macroPausedByRaid then
+                            setMacroStatus("Idle")
+                        end
+                    end)
+                end
 
             end
         end
