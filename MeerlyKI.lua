@@ -1033,16 +1033,18 @@ local function collectPartsInTrialRange(partFilter)
     return found
 end
 
-local function isPointInsidePartBounds(boundsPart, worldPoint)
+local function isPointInsidePartBounds(boundsPart, worldPoint, yPadding)
     if not boundsPart or not boundsPart:IsA("BasePart") or not worldPoint then
         return false
     end
 
     local localPoint = boundsPart.CFrame:PointToObjectSpace(worldPoint)
     local halfSize = boundsPart.Size * 0.5
+    local verticalPadding = math.max(0, yPadding or 0)
 
     return math.abs(localPoint.X) <= halfSize.X
-        and math.abs(localPoint.Y) <= halfSize.Y
+        and localPoint.Y >= (-halfSize.Y)
+        and localPoint.Y <= (halfSize.Y + verticalPadding)
         and math.abs(localPoint.Z) <= halfSize.Z
 end
 
@@ -1053,8 +1055,9 @@ local function collectAutoTomeParts(originPosition)
         return {}
     end
 
+    local upperYPadding = math.max(6, collectBounds.Size.Y * 1.5)
     local tomeParts = collectPartsInTrialRange(function(part)
-        return string.lower(string.sub(part.Name, 1, 4)) == "tome" and isPointInsidePartBounds(collectBounds, part.Position)
+        return string.lower(string.sub(part.Name, 1, 4)) == "tome" and isPointInsidePartBounds(collectBounds, part.Position, upperYPadding)
     end)
 
     table.sort(tomeParts, function(a, b)
