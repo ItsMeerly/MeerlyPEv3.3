@@ -1033,16 +1033,43 @@ local function collectPartsInTrialRange(partFilter)
     return found
 end
 
-local function collectAutoTomeParts()
-    local tomeParts = collectPartsInTrialRange(function(part)
-        return string.lower(string.sub(part.Name, 1, 4)) == "tome"
-    end)
-
-    if #tomeParts > 0 then
-        return tomeParts
+local function isPointInsidePartBounds(boundsPart, worldPoint)
+    if not boundsPart or not boundsPart:IsA("BasePart") or not worldPoint then
+        return false
     end
 
-    return collectPartsInTrialRange(nil)
+    local localPoint = boundsPart.CFrame:PointToObjectSpace(worldPoint)
+    local halfSize = boundsPart.Size * 0.5
+
+    return math.abs(localPoint.X) <= halfSize.X
+        and math.abs(localPoint.Y) <= halfSize.Y
+        and math.abs(localPoint.Z) <= halfSize.Z
+end
+
+local function collectAutoTomeParts(originPosition)
+    local collectBounds = Workspace:FindFirstChild("BookCascade") and Workspace.BookCascade:FindFirstChild("collect")
+    if not (collectBounds and collectBounds:IsA("BasePart")) then
+        log("Auto Tome: missing workspace.BookCascade.collect")
+        return {}
+    end
+
+    local tomeParts = collectPartsInTrialRange(function(part)
+        return string.lower(string.sub(part.Name, 1, 4)) == "tome" and isPointInsidePartBounds(collectBounds, part.Position)
+    end)
+
+    table.sort(tomeParts, function(a, b)
+        if not originPosition then
+            return a.Name < b.Name
+        end
+        local da = (a.Position - originPosition).Magnitude
+        local db = (b.Position - originPosition).Magnitude
+        if da == db then
+            return a.Name < b.Name
+        end
+        return da < db
+    end)
+
+    return tomeParts
 end
 
 local function pressRaidSkill(keyCode)
@@ -1520,7 +1547,7 @@ task.spawn(function()
             local character = localPlayer.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             if humanoid and root then
-                local tomeParts = collectAutoTomeParts()
+                local tomeParts = collectAutoTomeParts(root.Position)
                 for _, tomePart in ipairs(tomeParts) do
                     if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
                         break
