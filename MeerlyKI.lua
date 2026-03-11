@@ -977,7 +977,7 @@ local function resolveEntityWalkPosition(entity)
     return descendantPart and descendantPart.Position or nil
 end
 
-local function collectAutoTomeEntities()
+local function collectAutoTomeParts()
     local children = Workspace:GetChildren()
     local startNode = children[70]
     local endNode = Workspace:FindFirstChild("TotalKnowledge")
@@ -1004,14 +1004,14 @@ local function collectAutoTomeEntities()
     local seen = {}
     for idx = startIndex, endIndex do
         local node = children[idx]
-        if node then
-            if string.find(string.lower(node.Name), "tome", 1, true) and not seen[node] then
+        if node and string.lower(string.sub(node.Name, 1, 4)) == "tome" then
+            if node:IsA("BasePart") and not seen[node] then
                 found[#found + 1] = node
                 seen[node] = true
             end
 
             for _, descendant in ipairs(node:GetDescendants()) do
-                if string.find(string.lower(descendant.Name), "tome", 1, true) and not seen[descendant] then
+                if descendant:IsA("BasePart") and not seen[descendant] then
                     found[#found + 1] = descendant
                     seen[descendant] = true
                 end
@@ -1424,13 +1424,13 @@ task.spawn(function()
             local character = localPlayer.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             if humanoid and root then
-                local tomeEntities = collectAutoTomeEntities()
-                for _, tomeEntity in ipairs(tomeEntities) do
+                local tomeParts = collectAutoTomeParts()
+                for _, tomePart in ipairs(tomeParts) do
                     if not (keyAccepted and autoTomeEnabled and not autoTomeSuspendedByRaid) then
                         break
                     end
 
-                    local targetPosition = resolveEntityWalkPosition(tomeEntity)
+                    local targetPosition = resolveEntityWalkPosition(tomePart)
                     if targetPosition then
                         humanoid:MoveTo(targetPosition)
 
