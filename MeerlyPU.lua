@@ -40,15 +40,15 @@ local lowGraphicsEnabled = false
 local streamingOptimized = false
 local aggressiveFxCullEnabled = false
 local hideTrackedWeaponParts = false
-local weaponDamageOverride = 25
-local weaponDamageOverrideOnRescan = false
-local weaponDamageOverridePassActive = false
 local hitboxEnlargerEnabled = false
 local hideOtherPlayersWeapons = false
 local otherPlayersHidePassSeconds = 10
 local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
+local autoRollEnabled = false
+local autoAuraEnabled = false
+local autoRollPrimed = false
 
 local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
@@ -72,7 +72,6 @@ local trackedWeapons = makeWeakKeyTable()
 local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
 local trackedWeaponPartConnections = makeWeakKeyTable()
-local trackedWeaponDamageState = makeWeakKeyTable()
 local trackedWeaponFxState = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
 local otherPlayerWeaponFxState = makeWeakKeyTable()
@@ -569,21 +568,7 @@ local function applyHitboxEnlarger()
     end
 end
 
--- Applies/restores Damage attribute overrides while preserving original values for clean rollback.
-local function applyDamageState(instance)
-    if not weaponDamageOverridePassActive then
-        return
-    end
-
-    local state = trackedWeaponDamageState[instance]
-    if state == nil then
-        state = instance:GetAttribute("Damage")
-        trackedWeaponDamageState[instance] = state
-    end
-    instance:SetAttribute("Damage", weaponDamageOverride)
-end
-
--- Applies current local weapon policies (hide parts + damage override)
+-- Applies current local weapon policies (hide parts)
 -- to a tracked weapon container and all descendants.
 -- Why: keeps behavior consistent for both initial scans and live updates.
 local function applyWeaponState(container)
@@ -593,18 +578,11 @@ local function applyWeaponState(container)
         setWeaponFxHiddenLocal(container, hideTrackedWeaponParts, trackedWeaponFxState)
     end
 
-    if container:GetAttribute("Damage") ~= nil then
-        applyDamageState(container)
-    end
-
     for _, descendant in ipairs(container:GetDescendants()) do
         if descendant:IsA("BasePart") then
             applyWeaponPartState(descendant)
         elseif isWeaponFxInstance(descendant) then
             setWeaponFxHiddenLocal(descendant, hideTrackedWeaponParts, trackedWeaponFxState)
-        end
-        if descendant:GetAttribute("Damage") ~= nil then
-            applyDamageState(descendant)
         end
     end
 end
@@ -623,7 +601,7 @@ local function trackWeapon(container)
     log("Tracked weapon: " .. container.Name)
 end
 
--- Stops tracking a weapon and clears cached restore state for its parts/attributes.
+-- Stops tracking a weapon and clears cached restore state for its parts/fx.
 -- Why: prevents stale references and memory growth as weapons are created/removed.
 local function untrackWeapon(container)
     if not trackedWeapons[container] then
@@ -644,7 +622,6 @@ local function untrackWeapon(container)
             trackedWeaponPartConnections[container] = nil
         end
         trackedWeaponPartState[container] = nil
-        trackedWeaponDamageState[container] = nil
         trackedWeaponFxState[container] = nil
     end
 
@@ -654,7 +631,6 @@ local function untrackWeapon(container)
             trackedWeaponPartConnections[descendant] = nil
         end
         trackedWeaponPartState[descendant] = nil
-        trackedWeaponDamageState[descendant] = nil
         trackedWeaponFxState[descendant] = nil
     end
 end
@@ -721,8 +697,6 @@ local function runSelfWeaponPass(message, opts)
         end
     end
 
-    weaponDamageOverridePassActive = opts.applyDamageOnce == true
-
     for weapon in pairs(trackedWeapons) do
         if weapon and weapon.Parent == trackedCharacter then
             local passOk, passErr = pcall(function()
@@ -736,18 +710,12 @@ local function runSelfWeaponPass(message, opts)
         end
     end
 
-    if opts.applyDamageOnce then
-        weaponDamageOverrideOnRescan = false
-    end
-
     local hitboxOk, hitboxErr = pcall(function()
         applyHitboxEnlarger()
     end)
     if not hitboxOk then
         log(string.format("Hitbox enlarger pass failed: %s", tostring(hitboxErr)))
     end
-    weaponDamageOverridePassActive = false
-
     if message then
         log(message)
     end
@@ -762,7 +730,6 @@ local function bindCharacterForWeapons(character)
     orderedTrackedWeapons = {}
     trackedWeaponPartState = makeWeakKeyTable()
     trackedWeaponPartConnections = makeWeakKeyTable()
-    trackedWeaponDamageState = makeWeakKeyTable()
     trackedWeaponFxState = makeWeakKeyTable()
     originalWalkSpeed = nil
 
@@ -802,12 +769,6 @@ local function pruneTrackedWeaponStateTables()
         if (not part) or (not part.Parent) then
             trackedWeaponPartConnections[part]:Disconnect()
             trackedWeaponPartConnections[part] = nil
-        end
-    end
-
-    for instance in pairs(trackedWeaponDamageState) do
-        if (not instance) or (not instance.Parent) then
-            trackedWeaponDamageState[instance] = nil
         end
     end
 
@@ -1329,7 +1290,7 @@ end
 
 -- Input row with a right-side action button.
 -- What: commits text as usual and exposes a companion click action in the same row.
--- Why: weapon damage override is an action workflow, not a persistent ON/OFF mode.
+-- Why: some settings are best represented as value + explicit action in one row.
 local function makeInputWithButton(labelText, defaultText, onCommit, buttonText, onButtonClick, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
@@ -1836,19 +1797,179 @@ local function setOptionsListButtonVisible(buttonName, enabled)
     end
 end
 
+local function resolveMainGui()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then
+        return nil, "PlayerGui not found"
+    end
+
+    local mainGui = playerGui:FindFirstChild("MainGUI")
+    if not mainGui then
+        return nil, "MainGUI not found"
+    end
+
+    return mainGui
+end
+
+local function resolveRollRemote(remoteName)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if not remotes then
+        return nil, "ReplicatedStorage.Remotes not found"
+    end
+
+    local remote = remotes:FindFirstChild(remoteName)
+    if not remote then
+        return nil, remoteName .. " not found"
+    end
+
+    return remote
+end
+
+local function clickGuiButton(button, contextLabel)
+    if not button or not button:IsA("GuiButton") then
+        return false
+    end
+
+    local ok, err = pcall(function()
+        button:Activate()
+    end)
+
+    if not ok then
+        log(string.format("%s click failed: %s", tostring(contextLabel), tostring(err)))
+        return false
+    end
+
+    return true
+end
+
+local function resolveAutoRollUiNodes()
+    local mainGui, reason = resolveMainGui()
+    if not mainGui then
+        return nil, tostring(reason)
+    end
+
+    local generalUi = mainGui:FindFirstChild("GeneralUI")
+    if not generalUi then
+        return nil, "GeneralUI not found"
+    end
+
+    local bottomButtons = generalUi:FindFirstChild("BottomButtons")
+    if not bottomButtons then
+        return nil, "GeneralUI.BottomButtons not found"
+    end
+
+    local rollBtn = bottomButtons:FindFirstChild("RollBtn")
+    local upgradesBtn = bottomButtons:FindFirstChild("UpgradesBtn")
+    local weaponsBtn = bottomButtons:FindFirstChild("WeaponsBtn")
+    local rollUi = mainGui:FindFirstChild("RollUI")
+    local autoRollBtn = rollUi and rollUi:FindFirstChild("AutoRollBtn") or nil
+
+    if not rollBtn then
+        return nil, "RollBtn not found"
+    end
+    if not upgradesBtn then
+        return nil, "UpgradesBtn not found"
+    end
+    if not weaponsBtn then
+        return nil, "WeaponsBtn not found"
+    end
+    if not rollUi then
+        return nil, "RollUI not found"
+    end
+    if not autoRollBtn then
+        return nil, "RollUI.AutoRollBtn not found"
+    end
+
+    return {
+        rollBtn = rollBtn,
+        upgradesBtn = upgradesBtn,
+        weaponsBtn = weaponsBtn,
+        rollUi = rollUi,
+        autoRollBtn = autoRollBtn,
+    }
+end
+
+local function primeAutoRollUi()
+    local nodes, reason = resolveAutoRollUiNodes()
+    if not nodes then
+        log("Auto Roll setup failed: " .. tostring(reason))
+        return
+    end
+
+    if clickGuiButton(nodes.rollBtn, "RollBtn") then
+        task.wait(0.08)
+    end
+    clickGuiButton(nodes.autoRollBtn, "AutoRollBtn")
+    autoRollPrimed = true
+end
+
+local function enforceAutoRollUiState()
+    local nodes, reason = resolveAutoRollUiNodes()
+    if not nodes then
+        log("Auto Roll state sync failed: " .. tostring(reason))
+        return
+    end
+
+    if autoRollEnabled then
+        nodes.rollBtn.Visible = false
+        nodes.upgradesBtn.Visible = true
+        nodes.weaponsBtn.Visible = true
+        nodes.rollUi.Visible = false
+    else
+        nodes.rollBtn.Visible = true
+    end
+end
+
+local function disableAutoRollUi()
+    autoRollPrimed = false
+    local nodes = resolveAutoRollUiNodes()
+    if not nodes then
+        return
+    end
+
+    pcall(function()
+        nodes.rollBtn.Visible = true
+    end)
+end
+
+local function fireRollAurasRemote()
+    local remote, reason = resolveRollRemote("RollAuras")
+    if not remote then
+        log("Auto Aura failed: " .. tostring(reason))
+        return
+    end
+
+    local ok, err = pcall(function()
+        if remote:IsA("RemoteEvent") then
+            remote:FireServer()
+        else
+            remote:InvokeServer()
+        end
+    end)
+
+    if not ok then
+        log("Auto Aura remote call failed: " .. tostring(err))
+    end
+end
+
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- OP Settings page.
-makeSectionLabel("Weapon Damage Override", "OP Settings")
-makeInputWithButton("", tostring(weaponDamageOverride), function(text)
-    local v = tonumber(text)
+makeSectionLabel("Auto Rolling", "OP Settings")
+makeToggle("Auto Roll", autoRollEnabled, function(v)
+    autoRollEnabled = v
     if v then
-        weaponDamageOverride = v
+        autoRollPrimed = false
+        log("Auto Roll enabled")
+    else
+        disableAutoRollUi()
+        log("Auto Roll disabled")
     end
-    return tostring(weaponDamageOverride)
-end, "SCAN", function()
-    weaponDamageOverrideOnRescan = true
-    runSelfWeaponPass("Weapon damage override applied: " .. tostring(weaponDamageOverride), { applyDamageOnce = true })
+end, "OP Settings")
+
+makeToggle("Auto Aura", autoAuraEnabled, function(v)
+    autoAuraEnabled = v
+    log(v and "Auto Aura enabled" or "Auto Aura disabled")
 end, "OP Settings")
 
 makeToggle("Hitbox Enlarger", hitboxEnlargerEnabled, function(v)
@@ -2284,7 +2405,7 @@ characterAddedConnection = player.CharacterAdded:Connect(function(character)
     bindCharacterForWeapons(character)
 end)
 
--- Weapon maintenance worker: periodic correction for hidden/damage state drift.
+-- Weapon maintenance worker: periodic correction for hidden weapon-part state drift.
 -- Why: some games/scripts recreate or mutate weapon visuals/attributes after equip,
 -- so this pass reapplies active policies and prunes stale cached references.
 task.spawn(function()
@@ -2297,6 +2418,22 @@ task.spawn(function()
             end
         end
         pruneTrackedWeaponStateTables()
+    end
+end)
+
+-- Auto rolling worker: periodically requests weapon/aura rolls while toggled.
+task.spawn(function()
+    while running do
+        task.wait(1)
+        if autoRollEnabled then
+            if not autoRollPrimed then
+                primeAutoRollUi()
+            end
+            enforceAutoRollUiState()
+        end
+        if autoAuraEnabled then
+            fireRollAurasRemote()
+        end
     end
 end)
 
