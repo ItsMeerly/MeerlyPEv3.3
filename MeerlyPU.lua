@@ -48,6 +48,7 @@ local walkSpeedValue = 16
 local originalWalkSpeed = nil
 local autoRollEnabled = false
 local autoAuraEnabled = false
+local autoRollPrimed = false
 
 local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
@@ -1796,6 +1797,20 @@ local function setOptionsListButtonVisible(buttonName, enabled)
     end
 end
 
+local function resolveMainGui()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then
+        return nil, "PlayerGui not found"
+    end
+
+    local mainGui = playerGui:FindFirstChild("MainGUI")
+    if not mainGui then
+        return nil, "MainGUI not found"
+    end
+
+    return mainGui
+end
+
 local function resolveRollRemote(remoteName)
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then
@@ -1808,6 +1823,113 @@ local function resolveRollRemote(remoteName)
     end
 
     return remote
+end
+
+local function clickGuiButton(button, contextLabel)
+    if not button or not button:IsA("GuiButton") then
+        return false
+    end
+
+    local ok, err = pcall(function()
+        button:Activate()
+    end)
+
+    if not ok then
+        log(string.format("%s click failed: %s", tostring(contextLabel), tostring(err)))
+        return false
+    end
+
+    return true
+end
+
+local function resolveAutoRollUiNodes()
+    local mainGui, reason = resolveMainGui()
+    if not mainGui then
+        return nil, tostring(reason)
+    end
+
+    local generalUi = mainGui:FindFirstChild("GeneralUI")
+    if not generalUi then
+        return nil, "GeneralUI not found"
+    end
+
+    local bottomButtons = generalUi:FindFirstChild("BottomButtons")
+    if not bottomButtons then
+        return nil, "GeneralUI.BottomButtons not found"
+    end
+
+    local rollBtn = bottomButtons:FindFirstChild("RollBtn")
+    local upgradesBtn = bottomButtons:FindFirstChild("UpgradesBtn")
+    local weaponsBtn = bottomButtons:FindFirstChild("WeaponsBtn")
+    local rollUi = mainGui:FindFirstChild("RollUI")
+    local autoRollBtn = rollUi and rollUi:FindFirstChild("AutoRollBtn") or nil
+
+    if not rollBtn then
+        return nil, "RollBtn not found"
+    end
+    if not upgradesBtn then
+        return nil, "UpgradesBtn not found"
+    end
+    if not weaponsBtn then
+        return nil, "WeaponsBtn not found"
+    end
+    if not rollUi then
+        return nil, "RollUI not found"
+    end
+    if not autoRollBtn then
+        return nil, "RollUI.AutoRollBtn not found"
+    end
+
+    return {
+        rollBtn = rollBtn,
+        upgradesBtn = upgradesBtn,
+        weaponsBtn = weaponsBtn,
+        rollUi = rollUi,
+        autoRollBtn = autoRollBtn,
+    }
+end
+
+local function primeAutoRollUi()
+    local nodes, reason = resolveAutoRollUiNodes()
+    if not nodes then
+        log("Auto Roll setup failed: " .. tostring(reason))
+        return
+    end
+
+    if clickGuiButton(nodes.rollBtn, "RollBtn") then
+        task.wait(0.08)
+    end
+    clickGuiButton(nodes.autoRollBtn, "AutoRollBtn")
+    autoRollPrimed = true
+end
+
+local function enforceAutoRollUiState()
+    local nodes, reason = resolveAutoRollUiNodes()
+    if not nodes then
+        log("Auto Roll state sync failed: " .. tostring(reason))
+        return
+    end
+
+    if autoRollEnabled then
+        nodes.rollBtn.Visible = false
+        nodes.upgradesBtn.Visible = true
+        nodes.weaponsBtn.Visible = true
+        nodes.rollUi.Visible = false
+    else
+        nodes.rollBtn.Visible = true
+    end
+end
+
+local function disableAutoRollUi()
+    autoRollPrimed = false
+    local nodes = resolveAutoRollUiNodes()
+    if not nodes then
+        return
+    end
+
+    pcall(function()
+        nodes.rollBtn.Visible = true
+    end)
 end
 
 local function fireRollAurasRemote()
@@ -1830,33 +1952,19 @@ local function fireRollAurasRemote()
     end
 end
 
-local function fireRollWeaponsRemote()
-    local remote, reason = resolveRollRemote("RollWeapons")
-    if not remote then
-        log("Auto Roll failed: " .. tostring(reason))
-        return
-    end
-
-    local ok, err = pcall(function()
-        if remote:IsA("RemoteFunction") then
-            remote:InvokeServer()
-        else
-            remote:FireServer()
-        end
-    end)
-
-    if not ok then
-        log("Auto Roll remote call failed: " .. tostring(err))
-    end
-end
-
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- OP Settings page.
 makeSectionLabel("Auto Rolling", "OP Settings")
 makeToggle("Auto Roll", autoRollEnabled, function(v)
     autoRollEnabled = v
-    log(v and "Auto Roll enabled" or "Auto Roll disabled")
+    if v then
+        autoRollPrimed = false
+        log("Auto Roll enabled")
+    else
+        disableAutoRollUi()
+        log("Auto Roll disabled")
+    end
 end, "OP Settings")
 
 makeToggle("Auto Aura", autoAuraEnabled, function(v)
@@ -2318,7 +2426,10 @@ task.spawn(function()
     while running do
         task.wait(1)
         if autoRollEnabled then
-            fireRollWeaponsRemote()
+            if not autoRollPrimed then
+                primeAutoRollUi()
+            end
+            enforceAutoRollUiState()
         end
         if autoAuraEnabled then
             fireRollAurasRemote()
