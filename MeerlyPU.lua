@@ -85,6 +85,14 @@ local sacrificeStatusOutput = nil
 local sacrificeLastActionOutput = nil
 local sacrificeInventory = {}
 local weaponFusionTabEnabled = false
+local autoUpgradeEnabled = false
+local upgradeSelected = {}
+local upgradeLevelCap = {}
+local upgradeStatusLabel = nil
+local upgradeInfoLabel = nil
+local upgradeLiveOutput = nil
+local upgradeLastAttemptAt = 0
+local upgradeLastStatusRefresh = 0
 local sacrificeTierCaps = {
     { label = "Common (<= 5)", cap = 5 },
     { label = "Uncommon (<= 50)", cap = 50 },
@@ -149,6 +157,36 @@ local lastGcSweep = 0
 local gcSweepInterval = 30
 
 local log
+
+local UPGRADE_ORDER = {
+    "Weapons Equipped",
+    "Damage Multiplier",
+    "Enemy Spawn Rate",
+    "Enemy Limit",
+    "Mana Multiplier",
+    "Spin Speed",
+    "RNG Luck",
+    "Kill Multiplier",
+    "Skill Point Multiplier",
+    "Boss Spawn Chance",
+}
+
+local UPGRADE_PRICES = {
+    ["Weapons Equipped"] = function(p) return 1 + p^2 * p end,
+    ["Damage Multiplier"] = function(p) return p^4 + 5 end,
+    ["Enemy Spawn Rate"] = function(p) return math.floor(p^1.5 + 10) end,
+    ["Enemy Limit"] = function(p) return math.floor(p^1.1 + 1 + 0.5) end,
+    ["Mana Multiplier"] = function(p) return math.floor(8 + p^2.35 * p + 0.5) end,
+    ["Spin Speed"] = function(p) return p^4 + 5 end,
+    ["RNG Luck"] = function(p) return p^4 + 5 end,
+    ["Kill Multiplier"] = function(p) return math.floor(p^3.9 + 100 + 0.5) end,
+    ["Skill Point Multiplier"] = function(p) return math.floor(p^4.5 + 0.5) + 1 end,
+    ["Boss Spawn Chance"] = function(p) return math.floor(p^4 + 0.5) + 150 end,
+}
+
+for _, upgradeName in ipairs(UPGRADE_ORDER) do
+    upgradeSelected[upgradeName] = false
+end
 
 -- Centralized logger reference. It is assigned after UI creation so helper functions can call it safely.
 local uiTheme = {
@@ -1214,12 +1252,13 @@ end
 
 createTab("OP Settings")
 createTab("Utility")
+createTab("Upgrades")
 createTab("Sacrifice")
 createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "OP Settings", "Utility", "Sacrifice", "Settings", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Upgrades", "Sacrifice", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -2215,6 +2254,162 @@ local function runWeaponFusionPass(silent)
     return inventory
 end
 
+local function getRemotesFolder()
+    return ReplicatedStorage:FindFirstChild("Remotes")
+end
+
+local function invokeRemoteFunction(remoteName, ...)
+    local remotes = getRemotesFolder()
+    local remote = remotes and remotes:FindFirstChild(remoteName)
+    if not remote or not remote:IsA("RemoteFunction") then
+        return nil
+    end
+
+    local ok, result = pcall(function(...)
+        return remote:InvokeServer(...)
+    end, ...)
+    if not ok then
+        return nil
+    end
+    return result
+end
+
+local function coerceUpgradeLevel(raw)
+    if raw == nil or raw == false then
+        return 0
+    end
+    if type(raw) == "number" then
+        if raw ~= raw or raw < 0 then
+            return 0
+        end
+        return math.max(0, math.floor(raw))
+    end
+    if type(raw) == "string" then
+        return coerceUpgradeLevel(tonumber(raw))
+    end
+    if type(raw) == "table" then
+        return coerceUpgradeLevel(raw[1] or raw.Level or raw.level or raw.Lvl or raw.Value or raw.value)
+    end
+    return 0
+end
+
+local function coerceUpgradePrice(raw)
+    if type(raw) == "number" and raw == raw and raw > 0 then
+        return raw
+    end
+    if type(raw) == "string" then
+        return coerceUpgradePrice(tonumber(raw))
+    end
+    if type(raw) == "table" then
+        return coerceUpgradePrice(raw[1] or raw.Price or raw.price or raw.Cost or raw.cost or raw.SP or raw.sp)
+    end
+    return nil
+end
+
+local function readUpgradeLevel(upgradeName)
+    return coerceUpgradeLevel(invokeRemoteFunction("GetUpgradeLevel", upgradeName))
+end
+
+local function readCurrentSkillPoints()
+    local fromRemote = invokeRemoteFunction("GetSP")
+        or invokeRemoteFunction("GetSkillPoints")
+        or invokeRemoteFunction("GetPlayerSP")
+    local asNumber = tonumber(fromRemote)
+    if asNumber then
+        return asNumber
+    end
+
+    local leaderstats = player:FindFirstChild("leaderstats")
+    local spValue = leaderstats and (leaderstats:FindFirstChild("SP") or leaderstats:FindFirstChild("SkillPoints"))
+    if spValue and (spValue:IsA("IntValue") or spValue:IsA("NumberValue")) then
+        return tonumber(spValue.Value)
+    end
+    return nil
+end
+
+local function getUpgradeNextPrice(upgradeName, currentLevel)
+    local remotePrice = coerceUpgradePrice(
+        invokeRemoteFunction("GetUpgradePrice", upgradeName, currentLevel)
+        or invokeRemoteFunction("GetNextUpgradePrice", upgradeName, currentLevel)
+        or invokeRemoteFunction("GetUpgradeCost", upgradeName, currentLevel)
+        or invokeRemoteFunction("CalculateUpgradePrice", upgradeName, currentLevel)
+        or invokeRemoteFunction("GetUpgradePrice", upgradeName)
+        or invokeRemoteFunction("GetNextUpgradePrice", upgradeName)
+    )
+    if remotePrice then
+        return remotePrice
+    end
+
+    local formula = UPGRADE_PRICES[upgradeName]
+    if not formula then
+        return nil
+    end
+
+    local ok, price = pcall(function()
+        return formula((tonumber(currentLevel) or 0) + 1)
+    end)
+    if ok and type(price) == "number" and price == price and price > 0 then
+        return price
+    end
+    return nil
+end
+
+local function parseUpgradeCapInput(text)
+    local parsed = tonumber(tostring(text or ""):gsub("^%s*(.-)%s*$", "%1"))
+    if not parsed or parsed < 1 then
+        return nil
+    end
+    return math.floor(parsed)
+end
+
+local function getUpgradeCandidates()
+    local candidates = {}
+    for _, upgradeName in ipairs(UPGRADE_ORDER) do
+        if upgradeSelected[upgradeName] then
+            local level = readUpgradeLevel(upgradeName)
+            local cap = upgradeLevelCap[upgradeName]
+            local capReached = type(cap) == "number" and level >= cap
+            if not capReached then
+                local nextPrice = getUpgradeNextPrice(upgradeName, level)
+                if type(nextPrice) == "number" then
+                    table.insert(candidates, {
+                        name = upgradeName,
+                        level = level,
+                        price = nextPrice,
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(candidates, function(a, b)
+        if a.price == b.price then
+            return a.name < b.name
+        end
+        return a.price < b.price
+    end)
+    return candidates
+end
+
+local function refreshUpgradesLiveOutput()
+    if not upgradeLiveOutput then
+        return
+    end
+
+    local lines = {}
+    for _, upgradeName in ipairs(UPGRADE_ORDER) do
+        local level = readUpgradeLevel(upgradeName)
+        local cap = upgradeLevelCap[upgradeName]
+        local nextPrice = getUpgradeNextPrice(upgradeName, level)
+        local enabledText = upgradeSelected[upgradeName] and "ON" or "OFF"
+        local capText = (type(cap) == "number") and tostring(cap) or "-"
+        local priceText = nextPrice and tostring(math.floor(nextPrice)) or "?"
+        table.insert(lines, string.format("%s | %s | Lv %d | Next %s SP | Cap %s", upgradeName, enabledText, level, priceText, capText))
+    end
+
+    upgradeLiveOutput.Text = table.concat(lines, "\n")
+end
+
 local function clearTabRows(tabName)
     local page = tabPages[tabName]
     if not page then
@@ -2681,6 +2876,51 @@ makeButton("Rejoin Server", function()
     end)
 end, "Utility")
 
+-- Upgrades page.
+makeSectionLabel("Auto Upgrade", "Upgrades")
+makeToggle("Auto Upgrade", autoUpgradeEnabled, function(v)
+    autoUpgradeEnabled = v
+    if upgradeStatusLabel then
+        upgradeStatusLabel.Text = v and "Status: ON - watching SP and upgrade prices" or "Status: OFF"
+    end
+    log(v and "Auto Upgrade enabled" or "Auto Upgrade disabled")
+end, "Upgrades")
+
+makeButton("Select All / None", function()
+    local anyDisabled = false
+    for _, upgradeName in ipairs(UPGRADE_ORDER) do
+        if not upgradeSelected[upgradeName] then
+            anyDisabled = true
+            break
+        end
+    end
+    for _, upgradeName in ipairs(UPGRADE_ORDER) do
+        upgradeSelected[upgradeName] = anyDisabled
+    end
+    refreshUpgradesLiveOutput()
+    log(anyDisabled and "All upgrades selected" or "All upgrades deselected")
+end, "Upgrades")
+
+upgradeStatusLabel = makeSectionLabel("Status: OFF", "Upgrades")
+upgradeInfoLabel = makeSectionLabel("SP: -- | Next: --", "Upgrades")
+makeSectionLabel("Upgrade Selection (toggle + optional cap)", "Upgrades")
+
+for _, upgradeName in ipairs(UPGRADE_ORDER) do
+    makeToggle(upgradeName, upgradeSelected[upgradeName], function(v)
+        upgradeSelected[upgradeName] = v
+        refreshUpgradesLiveOutput()
+    end, "Upgrades")
+
+    makeInput(upgradeName .. " cap", "", function(text)
+        upgradeLevelCap[upgradeName] = parseUpgradeCapInput(text)
+        refreshUpgradesLiveOutput()
+        return upgradeLevelCap[upgradeName] and tostring(upgradeLevelCap[upgradeName]) or ""
+    end, "Upgrades")
+end
+
+upgradeLiveOutput = makeOutputField("Live Upgrades (Name | ON/OFF | Level | Next SP | Cap)", "Loading...", "Upgrades")
+refreshUpgradesLiveOutput()
+
 -- Settings page.
 makeSectionLabel("Performance", "Settings")
 makeToggle("Low Graphics Mode", lowGraphicsEnabled, function(v)
@@ -3009,6 +3249,67 @@ task.spawn(function()
                 end)
             elseif memoryGuardMode == "AutoQuit" then
                 pcall(function() player:Kick("AutoQuit: memory cap exceeded") end)
+            end
+        end
+    end
+end)
+
+-- Auto-upgrade worker: checks selected upgrades, chooses cheapest valid target, and buys safely.
+task.spawn(function()
+    while running do
+        task.wait(1)
+        local now = os.clock()
+
+        if now - upgradeLastStatusRefresh >= 3 then
+            upgradeLastStatusRefresh = now
+            local sp = readCurrentSkillPoints()
+            local candidates = getUpgradeCandidates()
+            local nextName = candidates[1] and candidates[1].name or "none"
+            local nextPrice = candidates[1] and tostring(math.floor(candidates[1].price)) or "--"
+            if upgradeInfoLabel then
+                upgradeInfoLabel.Text = string.format("SP: %s | Next: %s (%s SP)", sp and tostring(math.floor(sp)) or "--", nextName, nextPrice)
+            end
+            refreshUpgradesLiveOutput()
+        end
+
+        if not autoUpgradeEnabled then
+            continue
+        end
+
+        if now - upgradeLastAttemptAt < 0.9 then
+            continue
+        end
+        upgradeLastAttemptAt = now
+
+        local sp = readCurrentSkillPoints()
+        local candidates = getUpgradeCandidates()
+        local purchased = false
+
+        for _, candidate in ipairs(candidates) do
+            if (not sp) or sp >= candidate.price then
+                local result = invokeRemoteFunction("BuyUpgrade", candidate.name)
+                if result ~= false and result ~= nil then
+                    purchased = true
+                    if upgradeStatusLabel then
+                        upgradeStatusLabel.Text = string.format("Status: Bought %s (%d -> %d)", candidate.name, candidate.level, candidate.level + 1)
+                    end
+                    log(string.format("Auto Upgrade bought: %s", candidate.name))
+                    break
+                end
+            end
+        end
+
+        if (not purchased) and upgradeStatusLabel then
+            local nextCandidate = candidates[1]
+            if nextCandidate then
+                upgradeStatusLabel.Text = string.format(
+                    "Status: waiting for %s (%d SP), current SP %s",
+                    nextCandidate.name,
+                    math.floor(nextCandidate.price),
+                    sp and tostring(math.floor(sp)) or "--"
+                )
+            else
+                upgradeStatusLabel.Text = "Status: no eligible upgrades selected"
             end
         end
     end
