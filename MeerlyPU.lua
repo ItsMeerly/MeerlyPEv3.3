@@ -3511,14 +3511,4 @@ task.spawn(function()
     end
 end)
 
--- WalkSpeed enforcement worker: reapplies override if external scripts change it.
-task.spawn(function()
-    while running do
-        task.wait(0.75)
-        if walkSpeedOverrideEnabled then
-            applyWalkSpeed()
-        end
-    end
-end)
-
 log("Untitled Melee RNG Script Loaded")
