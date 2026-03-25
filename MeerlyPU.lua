@@ -50,13 +50,13 @@ local activeHitboxPreset = "Potato PC"
 local hitboxOriginalSizes = {}
 local hitboxPulseToken = 0
 local hitboxPresetScanIntervals = {
-    ["Boss Raids"] = 0.2,
+    ["Boss Raids"] = 0.1,
     ["High Performance"] = 0.2,
     ["Medium Performance"] = 0.4,
     ["Low Performance"] = 0.6,
 }
 local hitboxPresetSizes = {
-    ["Boss Raids"] = Vector3.new(150, 100, 150),
+    ["Boss Raids"] = Vector3.new(250, 200, 250),
     ["High Performance"] = Vector3.new(480, 200, 480),
     ["Medium Performance"] = Vector3.new(250, 100, 250),
     ["Low Performance"] = Vector3.new(150, 100, 150),
