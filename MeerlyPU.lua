@@ -77,6 +77,27 @@ local fusionSettings = {
     Legendary = { enabled = true, min = 8500, max = 43000 },
     Mythic = { enabled = true, min = 71000, max = 770000 },
 }
+local sacrificeAutoEnabled = false
+local sacrificeByColorEnabled = true
+local sacrificeByNameEnabled = false
+local sacrificeKeepQuantity = 2
+local sacrificeRarityCapIndex = 3
+local sacrificeSelectedNames = {}
+local sacrificeStatusOutput = nil
+local sacrificeSelectedOutput = nil
+local sacrificeLastActionOutput = nil
+local sacrificeInventory = {}
+local sacrificeTierCaps = {
+    { label = "Common (<= 5)", cap = 5 },
+    { label = "Uncommon (<= 50)", cap = 50 },
+    { label = "Rare (<= 200)", cap = 200 },
+    { label = "Epic (<= 5k)", cap = 5000 },
+    { label = "Legendary (<= 50k)", cap = 50000 },
+    { label = "Mythic (<= 1M)", cap = 1000000 },
+    { label = "Galactic (<= 7M)", cap = 7000000 },
+    { label = "Godly (<= 11M)", cap = 11000000 },
+    { label = "Omni (<= 99M)", cap = 99000000 },
+}
 
 local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
@@ -1196,11 +1217,12 @@ end
 createTab("OP Settings")
 createTab("Utility")
 createTab("Weapon Fusion")
+createTab("Sacrifice")
 createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "OP Settings", "Utility", "Weapon Fusion", "Settings", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Weapon Fusion", "Sacrifice", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -1906,6 +1928,186 @@ local function attachFusionFramesToInventory(inventory, frames)
     end
 end
 
+local function lookupWeaponOneInFromAssets(weaponName)
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    local weaponsFolder = assets and assets:FindFirstChild("Weapons")
+    if not weaponsFolder then
+        return nil
+    end
+
+    local byName = weaponsFolder:FindFirstChild(weaponName, true)
+    if not byName then
+        return nil
+    end
+
+    local oneIn = tonumber(byName:GetAttribute("OneIn"))
+    if oneIn then
+        return oneIn
+    end
+
+    local oneInValueObj = byName:FindFirstChild("OneIn", true)
+    if oneInValueObj and (oneInValueObj:IsA("IntValue") or oneInValueObj:IsA("NumberValue")) then
+        return tonumber(oneInValueObj.Value)
+    end
+
+    return nil
+end
+
+local function getSacrificeInventory()
+    local rawInventory = parseFusionInventoryRemote()
+    local parsed = {}
+
+    local function pushEntry(entry, fallbackName)
+        if type(entry) ~= "table" then
+            return
+        end
+
+        local weaponName = tostring(entry.WeaponName or entry.WepName or entry.Name or entry.ItemName or fallbackName or "Unknown")
+        weaponName = weaponName:gsub("^%s*(.-)%s*$", "%1")
+        if weaponName == "" then
+            weaponName = "Unknown"
+        end
+
+        local amount = tonumber(entry.Quantity or entry.Amount or entry.Qty or entry.ItemQty or entry.Count or entry.amount) or 1
+        amount = math.max(0, math.floor(amount))
+        local weaponType = tostring(entry.WeaponType or entry.Type or entry.ItemType or "Weapon")
+        local oneIn = tonumber(entry.OneIn or entry.Chance or entry.ItemChance) or parseOneInFromText(entry.ItemChanceText)
+        if not oneIn then
+            oneIn = lookupWeaponOneInFromAssets(weaponName)
+        end
+
+        if amount > 0 then
+            table.insert(parsed, {
+                name = weaponName,
+                amount = amount,
+                type = weaponType,
+                oneIn = oneIn or math.huge,
+            })
+        end
+    end
+
+    if type(rawInventory) == "table" then
+        if rawInventory[1] ~= nil then
+            for _, entry in ipairs(rawInventory) do
+                pushEntry(entry)
+            end
+        else
+            for key, entry in pairs(rawInventory) do
+                pushEntry(entry, key)
+            end
+        end
+    end
+
+    table.sort(parsed, function(a, b)
+        if a.oneIn == b.oneIn then
+            return a.name < b.name
+        end
+        return a.oneIn < b.oneIn
+    end)
+
+    return parsed
+end
+
+local function getSacrificeTierCap()
+    local idx = math.clamp(math.floor(tonumber(sacrificeRarityCapIndex) or 1), 1, #sacrificeTierCaps)
+    return sacrificeTierCaps[idx].cap, sacrificeTierCaps[idx].label, idx
+end
+
+local function shouldSacrificeEntry(entry)
+    if not entry or entry.amount <= 0 then
+        return false
+    end
+
+    if not (sacrificeByColorEnabled or sacrificeByNameEnabled) then
+        return false
+    end
+
+    if sacrificeByNameEnabled then
+        return sacrificeSelectedNames[entry.name] == true
+    end
+
+    if sacrificeByColorEnabled then
+        local cap = getSacrificeTierCap()
+        return (tonumber(entry.oneIn) or math.huge) <= cap
+    end
+
+    return false
+end
+
+local function updateSacrificeSelectedOutput()
+    if not sacrificeSelectedOutput then
+        return
+    end
+    local names = {}
+    for name, enabled in pairs(sacrificeSelectedNames) do
+        if enabled then
+            table.insert(names, name)
+        end
+    end
+    table.sort(names)
+    sacrificeSelectedOutput.Text = (#names > 0) and table.concat(names, "\n") or "No weapon names selected."
+end
+
+local function updateSacrificeInventoryOutput(inventory)
+    if not sacrificeStatusOutput then
+        return
+    end
+
+    local lines = {}
+    for _, item in ipairs(inventory or {}) do
+        local keepQty = math.max(0, math.floor(sacrificeKeepQuantity))
+        local canSacrificeQty = math.max(0, item.amount - keepQty)
+        local oneInDisplay = (item.oneIn and item.oneIn < math.huge) and tostring(math.floor(item.oneIn)) or "?"
+        local marker = sacrificeSelectedNames[item.name] and "✓" or " "
+        table.insert(lines, string.format("[%s] %s | OneIn %s | Owned %d | CanSac %d", marker, item.name, oneInDisplay, item.amount, canSacrificeQty))
+    end
+
+    sacrificeStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
+end
+
+local function refreshSacrificeInventory(silent)
+    sacrificeInventory = getSacrificeInventory()
+    updateSacrificeInventoryOutput(sacrificeInventory)
+    updateSacrificeSelectedOutput()
+    if (not silent) and log then
+        log(string.format("Sacrifice list refreshed (%d weapon entries)", #sacrificeInventory))
+    end
+    return sacrificeInventory
+end
+
+local function runSacrificePass()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local sacrificeRemote = remotes and remotes:FindFirstChild("FountainSacrifice")
+    if not sacrificeRemote then
+        return 0, 0, "FountainSacrifice remote not found"
+    end
+
+    local inventory = refreshSacrificeInventory(true)
+    local kept = math.max(0, math.floor(sacrificeKeepQuantity))
+    local attempted = 0
+    local succeeded = 0
+
+    for _, entry in ipairs(inventory) do
+        if shouldSacrificeEntry(entry) then
+            local toSacrifice = math.max(0, entry.amount - kept)
+            if toSacrifice > 0 then
+                attempted += 1
+                local ok, result = pcall(function()
+                    return sacrificeRemote:InvokeServer(entry.name, entry.type, toSacrifice)
+                end)
+                if ok and result ~= false then
+                    succeeded += 1
+                    if sacrificeLastActionOutput then
+                        sacrificeLastActionOutput.Text = string.format("Last sacrifice: %s x%d", entry.name, toSacrifice)
+                    end
+                end
+            end
+        end
+    end
+
+    return attempted, succeeded, nil
+end
+
 local function getWeaponInventoryForFusion()
     local frameInventory = parseFusionWeaponFrames()
     local remoteInventory = parseFusionInventoryRemote()
@@ -2421,6 +2623,80 @@ end, "Weapon Fusion")
 
 fusionStatusOutput = makeOutputField("Weapons (Weapon | OneIn | x Amount owned)", "No weapons found.", "Weapon Fusion")
 
+-- Sacrifice page.
+makeSectionLabel("Sacrifice (Fountain)", "Sacrifice")
+makeToggle("Auto Sacrifice", sacrificeAutoEnabled, function(v)
+    sacrificeAutoEnabled = v
+    log(v and "Auto Sacrifice enabled" or "Auto Sacrifice disabled")
+end, "Sacrifice")
+
+makeToggle("By color (OneIn cap)", sacrificeByColorEnabled, function(v)
+    sacrificeByColorEnabled = v
+    local cap, label = getSacrificeTierCap()
+    log(string.format("Sacrifice color filter: %s (cap %s)", v and "ON" or "OFF", label))
+    if v then
+        log(string.format("Sacrifice cap set to <= %d", cap))
+    end
+end, "Sacrifice")
+
+makeToggle("By selected names", sacrificeByNameEnabled, function(v)
+    sacrificeByNameEnabled = v
+    log(v and "Sacrifice name filter enabled (ignores color cap)" or "Sacrifice name filter disabled")
+end, "Sacrifice")
+
+makeSlider("Always keep qty", sacrificeKeepQuantity, 0, 999, function(v)
+    sacrificeKeepQuantity = v
+end, "Sacrifice")
+
+local sacrificeTierButton
+sacrificeTierButton = makeButton("Tier Cap: --", function()
+    sacrificeRarityCapIndex += 1
+    if sacrificeRarityCapIndex > #sacrificeTierCaps then
+        sacrificeRarityCapIndex = 1
+    end
+    local _, label = getSacrificeTierCap()
+    sacrificeTierButton.Text = "Tier Cap: " .. label
+    updateSacrificeInventoryOutput(sacrificeInventory)
+end, "Sacrifice")
+do
+    local _, label = getSacrificeTierCap()
+    sacrificeTierButton.Text = "Tier Cap: " .. label
+end
+
+local sacNameInputBox
+_, sacNameInputBox = makeInputWithButton("Name list toggle", "", function(text)
+    return tostring(text or "")
+end, "Toggle Name", function()
+    local weaponName = tostring((sacNameInputBox and sacNameInputBox.Text) or ""):gsub("^%s*(.-)%s*$", "%1")
+    if weaponName == "" then
+        log("Name list toggle ignored: empty weapon name")
+        return
+    end
+    sacrificeSelectedNames[weaponName] = not sacrificeSelectedNames[weaponName]
+    updateSacrificeSelectedOutput()
+    updateSacrificeInventoryOutput(sacrificeInventory)
+    log(string.format("Sacrifice name '%s' %s", weaponName, sacrificeSelectedNames[weaponName] and "added" or "removed"))
+end, "Sacrifice")
+
+makeButton("Refresh Sacrifice List", function()
+    refreshSacrificeInventory(false)
+end, "Sacrifice")
+
+makeButton("Run Sacrifice Once", function()
+    local attempted, succeeded, err = runSacrificePass()
+    if err then
+        log("Sacrifice run failed: " .. tostring(err))
+        return
+    end
+    log(string.format("Sacrifice run complete: %d attempted, %d succeeded", attempted, succeeded))
+    refreshSacrificeInventory(true)
+end, "Sacrifice")
+
+sacrificeLastActionOutput = makeSectionLabel("Last sacrifice: --", "Sacrifice")
+sacrificeStatusOutput = makeOutputField("Inventory (✓ selected | OneIn | Owned | CanSac)", "No weapons found.", "Sacrifice")
+sacrificeSelectedOutput = makeOutputField("Selected weapon names", "No weapon names selected.", "Sacrifice")
+refreshSacrificeInventory(true)
+
 makeSlider("GC Sweep", gcSweepInterval, 10, 300, function(v)
     gcSweepInterval = v
     log(string.format("GC sweep interval set: %ds", gcSweepInterval))
@@ -2822,6 +3098,24 @@ task.spawn(function()
             runWeaponFusionPass(silent)
         end)
         task.wait(autoFusionEnabled and 2 or 5)
+    end
+end)
+
+task.spawn(function()
+    while running do
+        if sacrificeAutoEnabled then
+            local attempted, succeeded, err = runSacrificePass()
+            if err then
+                log("Auto Sacrifice error: " .. tostring(err))
+            else
+                log(string.format("Auto Sacrifice: %d attempted, %d succeeded", attempted, succeeded))
+            end
+            refreshSacrificeInventory(true)
+            task.wait(1.5)
+        else
+            refreshSacrificeInventory(true)
+            task.wait(5)
+        end
     end
 end)
 
