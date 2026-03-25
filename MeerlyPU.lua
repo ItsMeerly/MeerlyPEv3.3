@@ -1732,13 +1732,13 @@ local function parseWeaponInventoryFromFrame()
     local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
     local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
-    local weaponsFrame = generalUi and generalUi:FindFirstChild("WeaponsFrame")
-    local weaponsScroll = weaponsFrame and weaponsFrame:FindFirstChild("ScrollingFrame")
-    if not weaponsScroll then
+    local fuseFrame = generalUi and generalUi:FindFirstChild("FuseFrame")
+    local fuseScroll = fuseFrame and fuseFrame:FindFirstChild("ScrollingFrame")
+    if not fuseScroll then
         return parsed
     end
 
-    for _, descendant in ipairs(weaponsScroll:GetDescendants()) do
+    for _, descendant in ipairs(fuseScroll:GetDescendants()) do
         if descendant:IsA("Frame") and descendant.Name == "WeaponFrame" then
             local chanceLabel = descendant:FindFirstChild("ItemChance", true)
             local nameLabel = descendant:FindFirstChild("ItemName", true)
@@ -1752,6 +1752,25 @@ local function parseWeaponInventoryFromFrame()
                     oneIn = oneIn or 0,
                     amount = math.max(1, qty or 1),
                 })
+            end
+        end
+    end
+    return parsed
+end
+
+local function normalizeWeaponInventory(rawInventory)
+    local parsed = {}
+    if type(rawInventory) ~= "table" then
+        return parsed
+    end
+
+    for key, item in pairs(rawInventory) do
+        if type(item) == "table" then
+            local weaponName = item.WeaponName or item.Name or item.ItemName or key
+            local amount = tonumber(item.Amount or item.Qty or item.ItemQty or item.Count) or 1
+            local oneIn = tonumber(item.OneIn or item.Chance or item.ItemChance) or parseOneInFromText(item.ItemChanceText)
+            if (not oneIn) and type(item.RarityText) == "string" then
+                oneIn = parseOneInFromText(item.RarityText)
             end
         end
     end
@@ -1797,7 +1816,7 @@ local function updateFusionStatusOutput(inventory)
     end
     local lines = {}
     for _, item in ipairs(inventory or {}) do
-        table.insert(lines, string.format("%s | %s | x%d", tostring(item.name), tostring(item.oneIn), tonumber(item.amount) or 1))
+        table.insert(lines, string.format("%s | One In %s | x%d", tostring(item.name), tostring(item.oneIn), tonumber(item.amount) or 1))
     end
     fusionStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
 end
