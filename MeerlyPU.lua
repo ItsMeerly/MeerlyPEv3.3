@@ -50,13 +50,13 @@ local activeHitboxPreset = "Potato PC"
 local hitboxOriginalSizes = {}
 local hitboxPulseToken = 0
 local hitboxPresetScanIntervals = {
-    ["Boss Raids"] = 0.1,
+    ["Boss Raids"] = 0.2,
     ["High Performance"] = 0.2,
     ["Medium Performance"] = 0.4,
     ["Low Performance"] = 0.6,
 }
 local hitboxPresetSizes = {
-    ["Boss Raids"] = Vector3.new(100, 200, 100),
+    ["Boss Raids"] = Vector3.new(150, 100, 150),
     ["High Performance"] = Vector3.new(480, 200, 480),
     ["Medium Performance"] = Vector3.new(250, 100, 250),
     ["Low Performance"] = Vector3.new(150, 100, 150),
@@ -1726,34 +1726,70 @@ local function parseOneInFromText(raw)
     return nil
 end
 
-local function parseWeaponInventoryFromFrame()
-    local parsed = {}
+local function readGuiText(node)
+    if not node then
+        return ""
+    end
+
+    local textValue = ""
+    pcall(function()
+        textValue = tostring(node.Text or "")
+    end)
+
+    if textValue == "" then
+        pcall(function()
+            textValue = tostring(node.ContentText or "")
+        end)
+    end
+
+    return textValue
+end
+
+local function resolveFusionScrollFrame()
     local localPlayer = Players.LocalPlayer
     local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
     local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
-    local fuseFrame = generalUi and generalUi:FindFirstChild("FuseFrame")
-    local fuseScroll = fuseFrame and fuseFrame:FindFirstChild("ScrollingFrame")
+    if not generalUi then
+        return nil
+    end
+
+    local fuseFrame = generalUi:FindFirstChild("FuseFrame") or generalUi:FindFirstChild("FuseFrame", true)
+    if not fuseFrame then
+        return nil
+    end
+
+    return fuseFrame:FindFirstChild("ScrollingFrame") or fuseFrame:FindFirstChild("ScrollingFrame", true)
+end
+
+local function parseWeaponInventoryFromFrame()
+    local parsed = {}
+    local fuseScroll = resolveFusionScrollFrame()
     if not fuseScroll then
         return parsed
     end
 
-    for _, child in ipairs(fuseScroll:GetChildren()) do
+    for _, child in ipairs(fuseScroll:GetDescendants()) do
         if child:IsA("GuiObject") and child.Name == "WeaponFrame" then
             local chanceLabel = child:FindFirstChild("ItemChance", true)
             local nameLabel = child:FindFirstChild("ItemName", true)
             local qtyLabel = child:FindFirstChild("ItemQuantity", true) or child:FindFirstChild("ItemQty", true)
-            local oneIn = chanceLabel and parseOneInFromText(chanceLabel.Text)
-            local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 0
-            local weaponName = (nameLabel and nameLabel.Text or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
-            if qty >= 3 and (not weaponName:match("Fused%s*$")) then
-                table.insert(parsed, {
-                    name = weaponName,
-                    oneIn = oneIn or 0,
-                    amount = qty,
-                    frame = child,
-                })
+            local chanceText = readGuiText(chanceLabel)
+            if chanceText == "" then
+                chanceText = "Unknown"
             end
+            local oneIn = parseOneInFromText(chanceText)
+            local qtyText = readGuiText(qtyLabel)
+            local qty = tonumber((qtyText):gsub("[^%d]", "")) or 0
+            local weaponName = readGuiText(nameLabel)
+            weaponName = weaponName ~= "" and weaponName:gsub("^%s*(.-)%s*$", "%1") or "Unknown"
+            table.insert(parsed, {
+                name = weaponName,
+                oneIn = oneIn or 0,
+                oneInRaw = chanceText,
+                amount = qty,
+                frame = child,
+            })
         end
     end
     return parsed
@@ -1817,9 +1853,19 @@ local function updateFusionStatusOutput(inventory)
     end
     local lines = {}
     for _, item in ipairs(inventory or {}) do
-        table.insert(lines, string.format("%s | One In %s | x%d", tostring(item.name), tostring(item.oneIn), tonumber(item.amount) or 1))
+        local oneInDisplay = item.oneInRaw and item.oneInRaw ~= "" and item.oneInRaw or tostring(item.oneIn)
+        table.insert(lines, string.format("%s | One In %s | x%d", tostring(item.name), tostring(oneInDisplay), tonumber(item.amount) or 0))
     end
     fusionStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
+end
+
+local function resolveFuseConfirmButton()
+    local localPlayer = Players.LocalPlayer
+    local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
+    local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
+    local fuseConfirm = generalUi and generalUi:FindFirstChild("FuseConfirm")
+    return fuseConfirm and fuseConfirm:FindFirstChild("FuseBtn", true)
 end
 
 local function tryFuseViaUiButton(entry)
@@ -1828,10 +1874,10 @@ local function tryFuseViaUiButton(entry)
         return false
     end
 
-    local fuseButton = frame:FindFirstChild("FuseButton", true)
+    local fuseButton = frame:FindFirstChild("Btn", true)
     if not fuseButton then
         for _, obj in ipairs(frame:GetDescendants()) do
-            if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and string.find(string.lower(obj.Name), "fuse", 1, true) then
+            if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and string.lower(obj.Name) == "btn" then
                 fuseButton = obj
                 break
             end
@@ -1842,48 +1888,30 @@ local function tryFuseViaUiButton(entry)
         return false
     end
 
-    local ok = pcall(function()
+    local okSelect = pcall(function()
         fuseButton:Activate()
     end)
-    return ok
+    if not okSelect then
+        return false
+    end
+
+    task.wait(0.1)
+    local confirmButton = resolveFuseConfirmButton()
+    if not (confirmButton and (confirmButton:IsA("TextButton") or confirmButton:IsA("ImageButton"))) then
+        return false
+    end
+
+    local okConfirm = pcall(function()
+        confirmButton:Activate()
+    end)
+    return okConfirm
 end
 
 local function tryFuseWeaponsFromInventory(inventory)
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local fuseRemote = remotes and remotes:FindFirstChild("FuseWeapons")
-
     local fusedCount = 0
     for _, item in ipairs(inventory) do
         if shouldFuseWeaponEntry(item) then
-            local didFuse = false
-
-            if fuseRemote then
-                local attemptArgs = {
-                    { item.name },
-                    { item.name, 3 },
-                    { item.name, item.amount },
-                    { item.name, item.oneIn, item.amount },
-                }
-                for _, args in ipairs(attemptArgs) do
-                    local ok, result = pcall(function()
-                        if fuseRemote:IsA("RemoteFunction") then
-                            return fuseRemote:InvokeServer(unpack(args))
-                        end
-                        fuseRemote:FireServer(unpack(args))
-                        return true
-                    end)
-                    if ok and result ~= false then
-                        didFuse = true
-                        break
-                    end
-                end
-            end
-
-            if (not didFuse) and tryFuseViaUiButton(item) then
-                didFuse = true
-            end
-
-            if didFuse then
+            if tryFuseViaUiButton(item) then
                 fusedCount += 1
                 task.wait(0.3)
             end
