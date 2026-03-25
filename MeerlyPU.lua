@@ -138,9 +138,12 @@ local disable3D = false
 local muteSounds = false
 local hideDisappearEntities = false
 local cullMobPartsEnabled = false
-local hideManaKillsEnabled = false
-local hideMiniRollEnabled = false
-local hideHudEnabled = false
+local uiUtilityState = {
+    hideManaKillsEnabled = false,
+    hideMiniRollEnabled = false,
+    hideHudEnabled = false,
+    originalVisibility = {},
+}
 local disappearOriginalName = "Disappear"
 local disappearRenamedName = "Disappear123"
 local renamedDisappearInstance = nil
@@ -2686,8 +2689,6 @@ function resolveMainGui()
     return mainGui
 end
 
-local uiUtilityOriginalVisibility = {}
-
 local function resolveGeneralUi()
     local mainGui, reason = resolveMainGui()
     if not mainGui then
@@ -2715,8 +2716,8 @@ local function setGeneralUiFrameVisible(frameName, enabled, rememberOriginal)
         return false
     end
 
-    if rememberOriginal and uiUtilityOriginalVisibility[frameName] == nil then
-        uiUtilityOriginalVisibility[frameName] = frame.Visible
+    if rememberOriginal and uiUtilityState.originalVisibility[frameName] == nil then
+        uiUtilityState.originalVisibility[frameName] = frame.Visible
     end
 
     local ok, err = pcall(function()
@@ -2737,7 +2738,7 @@ local function setManaKillsHidden(hidden)
 end
 
 local function resetUiUtilitiesVisibility()
-    for frameName, originalState in pairs(uiUtilityOriginalVisibility) do
+    for frameName, originalState in pairs(uiUtilityState.originalVisibility) do
         if frameName == "GeneralUI" then
             local generalUi = resolveGeneralUi()
             if generalUi then
@@ -2747,9 +2748,9 @@ local function resetUiUtilitiesVisibility()
             setGeneralUiFrameVisible(frameName, originalState, false)
         end
     end
-    hideManaKillsEnabled = false
-    hideMiniRollEnabled = false
-    hideHudEnabled = false
+    uiUtilityState.hideManaKillsEnabled = false
+    uiUtilityState.hideMiniRollEnabled = false
+    uiUtilityState.hideHudEnabled = false
 end
 
 -- ---- Feature wiring (UI -> behavior) ----
@@ -2868,26 +2869,26 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
 end, "Utility")
 
 makeSectionLabel("UI Utilities", "Utility")
-makeToggle("Hide Mana / Kills", hideManaKillsEnabled, function(v)
-    hideManaKillsEnabled = v
+makeToggle("Hide Mana / Kills", uiUtilityState.hideManaKillsEnabled, function(v)
+    uiUtilityState.hideManaKillsEnabled = v
     setManaKillsHidden(v)
 end, "Utility")
 
-makeToggle("Hide Mini-Roll", hideMiniRollEnabled, function(v)
-    hideMiniRollEnabled = v
+makeToggle("Hide Mini-Roll", uiUtilityState.hideMiniRollEnabled, function(v)
+    uiUtilityState.hideMiniRollEnabled = v
     setGeneralUiFrameVisible("MiniRollFrame", not v, true)
 end, "Utility")
 
-makeToggle("Hide HUD", hideHudEnabled, function(v)
-    hideHudEnabled = v
+makeToggle("Hide HUD", uiUtilityState.hideHudEnabled, function(v)
+    uiUtilityState.hideHudEnabled = v
     local generalUi, reason = resolveGeneralUi()
     if not generalUi then
         log("Hide HUD toggle failed: " .. tostring(reason))
         return
     end
 
-    if uiUtilityOriginalVisibility.GeneralUI == nil then
-        uiUtilityOriginalVisibility.GeneralUI = generalUi.Visible
+    if uiUtilityState.originalVisibility.GeneralUI == nil then
+        uiUtilityState.originalVisibility.GeneralUI = generalUi.Visible
     end
     generalUi.Visible = not v
 end, "Utility")
