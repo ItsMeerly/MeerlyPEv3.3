@@ -79,14 +79,12 @@ local fusionSettings = {
 }
 local sacrificeAutoEnabled = false
 local sacrificeByColorEnabled = true
-local sacrificeByNameEnabled = false
 local sacrificeKeepQuantity = 2
 local sacrificeRarityCapIndex = 3
-local sacrificeSelectedNames = {}
 local sacrificeStatusOutput = nil
-local sacrificeSelectedOutput = nil
 local sacrificeLastActionOutput = nil
 local sacrificeInventory = {}
+local weaponFusionTabEnabled = false
 local sacrificeTierCaps = {
     { label = "Common (<= 5)", cap = 5 },
     { label = "Uncommon (<= 50)", cap = 50 },
@@ -1216,13 +1214,12 @@ end
 
 createTab("OP Settings")
 createTab("Utility")
-createTab("Weapon Fusion")
 createTab("Sacrifice")
 createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "OP Settings", "Utility", "Weapon Fusion", "Sacrifice", "Settings", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Sacrifice", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -2018,34 +2015,12 @@ local function shouldSacrificeEntry(entry)
         return false
     end
 
-    if not (sacrificeByColorEnabled or sacrificeByNameEnabled) then
+    if not sacrificeByColorEnabled then
         return false
     end
 
-    if sacrificeByNameEnabled then
-        return sacrificeSelectedNames[entry.name] == true
-    end
-
-    if sacrificeByColorEnabled then
-        local cap = getSacrificeTierCap()
-        return (tonumber(entry.oneIn) or math.huge) <= cap
-    end
-
-    return false
-end
-
-local function updateSacrificeSelectedOutput()
-    if not sacrificeSelectedOutput then
-        return
-    end
-    local names = {}
-    for name, enabled in pairs(sacrificeSelectedNames) do
-        if enabled then
-            table.insert(names, name)
-        end
-    end
-    table.sort(names)
-    sacrificeSelectedOutput.Text = (#names > 0) and table.concat(names, "\n") or "No weapon names selected."
+    local cap = getSacrificeTierCap()
+    return (tonumber(entry.oneIn) or math.huge) <= cap
 end
 
 local function updateSacrificeInventoryOutput(inventory)
@@ -2058,17 +2033,21 @@ local function updateSacrificeInventoryOutput(inventory)
         local keepQty = math.max(0, math.floor(sacrificeKeepQuantity))
         local canSacrificeQty = math.max(0, item.amount - keepQty)
         local oneInDisplay = (item.oneIn and item.oneIn < math.huge) and tostring(math.floor(item.oneIn)) or "?"
-        local marker = sacrificeSelectedNames[item.name] and "✓" or " "
-        table.insert(lines, string.format("[%s] %s | OneIn %s | Owned %d | CanSac %d", marker, item.name, oneInDisplay, item.amount, canSacrificeQty))
+        table.insert(lines, string.format("%s | OneIn %s | Owned %d | CanSac %d", item.name, oneInDisplay, item.amount, canSacrificeQty))
     end
 
     sacrificeStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
+    local container = sacrificeStatusOutput.Parent
+    if container then
+        local lineCount = math.max(6, #lines)
+        local dynamicHeight = math.clamp(36 + (lineCount * 14), 168, 780)
+        container.Size = UDim2.new(1, -4, 0, dynamicHeight)
+    end
 end
 
 local function refreshSacrificeInventory(silent)
     sacrificeInventory = getSacrificeInventory()
     updateSacrificeInventoryOutput(sacrificeInventory)
-    updateSacrificeSelectedOutput()
     if (not silent) and log then
         log(string.format("Sacrifice list refreshed (%d weapon entries)", #sacrificeInventory))
     end
@@ -2601,27 +2580,29 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
 end, "Utility")
 
 -- Weapon Fusion page.
-makeSectionLabel("Weapon Fusion", "Weapon Fusion")
-makeToggle("Auto Fusion On/Off", autoFusionEnabled, function(v)
-    autoFusionEnabled = v
-    log(v and "Weapon Fusion enabled" or "Weapon Fusion disabled")
-end, "Weapon Fusion")
+if weaponFusionTabEnabled then
+    makeSectionLabel("Weapon Fusion", "Weapon Fusion")
+    makeToggle("Auto Fusion On/Off", autoFusionEnabled, function(v)
+        autoFusionEnabled = v
+        log(v and "Weapon Fusion enabled" or "Weapon Fusion disabled")
+    end, "Weapon Fusion")
 
-for _, category in ipairs({ "All", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }) do
-    local config = fusionSettings[category]
-    if config then
-        makeToggle(string.format("%s OneIn Enabled", category), config.enabled, function(v)
-            config.enabled = v
-        end, "Weapon Fusion")
+    for _, category in ipairs({ "All", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }) do
+        local config = fusionSettings[category]
+        if config then
+            makeToggle(string.format("%s OneIn Enabled", category), config.enabled, function(v)
+                config.enabled = v
+            end, "Weapon Fusion")
+        end
     end
+
+    makeButton("Refresh Weapon Fusion List", function()
+        local inventory = runWeaponFusionPass(true)
+        log(string.format("Weapon Fusion list refreshed (%d entries)", #inventory))
+    end, "Weapon Fusion")
+
+    fusionStatusOutput = makeOutputField("Weapons (Weapon | OneIn | x Amount owned)", "No weapons found.", "Weapon Fusion")
 end
-
-makeButton("Refresh Weapon Fusion List", function()
-    local inventory = runWeaponFusionPass(true)
-    log(string.format("Weapon Fusion list refreshed (%d entries)", #inventory))
-end, "Weapon Fusion")
-
-fusionStatusOutput = makeOutputField("Weapons (Weapon | OneIn | x Amount owned)", "No weapons found.", "Weapon Fusion")
 
 -- Sacrifice page.
 makeSectionLabel("Sacrifice (Fountain)", "Sacrifice")
@@ -2630,7 +2611,7 @@ makeToggle("Auto Sacrifice", sacrificeAutoEnabled, function(v)
     log(v and "Auto Sacrifice enabled" or "Auto Sacrifice disabled")
 end, "Sacrifice")
 
-makeToggle("By color (OneIn cap)", sacrificeByColorEnabled, function(v)
+makeToggle("By Rarity (OneIn Cap)", sacrificeByColorEnabled, function(v)
     sacrificeByColorEnabled = v
     local cap, label = getSacrificeTierCap()
     log(string.format("Sacrifice color filter: %s (cap %s)", v and "ON" or "OFF", label))
@@ -2639,13 +2620,11 @@ makeToggle("By color (OneIn cap)", sacrificeByColorEnabled, function(v)
     end
 end, "Sacrifice")
 
-makeToggle("By selected names", sacrificeByNameEnabled, function(v)
-    sacrificeByNameEnabled = v
-    log(v and "Sacrifice name filter enabled (ignores color cap)" or "Sacrifice name filter disabled")
-end, "Sacrifice")
-
-makeSlider("Always keep qty", sacrificeKeepQuantity, 0, 999, function(v)
-    sacrificeKeepQuantity = v
+makeInput("Always Keep Qty", tostring(sacrificeKeepQuantity), function(text)
+    local value = math.floor(tonumber(text) or sacrificeKeepQuantity)
+    sacrificeKeepQuantity = math.max(0, value)
+    updateSacrificeInventoryOutput(sacrificeInventory)
+    return tostring(sacrificeKeepQuantity)
 end, "Sacrifice")
 
 local sacrificeTierButton
@@ -2663,21 +2642,6 @@ do
     sacrificeTierButton.Text = "Tier Cap: " .. label
 end
 
-local sacNameInputBox
-_, sacNameInputBox = makeInputWithButton("Name list toggle", "", function(text)
-    return tostring(text or "")
-end, "Toggle Name", function()
-    local weaponName = tostring((sacNameInputBox and sacNameInputBox.Text) or ""):gsub("^%s*(.-)%s*$", "%1")
-    if weaponName == "" then
-        log("Name list toggle ignored: empty weapon name")
-        return
-    end
-    sacrificeSelectedNames[weaponName] = not sacrificeSelectedNames[weaponName]
-    updateSacrificeSelectedOutput()
-    updateSacrificeInventoryOutput(sacrificeInventory)
-    log(string.format("Sacrifice name '%s' %s", weaponName, sacrificeSelectedNames[weaponName] and "added" or "removed"))
-end, "Sacrifice")
-
 makeButton("Refresh Sacrifice List", function()
     refreshSacrificeInventory(false)
 end, "Sacrifice")
@@ -2693,8 +2657,7 @@ makeButton("Run Sacrifice Once", function()
 end, "Sacrifice")
 
 sacrificeLastActionOutput = makeSectionLabel("Last sacrifice: --", "Sacrifice")
-sacrificeStatusOutput = makeOutputField("Inventory (✓ selected | OneIn | Owned | CanSac)", "No weapons found.", "Sacrifice")
-sacrificeSelectedOutput = makeOutputField("Selected weapon names", "No weapon names selected.", "Sacrifice")
+sacrificeStatusOutput = makeOutputField("Inventory (Weapon | OneIn | Owned | CanSac)", "No weapons found.", "Sacrifice")
 refreshSacrificeInventory(true)
 
 makeSlider("GC Sweep", gcSweepInterval, 10, 300, function(v)
