@@ -1729,21 +1729,20 @@ end
 local function parseWeaponInventoryFromFrame()
     local parsed = {}
     local localPlayer = Players.LocalPlayer
-    local weaponsScroll = localPlayer
-        and localPlayer:FindFirstChild("PlayerGui")
-        and localPlayer.PlayerGui:FindFirstChild("MainGUI")
-    weaponsScroll = weaponsScroll and weaponsScroll:FindFirstChild("GeneralUI")
-    weaponsScroll = weaponsScroll and weaponsScroll:FindFirstChild("WeaponsFrame")
-    weaponsScroll = weaponsScroll and weaponsScroll:FindFirstChild("ScrollingFrame")
+    local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
+    local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
+    local weaponsFrame = generalUi and generalUi:FindFirstChild("WeaponsFrame")
+    local weaponsScroll = weaponsFrame and weaponsFrame:FindFirstChild("ScrollingFrame")
     if not weaponsScroll then
         return parsed
     end
 
-    for _, descendant in ipairs(weaponsScroll:GetChildren()) do
-        if descendant.Name == "WeaponFrame" then
-            local chanceLabel = descendant:FindFirstChild("ItemChance")
-            local nameLabel = descendant:FindFirstChild("ItemName")
-            local qtyLabel = descendant:FindFirstChild("ItemQty")
+    for _, descendant in ipairs(weaponsScroll:GetDescendants()) do
+        if descendant:IsA("Frame") and descendant.Name == "WeaponFrame" then
+            local chanceLabel = descendant:FindFirstChild("ItemChance", true)
+            local nameLabel = descendant:FindFirstChild("ItemName", true)
+            local qtyLabel = descendant:FindFirstChild("ItemQty", true)
             local oneIn = chanceLabel and parseOneInFromText(chanceLabel.Text)
             local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 0
             local weaponName = (nameLabel and nameLabel.Text or descendant.Name):gsub("^%s*(.-)%s*$", "%1")
