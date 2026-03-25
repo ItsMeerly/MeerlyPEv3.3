@@ -41,6 +41,22 @@ local streamingOptimized = false
 local aggressiveFxCullEnabled = false
 local hideTrackedWeaponParts = false
 local hitboxEnlargerEnabled = false
+local hitboxPresetRows = {}
+local hitboxPresetSelection = "Potato PC"
+local activeHitboxPreset = "Potato PC"
+local hitboxPresetScanIntervals = {
+    ["Boss Raids"] = 0.1,
+    ["High Performance"] = 0.2,
+    ["Medium Performance"] = 0.4,
+    ["Low Performance"] = 0.6,
+}
+local hitboxPresetSizes = {
+    ["Boss Raids"] = Vector3.new(100, 200, 100),
+    ["High Performance"] = Vector3.new(480, 200, 480),
+    ["Medium Performance"] = Vector3.new(250, 100, 250),
+    ["Low Performance"] = Vector3.new(150, 100, 150),
+    ["Potato PC"] = Vector3.new(1000, 300, 1000),
+}
 local hideOtherPlayersWeapons = false
 local otherPlayersHidePassSeconds = 10
 local walkSpeedOverrideEnabled = false
@@ -479,89 +495,54 @@ local function isTargetHitboxEntity(part)
     return attachmentCount == 2 and trailCount == 1
 end
 
-local function applyHitboxEnlarger()
+local function applyHitboxEnlarger(presetName)
     if not hitboxEnlargerEnabled then
         return
     end
 
-    local firstWeapon = orderedTrackedWeapons[1]
-    if not firstWeapon or firstWeapon.Parent ~= trackedCharacter then
+    local targetPreset = presetName or activeHitboxPreset or "Potato PC"
+    local targetSize = hitboxPresetSizes[targetPreset]
+    if not targetSize then
+        return
+    end
+
+    if not trackedCharacter or not trackedCharacter.Parent then
         return
     end
 
     local enlargedCount = 0
-    if isTargetHitboxEntity(firstWeapon) then
-        firstWeapon.Size = Vector3.new(1000, 300, 1000)
-        enlargedCount += 1
-    end
+    local scannedWeapons = 0
 
-    for _, descendant in ipairs(firstWeapon:GetDescendants()) do
-        if isTargetHitboxEntity(descendant) then
-            descendant.Size = Vector3.new(1000, 300, 1000)
-            enlargedCount += 1
+    for _, weapon in ipairs(orderedTrackedWeapons) do
+        if weapon and weapon.Parent == trackedCharacter then
+            scannedWeapons += 1
+
+            if isTargetHitboxEntity(weapon) then
+                weapon.Size = targetSize
+                enlargedCount += 1
+            end
+
+            for _, descendant in ipairs(weapon:GetDescendants()) do
+                if isTargetHitboxEntity(descendant) then
+                    descendant.Size = targetSize
+                    enlargedCount += 1
+                end
+            end
         end
     end
 
     if enlargedCount > 0 then
-        log(string.format("Hitbox enlarger applied on %s (%d hitbox parts)", firstWeapon.Name, enlargedCount))
+        log(string.format(
+            "Hitbox [%s] scan complete: %d weapons, %d hitboxes @ %.0f, %.0f, %.0f",
+            targetPreset,
+            scannedWeapons,
+            enlargedCount,
+            targetSize.X,
+            targetSize.Y,
+            targetSize.Z
+        ))
     else
-        log("Hitbox enlarger found no matching Hitbox part on first tracked weapon")
-    end
-end
-
-local function isTargetHitboxEntity(part)
-    if not part:IsA("BasePart") or part.Name ~= "Hitbox" then
-        return false
-    end
-
-    local children = part:GetChildren()
-    if #children ~= 3 then
-        return false
-    end
-
-    local attachmentCount = 0
-    local trailCount = 0
-
-    for _, child in ipairs(children) do
-        if child:IsA("Attachment") and child.Name == "Attachment" then
-            attachmentCount += 1
-        elseif child:IsA("Trail") and child.Name == "Trail" then
-            trailCount += 1
-        else
-            return false
-        end
-    end
-
-    return attachmentCount == 2 and trailCount == 1
-end
-
-local function applyHitboxEnlarger()
-    if not hitboxEnlargerEnabled then
-        return
-    end
-
-    local firstWeapon = orderedTrackedWeapons[1]
-    if not firstWeapon or firstWeapon.Parent ~= trackedCharacter then
-        return
-    end
-
-    local enlargedCount = 0
-    if isTargetHitboxEntity(firstWeapon) then
-        firstWeapon.Size = Vector3.new(1000, 300, 1000)
-        enlargedCount += 1
-    end
-
-    for _, descendant in ipairs(firstWeapon:GetDescendants()) do
-        if isTargetHitboxEntity(descendant) then
-            descendant.Size = Vector3.new(1000, 300, 1000)
-            enlargedCount += 1
-        end
-    end
-
-    if enlargedCount > 0 then
-        log(string.format("Hitbox enlarger applied on %s (%d hitbox parts)", firstWeapon.Name, enlargedCount))
-    else
-        log("Hitbox enlarger found no matching Hitbox part on first tracked weapon")
+        log(string.format("Hitbox [%s] scan found no matching hitboxes", targetPreset))
     end
 end
 
@@ -1243,6 +1224,93 @@ local function makeToggle(labelText, default, callback, tabName)
     }
 end
 
+local function setHitboxPresetSelection(presetName)
+    hitboxPresetSelection = presetName
+    for key, row in pairs(hitboxPresetRows) do
+        if row and row.setState then
+            row.setState(key == presetName)
+        end
+    end
+end
+
+local function makeHitboxPresetRow(labelText, presetName, tabName)
+    tabName = tabName or currentTabName
+    local row = newRow(34, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(0.42, -10, 1, 0)
+    label.Position = UDim2.fromOffset(10, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = uiTheme.text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Parent = row
+    toggleButton.Size = UDim2.new(0.20, -6, 1, -8)
+    toggleButton.Position = UDim2.new(0.45, 0, 0, 4)
+    toggleButton.BorderSizePixel = 0
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.TextSize = 11
+    makeCorner(toggleButton, 5)
+
+    local scanButton = Instance.new("TextButton")
+    scanButton.Parent = row
+    scanButton.Size = UDim2.new(0.26, -8, 1, -8)
+    scanButton.Position = UDim2.new(0.70, 0, 0, 4)
+    scanButton.BackgroundColor3 = uiTheme.accent
+    scanButton.BorderSizePixel = 0
+    scanButton.Font = Enum.Font.GothamBold
+    scanButton.TextSize = 11
+    scanButton.TextColor3 = Color3.fromRGB(10, 10, 12)
+    scanButton.Text = "Scan"
+    makeCorner(scanButton, 5)
+
+    local state = presetName == hitboxPresetSelection
+    local function refresh()
+        toggleButton.Text = state and "ON" or "OFF"
+        toggleButton.BackgroundColor3 = state and uiTheme.accent or Color3.fromRGB(70, 70, 82)
+        toggleButton.TextColor3 = state and Color3.fromRGB(10, 10, 12) or uiTheme.text
+    end
+
+    toggleButton.MouseButton1Click:Connect(function()
+        if hitboxPresetSelection == presetName then
+            log(string.format("'%s' stays selected (pick another mode to switch)", presetName))
+            state = true
+        else
+            state = true
+            setHitboxPresetSelection(presetName)
+        end
+        refresh()
+    end)
+
+    scanButton.MouseButton1Click:Connect(function()
+        if hitboxPresetSelection ~= presetName then
+            log(string.format("Select '%s' toggle before scanning", presetName))
+            return
+        end
+
+        activeHitboxPreset = presetName
+        hitboxEnlargerEnabled = true
+        runSelfWeaponPass(string.format("Hitbox mode activated: %s", presetName))
+    end)
+
+    refresh()
+
+    hitboxPresetRows[presetName] = {
+        setState = function(v)
+            state = v == true
+            refresh()
+        end,
+        getState = function()
+            return state
+        end,
+    }
+end
+
 -- Generic input row factory.
 -- What: commits value on focus loss, allowing validation/coercion in onCommit.
 -- Why: avoids duplicated textbox plumbing for each numeric setting.
@@ -1811,10 +1879,13 @@ end
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- OP Settings page.
-makeToggle("Hitbox Enlarger", hitboxEnlargerEnabled, function(v)
-    hitboxEnlargerEnabled = v
-    runSelfWeaponPass(v and "Hitbox enlarger enabled" or "Hitbox enlarger disabled")
-end, "OP Settings")
+makeSectionLabel("Hitbox Expander Modes", "OP Settings")
+makeHitboxPresetRow("Boss Raids", "Boss Raids", "OP Settings")
+makeHitboxPresetRow("High Performance", "High Performance", "OP Settings")
+makeHitboxPresetRow("Medium Performance", "Medium Performance", "OP Settings")
+makeHitboxPresetRow("Low Performance", "Low Performance", "OP Settings")
+makeHitboxPresetRow("Potato PC", "Potato PC", "OP Settings")
+setHitboxPresetSelection("Potato PC")
 
 makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
     setDisappearHider(v)
@@ -2257,6 +2328,20 @@ task.spawn(function()
             end
         end
         pruneTrackedWeaponStateTables()
+    end
+end)
+
+-- Hitbox mode worker: runs mode-specific scan cadence for non-potato presets.
+task.spawn(function()
+    while running do
+        local preset = activeHitboxPreset
+        local interval = hitboxPresetScanIntervals[preset]
+        if hitboxEnlargerEnabled and interval then
+            runSelfWeaponPass(nil, { rescan = true })
+            task.wait(interval)
+        else
+            task.wait(0.1)
+        end
     end
 end)
 
