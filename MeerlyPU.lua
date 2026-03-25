@@ -2452,7 +2452,7 @@ memoryText.TextSize = 13
 memoryText.TextColor3 = uiTheme.text
 memoryText.Text = "Memory: --"
 
-local function resolveDisappearController()
+function resolveDisappearController()
     local playerScripts = player:FindFirstChild("PlayerScripts")
     if not playerScripts then
         return nil, "PlayerScripts not found"
@@ -2481,7 +2481,7 @@ local function resolveDisappearController()
     return nil, "Disappear root not found"
 end
 
-local function setDisappearHider(enabled)
+function setDisappearHider(enabled)
     hideDisappearEntities = enabled
 
     local disappearNode, reason = resolveDisappearController()
@@ -2529,7 +2529,7 @@ local function setDisappearHider(enabled)
     end
 end
 
-local function isBossMobPart(part)
+function isBossMobPart(part)
     local cursor = part
     while cursor and cursor ~= ReplicatedStorage do
         local lowerName = string.lower(cursor.Name)
@@ -2541,7 +2541,7 @@ local function isBossMobPart(part)
     return false
 end
 
-local function resolveMobsAssetsFolder()
+function resolveMobsAssetsFolder()
     local assets = ReplicatedStorage:FindFirstChild("Assets")
     if not assets then
         return nil, "ReplicatedStorage.Assets not found"
@@ -2555,7 +2555,7 @@ local function resolveMobsAssetsFolder()
     return mobs
 end
 
-local function hideMobPart(part)
+function hideMobPart(part)
     if hiddenMobPartsState[part] or isBossMobPart(part) then
         return false
     end
@@ -2571,7 +2571,7 @@ local function hideMobPart(part)
     return true
 end
 
-local function restoreHiddenMobParts()
+function restoreHiddenMobParts()
     local restored = 0
     for part, state in pairs(hiddenMobPartsState) do
         if part and part.Parent == nil and state and state.parent and state.parent.Parent then
@@ -2585,7 +2585,7 @@ local function restoreHiddenMobParts()
     return restored
 end
 
-local function applyMobPartsCull(enabled)
+function applyMobPartsCull(enabled)
     cullMobPartsEnabled = enabled
 
     if mobsAssetsConnection then
@@ -2622,7 +2622,7 @@ local function applyMobPartsCull(enabled)
     end
 end
 
-local function resolveOptionsListButton(buttonName)
+function resolveOptionsListButton(buttonName)
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then
         return nil, "PlayerGui not found"
@@ -2646,12 +2646,12 @@ local function resolveOptionsListButton(buttonName)
     return button
 end
 
-local function getOptionsListButtonVisible(buttonName)
+function getOptionsListButtonVisible(buttonName)
     local button = resolveOptionsListButton(buttonName)
     return button and button.Visible or false
 end
 
-local function setOptionsListButtonVisible(buttonName, enabled)
+function setOptionsListButtonVisible(buttonName, enabled)
     local button, reason = resolveOptionsListButton(buttonName)
     if not button then
         log(string.format("%s visibility toggle failed: %s", buttonName, tostring(reason)))
@@ -2669,7 +2669,7 @@ local function setOptionsListButtonVisible(buttonName, enabled)
     end
 end
 
-local function resolveMainGui()
+function resolveMainGui()
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then
         return nil, "PlayerGui not found"
