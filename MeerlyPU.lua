@@ -41,7 +41,10 @@ local streamingOptimized = false
 local aggressiveFxCullEnabled = false
 local hideTrackedWeaponParts = false
 local hitboxEnlargerEnabled = false
+local hitboxExpanderMasterEnabled = false
 local hitboxPresetRows = {}
+local hitboxPresetUiRows = {}
+local hitboxPresetHeaderLabel = nil
 local hitboxPresetSelection = "Potato PC"
 local activeHitboxPreset = "Potato PC"
 local hitboxPresetScanIntervals = {
@@ -495,7 +498,7 @@ local function isTargetHitboxEntity(part)
     return attachmentCount == 2 and trailCount == 1
 end
 
-local function applyHitboxEnlarger(presetName)
+local function applyHitboxEnlarger(presetName, silent)
     if not hitboxEnlargerEnabled then
         return
     end
@@ -512,18 +515,21 @@ local function applyHitboxEnlarger(presetName)
 
     local enlargedCount = 0
     local scannedWeapons = 0
+    local pulseSize = Vector3.new(0.01, 0.01, 0.01)
 
     for _, weapon in ipairs(orderedTrackedWeapons) do
         if weapon and weapon.Parent == trackedCharacter then
             scannedWeapons += 1
 
             if isTargetHitboxEntity(weapon) then
+                weapon.Size = pulseSize
                 weapon.Size = targetSize
                 enlargedCount += 1
             end
 
             for _, descendant in ipairs(weapon:GetDescendants()) do
                 if isTargetHitboxEntity(descendant) then
+                    descendant.Size = pulseSize
                     descendant.Size = targetSize
                     enlargedCount += 1
                 end
@@ -531,7 +537,7 @@ local function applyHitboxEnlarger(presetName)
         end
     end
 
-    if enlargedCount > 0 then
+    if not silent and enlargedCount > 0 then
         log(string.format(
             "Hitbox [%s] scan complete: %d weapons, %d hitboxes @ %.0f, %.0f, %.0f",
             targetPreset,
@@ -541,7 +547,7 @@ local function applyHitboxEnlarger(presetName)
             targetSize.Y,
             targetSize.Z
         ))
-    else
+    elseif not silent then
         log(string.format("Hitbox [%s] scan found no matching hitboxes", targetPreset))
     end
 end
@@ -689,7 +695,7 @@ local function runSelfWeaponPass(message, opts)
     end
 
     local hitboxOk, hitboxErr = pcall(function()
-        applyHitboxEnlarger()
+        applyHitboxEnlarger(opts.hitboxPreset, opts.silentHitbox)
     end)
     if not hitboxOk then
         log(string.format("Hitbox enlarger pass failed: %s", tostring(hitboxErr)))
@@ -1226,9 +1232,24 @@ end
 
 local function setHitboxPresetSelection(presetName)
     hitboxPresetSelection = presetName
+    activeHitboxPreset = presetName
     for key, row in pairs(hitboxPresetRows) do
         if row and row.setState then
             row.setState(key == presetName)
+        end
+    end
+    if hitboxEnlargerEnabled then
+        runSelfWeaponPass(string.format("Hitbox mode set: %s", presetName), { silentHitbox = true })
+    end
+end
+
+local function setHitboxPresetRowsVisible(visible)
+    if hitboxPresetHeaderLabel and hitboxPresetHeaderLabel.Parent then
+        hitboxPresetHeaderLabel.Parent.Visible = visible
+    end
+    for _, row in ipairs(hitboxPresetUiRows) do
+        if row then
+            row.Visible = visible
         end
     end
 end
@@ -1236,6 +1257,7 @@ end
 local function makeHitboxPresetRow(labelText, presetName, tabName)
     tabName = tabName or currentTabName
     local row = newRow(34, tabName)
+    table.insert(hitboxPresetUiRows, row)
 
     local label = Instance.new("TextLabel")
     label.Parent = row
@@ -1250,24 +1272,12 @@ local function makeHitboxPresetRow(labelText, presetName, tabName)
 
     local toggleButton = Instance.new("TextButton")
     toggleButton.Parent = row
-    toggleButton.Size = UDim2.new(0.20, -6, 1, -8)
-    toggleButton.Position = UDim2.new(0.45, 0, 0, 4)
+    toggleButton.Size = UDim2.new(0.30, -6, 1, -8)
+    toggleButton.Position = UDim2.new(0.66, 0, 0, 4)
     toggleButton.BorderSizePixel = 0
     toggleButton.Font = Enum.Font.GothamBold
     toggleButton.TextSize = 11
     makeCorner(toggleButton, 5)
-
-    local scanButton = Instance.new("TextButton")
-    scanButton.Parent = row
-    scanButton.Size = UDim2.new(0.26, -8, 1, -8)
-    scanButton.Position = UDim2.new(0.70, 0, 0, 4)
-    scanButton.BackgroundColor3 = uiTheme.accent
-    scanButton.BorderSizePixel = 0
-    scanButton.Font = Enum.Font.GothamBold
-    scanButton.TextSize = 11
-    scanButton.TextColor3 = Color3.fromRGB(10, 10, 12)
-    scanButton.Text = "Scan"
-    makeCorner(scanButton, 5)
 
     local state = presetName == hitboxPresetSelection
     local function refresh()
@@ -1277,25 +1287,9 @@ local function makeHitboxPresetRow(labelText, presetName, tabName)
     end
 
     toggleButton.MouseButton1Click:Connect(function()
-        if hitboxPresetSelection == presetName then
-            log(string.format("'%s' stays selected (pick another mode to switch)", presetName))
-            state = true
-        else
-            state = true
-            setHitboxPresetSelection(presetName)
-        end
+        state = true
+        setHitboxPresetSelection(presetName)
         refresh()
-    end)
-
-    scanButton.MouseButton1Click:Connect(function()
-        if hitboxPresetSelection ~= presetName then
-            log(string.format("Select '%s' toggle before scanning", presetName))
-            return
-        end
-
-        activeHitboxPreset = presetName
-        hitboxEnlargerEnabled = true
-        runSelfWeaponPass(string.format("Hitbox mode activated: %s", presetName))
     end)
 
     refresh()
@@ -1879,13 +1873,25 @@ end
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- OP Settings page.
-makeSectionLabel("Hitbox Expander Modes", "OP Settings")
+makeToggle("Hitbox Expander", hitboxExpanderMasterEnabled, function(v)
+    hitboxExpanderMasterEnabled = v
+    hitboxEnlargerEnabled = v
+    setHitboxPresetRowsVisible(v)
+    if v then
+        runSelfWeaponPass("Hitbox expander enabled", { silentHitbox = true })
+    else
+        log("Hitbox expander disabled")
+    end
+end, "OP Settings")
+
+hitboxPresetHeaderLabel = makeSectionLabel("Hitbox Expander Modes", "OP Settings")
 makeHitboxPresetRow("Boss Raids", "Boss Raids", "OP Settings")
 makeHitboxPresetRow("High Performance", "High Performance", "OP Settings")
 makeHitboxPresetRow("Medium Performance", "Medium Performance", "OP Settings")
 makeHitboxPresetRow("Low Performance", "Low Performance", "OP Settings")
 makeHitboxPresetRow("Potato PC", "Potato PC", "OP Settings")
 setHitboxPresetSelection("Potato PC")
+setHitboxPresetRowsVisible(hitboxExpanderMasterEnabled)
 
 makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
     setDisappearHider(v)
