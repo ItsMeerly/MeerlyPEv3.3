@@ -47,6 +47,8 @@ local hitboxPresetUiRows = {}
 local hitboxPresetHeaderLabel = nil
 local hitboxPresetSelection = "Potato PC"
 local activeHitboxPreset = "Potato PC"
+local hitboxOriginalSizes = {}
+local hitboxPulseToken = 0
 local hitboxPresetScanIntervals = {
     ["Boss Raids"] = 0.1,
     ["High Performance"] = 0.2,
@@ -65,6 +67,16 @@ local otherPlayersHidePassSeconds = 10
 local walkSpeedOverrideEnabled = false
 local walkSpeedValue = 16
 local originalWalkSpeed = nil
+local autoFusionEnabled = false
+local fusionStatusOutput = nil
+local fusionSettings = {
+    All = { enabled = true, min = 10, max = math.huge },
+    Green = { enabled = true, min = 10, max = 40 },
+    Blue = { enabled = true, min = 60, max = 150 },
+    Purple = { enabled = true, min = 320, max = 4700 },
+    Orange = { enabled = true, min = 8500, max = 43000 },
+    Pink = { enabled = true, min = 71000, max = 770000 },
+}
 
 local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
@@ -89,6 +101,7 @@ local orderedTrackedWeapons = {}
 local trackedWeaponPartState = makeWeakKeyTable()
 local trackedWeaponPartConnections = makeWeakKeyTable()
 local trackedWeaponFxState = makeWeakKeyTable()
+hitboxOriginalSizes = makeWeakKeyTable()
 local otherPlayerWeaponPartState = makeWeakKeyTable()
 local otherPlayerWeaponFxState = makeWeakKeyTable()
 
@@ -498,6 +511,55 @@ local function isTargetHitboxEntity(part)
     return attachmentCount == 2 and trailCount == 1
 end
 
+local function restoreTrackedHitboxDefaults(silent)
+    hitboxPulseToken += 1
+    local restoredCount = 0
+    for hitbox, defaultSize in pairs(hitboxOriginalSizes) do
+        if hitbox and hitbox.Parent and hitbox:IsA("BasePart") then
+            hitbox.Size = defaultSize
+            restoredCount += 1
+        end
+        hitboxOriginalSizes[hitbox] = nil
+    end
+    if (not silent) and restoredCount > 0 then
+        log(string.format("Hitbox defaults restored: %d", restoredCount))
+    end
+end
+
+local function collectTrackedHitboxes(targetPreset)
+    local hitboxes = {}
+    local scannedWeapons = 0
+    local allowSingleWeapon = targetPreset == "Potato PC"
+
+    for _, weapon in ipairs(orderedTrackedWeapons) do
+        if weapon and weapon.Parent == trackedCharacter then
+            scannedWeapons += 1
+            local weaponHitboxes = {}
+
+            if isTargetHitboxEntity(weapon) then
+                table.insert(weaponHitboxes, weapon)
+            end
+
+            for _, descendant in ipairs(weapon:GetDescendants()) do
+                if isTargetHitboxEntity(descendant) then
+                    table.insert(weaponHitboxes, descendant)
+                end
+            end
+
+            if #weaponHitboxes > 0 then
+                for _, hitbox in ipairs(weaponHitboxes) do
+                    table.insert(hitboxes, hitbox)
+                end
+                if allowSingleWeapon then
+                    break
+                end
+            end
+        end
+    end
+
+    return hitboxes, scannedWeapons
+end
+
 local function applyHitboxEnlarger(presetName, silent)
     if not hitboxEnlargerEnabled then
         return
@@ -513,30 +575,35 @@ local function applyHitboxEnlarger(presetName, silent)
         return
     end
 
-    local enlargedCount = 0
-    local scannedWeapons = 0
+    local pulseToken = hitboxPulseToken + 1
+    hitboxPulseToken = pulseToken
     local pulseSize = Vector3.new(0.01, 0.01, 0.01)
+    local hitboxes, scannedWeapons = collectTrackedHitboxes(targetPreset)
 
-    for _, weapon in ipairs(orderedTrackedWeapons) do
-        if weapon and weapon.Parent == trackedCharacter then
-            scannedWeapons += 1
-
-            if isTargetHitboxEntity(weapon) then
-                weapon.Size = pulseSize
-                weapon.Size = targetSize
-                enlargedCount += 1
-            end
-
-            for _, descendant in ipairs(weapon:GetDescendants()) do
-                if isTargetHitboxEntity(descendant) then
-                    descendant.Size = pulseSize
-                    descendant.Size = targetSize
-                    enlargedCount += 1
-                end
-            end
+    for _, hitbox in ipairs(hitboxes) do
+        if not hitboxOriginalSizes[hitbox] then
+            hitboxOriginalSizes[hitbox] = hitbox.Size
         end
+        hitbox.Size = pulseSize
     end
 
+    task.delay(0.1, function()
+        if (not running) or (not hitboxEnlargerEnabled) or hitboxPulseToken ~= pulseToken then
+            return
+        end
+        local delayedPreset = presetName or activeHitboxPreset or "Potato PC"
+        local delayedSize = hitboxPresetSizes[delayedPreset]
+        if not delayedSize then
+            return
+        end
+        for _, hitbox in ipairs(hitboxes) do
+            if hitbox and hitbox.Parent and isTargetHitboxEntity(hitbox) then
+                hitbox.Size = delayedSize
+            end
+        end
+    end)
+
+    local enlargedCount = #hitboxes
     if not silent and enlargedCount > 0 then
         log(string.format(
             "Hitbox [%s] scan complete: %d weapons, %d hitboxes @ %.0f, %.0f, %.0f",
@@ -601,6 +668,7 @@ local function untrackWeapon(container)
     end
 
     if container:IsA("BasePart") then
+        hitboxOriginalSizes[container] = nil
         if trackedWeaponPartConnections[container] then
             trackedWeaponPartConnections[container]:Disconnect()
             trackedWeaponPartConnections[container] = nil
@@ -610,6 +678,7 @@ local function untrackWeapon(container)
     end
 
     for _, descendant in ipairs(container:GetDescendants()) do
+        hitboxOriginalSizes[descendant] = nil
         if trackedWeaponPartConnections[descendant] then
             trackedWeaponPartConnections[descendant]:Disconnect()
             trackedWeaponPartConnections[descendant] = nil
@@ -664,7 +733,7 @@ local function runSelfWeaponPass(message, opts)
     end
 
     if not trackedCharacter or not trackedCharacter.Parent then
-        trackedCharacter = localPlayer and localPlayer.Character
+        trackedCharacter = player and player.Character
         if not trackedCharacter then
             log("Weapon pass skipped: no active character")
             return
@@ -715,6 +784,7 @@ local function bindCharacterForWeapons(character)
     trackedWeaponPartState = makeWeakKeyTable()
     trackedWeaponPartConnections = makeWeakKeyTable()
     trackedWeaponFxState = makeWeakKeyTable()
+    hitboxOriginalSizes = makeWeakKeyTable()
     originalWalkSpeed = nil
 
     if weaponChildAddedConnection then
@@ -1125,11 +1195,12 @@ end
 
 createTab("OP Settings")
 createTab("Utility")
+createTab("Weapon Fusion")
 createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "OP Settings", "Utility", "Settings", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Weapon Fusion", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -1597,6 +1668,224 @@ local function makeSectionLabel(text, tabName)
     return label
 end
 
+local function makeOutputField(labelText, initialText, tabName)
+    local row = newRow(168, tabName)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = row
+    label.Size = UDim2.new(1, -14, 0, 20)
+    label.Position = UDim2.fromOffset(8, 2)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 12
+    label.TextColor3 = uiTheme.subtle
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+
+    local box = Instance.new("TextBox")
+    box.Parent = row
+    box.Size = UDim2.new(1, -14, 1, -28)
+    box.Position = UDim2.fromOffset(8, 24)
+    box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    box.BorderSizePixel = 0
+    box.ClearTextOnFocus = false
+    box.MultiLine = true
+    box.TextWrapped = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.TextYAlignment = Enum.TextYAlignment.Top
+    box.Font = Enum.Font.Code
+    box.TextSize = 12
+    box.TextEditable = false
+    box.TextColor3 = uiTheme.text
+    box.Text = initialText or ""
+    makeCorner(box, 5)
+
+    return box
+end
+
+local function getFusionCategoryForOneIn(oneInValue)
+    for categoryName, config in pairs(fusionSettings) do
+        if categoryName ~= "All" and oneInValue >= config.min and oneInValue <= config.max then
+            return categoryName
+        end
+    end
+    return "All"
+end
+
+local function parseOneInFromText(raw)
+    local text = tostring(raw or ""):lower()
+    local value = text:match("onein%s*[:|%-]*%s*([%d,%.]+)") or text:match("1%s*/%s*([%d,%.]+)") or text:match("([%d,%.]+)")
+    if not value then
+        return nil
+    end
+    value = value:gsub(",", "")
+    local parsed = tonumber(value)
+    if parsed and parsed >= 0 then
+        return math.floor(parsed + 0.5)
+    end
+    return nil
+end
+
+local function parseWeaponInventoryFromFrame()
+    local parsed = {}
+    local localPlayer = Players.LocalPlayer
+    local fuseFrame = localPlayer
+        and localPlayer:FindFirstChild("PlayerGui")
+        and localPlayer.PlayerGui:FindFirstChild("MainGUI")
+    fuseFrame = fuseFrame and fuseFrame:FindFirstChild("GeneralUI")
+    fuseFrame = fuseFrame and fuseFrame:FindFirstChild("FuseFrame")
+    if not fuseFrame then
+        return parsed
+    end
+
+    for _, descendant in ipairs(fuseFrame:GetDescendants()) do
+        if descendant.Name == "WeaponFrame" then
+            local chanceLabel = descendant:FindFirstChild("ItemChance", true)
+            local nameLabel = descendant:FindFirstChild("ItemName", true)
+            local qtyLabel = descendant:FindFirstChild("ItemQty", true)
+            local oneIn = chanceLabel and parseOneInFromText(chanceLabel.Text)
+            local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 1
+            local weaponName = nameLabel and nameLabel.Text or descendant.Name
+            table.insert(parsed, {
+                name = weaponName or "Unknown",
+                oneIn = oneIn or 0,
+                amount = math.max(1, qty or 1),
+            })
+        end
+    end
+    return parsed
+end
+
+local function normalizeWeaponInventory(rawInventory)
+    local parsed = {}
+    if type(rawInventory) ~= "table" then
+        return parsed
+    end
+
+    for key, item in pairs(rawInventory) do
+        if type(item) == "table" then
+            local weaponName = item.WeaponName or item.Name or item.ItemName or key
+            local amount = tonumber(item.Amount or item.Qty or item.ItemQty or item.Count) or 1
+            local oneIn = tonumber(item.OneIn or item.Chance or item.ItemChance) or parseOneInFromText(item.ItemChanceText)
+            if (not oneIn) and type(item.RarityText) == "string" then
+                oneIn = parseOneInFromText(item.RarityText)
+            end
+            table.insert(parsed, {
+                name = tostring(weaponName or key),
+                oneIn = math.max(0, math.floor((oneIn or 0) + 0.5)),
+                amount = math.max(1, math.floor(amount + 0.5)),
+            })
+        end
+    end
+    return parsed
+end
+
+local function getWeaponInventoryForFusion()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local getInvRemote = remotes and remotes:FindFirstChild("GetWeaponsInv")
+    local inventory
+    if getInvRemote then
+        local ok, result = pcall(function()
+            if getInvRemote:IsA("RemoteFunction") then
+                return getInvRemote:InvokeServer()
+            end
+            return nil
+        end)
+        if ok then
+            inventory = normalizeWeaponInventory(result)
+        end
+    end
+
+    if not inventory or #inventory == 0 then
+        inventory = parseWeaponInventoryFromFrame()
+    end
+
+    table.sort(inventory, function(a, b)
+        if a.oneIn == b.oneIn then
+            return a.name < b.name
+        end
+        return a.oneIn < b.oneIn
+    end)
+
+    return inventory
+end
+
+local function shouldFuseWeaponEntry(entry)
+    if not entry or entry.amount < 2 then
+        return false
+    end
+
+    local oneIn = entry.oneIn or 0
+    local allConfig = fusionSettings.All
+    if not (allConfig.enabled and oneIn >= allConfig.min) then
+        return false
+    end
+
+    local category = getFusionCategoryForOneIn(oneIn)
+    local categoryConfig = fusionSettings[category]
+    if not categoryConfig then
+        return false
+    end
+
+    return categoryConfig.enabled and oneIn >= categoryConfig.min and oneIn <= categoryConfig.max
+end
+
+local function updateFusionStatusOutput(inventory)
+    if not fusionStatusOutput then
+        return
+    end
+    local lines = {}
+    for _, item in ipairs(inventory or {}) do
+        table.insert(lines, string.format("%s | %s | x%d", tostring(item.name), tostring(item.oneIn), tonumber(item.amount) or 1))
+    end
+    fusionStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
+end
+
+local function tryFuseWeaponsFromInventory(inventory)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local fuseRemote = remotes and remotes:FindFirstChild("FuseWeapons")
+    if not fuseRemote then
+        return 0
+    end
+
+    local fusedCount = 0
+    for _, item in ipairs(inventory) do
+        if shouldFuseWeaponEntry(item) then
+            local attemptArgs = {
+                { item.name, 1 },
+                { item.name },
+                { item.name, item.oneIn, item.amount },
+            }
+            for _, args in ipairs(attemptArgs) do
+                local ok = pcall(function()
+                    if fuseRemote:IsA("RemoteFunction") then
+                        fuseRemote:InvokeServer(unpack(args))
+                    else
+                        fuseRemote:FireServer(unpack(args))
+                    end
+                end)
+                if ok then
+                    fusedCount += 1
+                    break
+                end
+            end
+        end
+    end
+    return fusedCount
+end
+
+local function runWeaponFusionPass(silent)
+    local inventory = getWeaponInventoryForFusion()
+    updateFusionStatusOutput(inventory)
+    if autoFusionEnabled then
+        local fusedCount = tryFuseWeaponsFromInventory(inventory)
+        if (not silent) and fusedCount > 0 then
+            log(string.format("Weapon Fusion fused %d entries", fusedCount))
+        end
+    end
+    return inventory
+end
+
 local function clearTabRows(tabName)
     local page = tabPages[tabName]
     if not page then
@@ -1880,16 +2169,17 @@ makeToggle("Hitbox Expander", hitboxExpanderMasterEnabled, function(v)
     if v then
         runSelfWeaponPass("Hitbox expander enabled", { silentHitbox = true })
     else
+        restoreTrackedHitboxDefaults()
         log("Hitbox expander disabled")
     end
 end, "OP Settings")
 
 hitboxPresetHeaderLabel = makeSectionLabel("Hitbox Expander Modes", "OP Settings")
-makeHitboxPresetRow("Boss Raids", "Boss Raids", "OP Settings")
-makeHitboxPresetRow("High Performance", "High Performance", "OP Settings")
-makeHitboxPresetRow("Medium Performance", "Medium Performance", "OP Settings")
-makeHitboxPresetRow("Low Performance", "Low Performance", "OP Settings")
-makeHitboxPresetRow("Potato PC", "Potato PC", "OP Settings")
+makeHitboxPresetRow("Boss", "Boss Raids", "OP Settings")
+makeHitboxPresetRow("High", "High Performance", "OP Settings")
+makeHitboxPresetRow("Medium", "Medium Performance", "OP Settings")
+makeHitboxPresetRow("Low", "Low Performance", "OP Settings")
+makeHitboxPresetRow("Potato", "Potato PC", "OP Settings")
 setHitboxPresetSelection("Potato PC")
 setHitboxPresetRowsVisible(hitboxExpanderMasterEnabled)
 
@@ -1959,6 +2249,45 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
     end
     return tostring(targetFPS)
 end, "Utility")
+
+-- Weapon Fusion page.
+makeSectionLabel("Weapon Fusion", "Weapon Fusion")
+makeToggle("Auto Fusion On/Off", autoFusionEnabled, function(v)
+    autoFusionEnabled = v
+    log(v and "Weapon Fusion enabled" or "Weapon Fusion disabled")
+end, "Weapon Fusion")
+
+for _, category in ipairs({ "All", "Green", "Blue", "Purple", "Orange", "Pink" }) do
+    local config = fusionSettings[category]
+    if config then
+        makeToggle(string.format("%s OneIn Enabled", category), config.enabled, function(v)
+            config.enabled = v
+        end, "Weapon Fusion")
+        makeInput(string.format("%s OneIn Min", category), tostring(config.min), function(text)
+            local val = tonumber((text or ""):gsub(",", ""))
+            if val then
+                config.min = math.max(0, math.floor(val + 0.5))
+            end
+            return tostring(config.min)
+        end, "Weapon Fusion")
+        if config.max < math.huge then
+            makeInput(string.format("%s OneIn Max", category), tostring(config.max), function(text)
+                local val = tonumber((text or ""):gsub(",", ""))
+                if val then
+                    config.max = math.max(config.min, math.floor(val + 0.5))
+                end
+                return tostring(config.max)
+            end, "Weapon Fusion")
+        end
+    end
+end
+
+makeButton("Refresh Weapon Fusion List", function()
+    local inventory = runWeaponFusionPass(true)
+    log(string.format("Weapon Fusion list refreshed (%d entries)", #inventory))
+end, "Weapon Fusion")
+
+fusionStatusOutput = makeOutputField("Weapons (Weapon | OneIn | x Amount owned)", "No weapons found.", "Weapon Fusion")
 
 makeSlider("GC Sweep", gcSweepInterval, 10, 300, function(v)
     gcSweepInterval = v
@@ -2166,6 +2495,9 @@ local function requestShutdown(reason)
             setDisappearHider(false)
         end)
     end
+    pcall(function()
+        restoreTrackedHitboxDefaults(true)
+    end)
     pcall(function() screen:Destroy() end)
     pcall(function() memoryGui:Destroy() end)
 
@@ -2348,6 +2680,16 @@ task.spawn(function()
         else
             task.wait(0.1)
         end
+    end
+end)
+
+task.spawn(function()
+    while running do
+        local silent = not autoFusionEnabled
+        pcall(function()
+            runWeaponFusionPass(silent)
+        end)
+        task.wait(autoFusionEnabled and 2 or 5)
     end
 end)
 
