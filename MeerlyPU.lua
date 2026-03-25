@@ -1772,35 +1772,13 @@ local function normalizeWeaponInventory(rawInventory)
             if (not oneIn) and type(item.RarityText) == "string" then
                 oneIn = parseOneInFromText(item.RarityText)
             end
-            table.insert(parsed, {
-                name = tostring(weaponName or key),
-                oneIn = math.max(0, math.floor((oneIn or 0) + 0.5)),
-                amount = math.max(1, math.floor(amount + 0.5)),
-            })
         end
     end
     return parsed
 end
 
 local function getWeaponInventoryForFusion()
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local getInvRemote = remotes and remotes:FindFirstChild("GetWeaponsInv")
-    local inventory
-    if getInvRemote then
-        local ok, result = pcall(function()
-            if getInvRemote:IsA("RemoteFunction") then
-                return getInvRemote:InvokeServer()
-            end
-            return nil
-        end)
-        if ok then
-            inventory = normalizeWeaponInventory(result)
-        end
-    end
-
-    if not inventory or #inventory == 0 then
-        inventory = parseWeaponInventoryFromFrame()
-    end
+    local inventory = parseWeaponInventoryFromFrame()
 
     table.sort(inventory, function(a, b)
         if a.oneIn == b.oneIn then
