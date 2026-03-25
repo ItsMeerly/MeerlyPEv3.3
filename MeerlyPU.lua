@@ -138,6 +138,9 @@ local disable3D = false
 local muteSounds = false
 local hideDisappearEntities = false
 local cullMobPartsEnabled = false
+local hideManaKillsEnabled = false
+local hideMiniRollEnabled = false
+local hideHudEnabled = false
 local disappearOriginalName = "Disappear"
 local disappearRenamedName = "Disappear123"
 local renamedDisappearInstance = nil
@@ -2683,10 +2686,76 @@ function resolveMainGui()
     return mainGui
 end
 
+local uiUtilityOriginalVisibility = {}
+
+local function resolveGeneralUi()
+    local mainGui, reason = resolveMainGui()
+    if not mainGui then
+        return nil, reason
+    end
+
+    local generalUi = mainGui:FindFirstChild("GeneralUI")
+    if not generalUi then
+        return nil, "GeneralUI not found"
+    end
+
+    return generalUi
+end
+
+local function setGeneralUiFrameVisible(frameName, enabled, rememberOriginal)
+    local generalUi, reason = resolveGeneralUi()
+    if not generalUi then
+        log(string.format("%s visibility toggle failed: %s", frameName, tostring(reason)))
+        return false
+    end
+
+    local frame = generalUi:FindFirstChild(frameName)
+    if not frame then
+        log(string.format("%s visibility toggle failed: frame not found", frameName))
+        return false
+    end
+
+    if rememberOriginal and uiUtilityOriginalVisibility[frameName] == nil then
+        uiUtilityOriginalVisibility[frameName] = frame.Visible
+    end
+
+    local ok, err = pcall(function()
+        frame.Visible = enabled
+    end)
+
+    if not ok then
+        log(string.format("Failed to set %s visibility: %s", frameName, tostring(err)))
+        return false
+    end
+
+    return true
+end
+
+local function setManaKillsHidden(hidden)
+    setGeneralUiFrameVisible("ManaFrame", not hidden, true)
+    setGeneralUiFrameVisible("KillsFrame", not hidden, true)
+end
+
+local function resetUiUtilitiesVisibility()
+    for frameName, originalState in pairs(uiUtilityOriginalVisibility) do
+        if frameName == "GeneralUI" then
+            local generalUi = resolveGeneralUi()
+            if generalUi then
+                generalUi.Visible = originalState
+            end
+        else
+            setGeneralUiFrameVisible(frameName, originalState, false)
+        end
+    end
+    hideManaKillsEnabled = false
+    hideMiniRollEnabled = false
+    hideHudEnabled = false
+end
+
 -- ---- Feature wiring (UI -> behavior) ----
 
 -- OP Settings page.
-makeToggle("Hitbox Expander", hitboxExpanderMasterEnabled, function(v)
+makeToggle("Kill Aura", hitboxExpanderMasterEnabled, function(v)
     hitboxExpanderMasterEnabled = v
     hitboxEnlargerEnabled = v
     setHitboxPresetRowsVisible(v)
@@ -2698,7 +2767,7 @@ makeToggle("Hitbox Expander", hitboxExpanderMasterEnabled, function(v)
     end
 end, "OP Settings")
 
-hitboxPresetHeaderLabel = makeSectionLabel("Hitbox Expander Modes", "OP Settings")
+hitboxPresetHeaderLabel = makeSectionLabel("Kill Aura Modes", "OP Settings")
 makeHitboxPresetRow("Boss", "Boss Raids", "OP Settings")
 makeHitboxPresetRow("High", "High Performance", "OP Settings")
 makeHitboxPresetRow("Medium", "Medium Performance", "OP Settings")
@@ -2707,7 +2776,7 @@ makeHitboxPresetRow("Potato", "Potato PC", "OP Settings")
 setHitboxPresetSelection("Potato PC")
 setHitboxPresetRowsVisible(hitboxExpanderMasterEnabled)
 
-makeToggle("Hide Disappear Entities", hideDisappearEntities, function(v)
+makeToggle("Hide Kill Effects", hideDisappearEntities, function(v)
     setDisappearHider(v)
 end, "OP Settings")
 
@@ -2726,6 +2795,30 @@ end, "OP Settings")
 
 -- Utility page.
 makeSectionLabel("Game Utils", "Utility")
+makeButton("Fusion UI", function()
+    if setGeneralUiFrameVisible("FuseFrame", true, false) then
+        log("Opened Fusion UI")
+    end
+end, "Utility")
+
+makeButton("Totem UI", function()
+    if setGeneralUiFrameVisible("TotemOfFortuneFrame", true, false) then
+        log("Opened Totem UI")
+    end
+end, "Utility")
+
+makeButton("Crafting UI", function()
+    if setGeneralUiFrameVisible("WeaponCrafter", true, false) then
+        log("Opened Crafting UI")
+    end
+end, "Utility")
+
+makeButton("Ascend UI", function()
+    if setGeneralUiFrameVisible("AscendPrompt", true, false) then
+        log("Opened Ascend UI")
+    end
+end, "Utility")
+
 makeToggle("Hide Tracked Weapon Parts", hideTrackedWeaponParts, function(v)
     hideTrackedWeaponParts = v
     runSelfWeaponPass(v and "Tracked weapon parts hidden (local visual only)" or "Tracked weapon parts shown")
@@ -2772,6 +2865,31 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
         end
     end
     return tostring(targetFPS)
+end, "Utility")
+
+makeSectionLabel("UI Utilities", "Utility")
+makeToggle("Hide Mana / Kills", hideManaKillsEnabled, function(v)
+    hideManaKillsEnabled = v
+    setManaKillsHidden(v)
+end, "Utility")
+
+makeToggle("Hide Mini-Roll", hideMiniRollEnabled, function(v)
+    hideMiniRollEnabled = v
+    setGeneralUiFrameVisible("MiniRollFrame", not v, true)
+end, "Utility")
+
+makeToggle("Hide HUD", hideHudEnabled, function(v)
+    hideHudEnabled = v
+    local generalUi, reason = resolveGeneralUi()
+    if not generalUi then
+        log("Hide HUD toggle failed: " .. tostring(reason))
+        return
+    end
+
+    if uiUtilityOriginalVisibility.GeneralUI == nil then
+        uiUtilityOriginalVisibility.GeneralUI = generalUi.Visible
+    end
+    generalUi.Visible = not v
 end, "Utility")
 
 -- Weapon Fusion page.
@@ -3102,6 +3220,9 @@ local function requestShutdown(reason)
             setDisappearHider(false)
         end)
     end
+    pcall(function()
+        resetUiUtilitiesVisibility()
+    end)
     pcall(function()
         restoreTrackedHitboxDefaults(true)
     end)
