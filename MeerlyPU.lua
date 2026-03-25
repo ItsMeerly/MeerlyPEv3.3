@@ -1762,7 +1762,7 @@ local function resolveFusionScrollFrame()
     return fuseFrame:FindFirstChild("ScrollingFrame") or fuseFrame:FindFirstChild("ScrollingFrame", true)
 end
 
-local function parseWeaponInventoryFromFrame()
+local function parseFusionWeaponFrames()
     local parsed = {}
     local fuseScroll = resolveFusionScrollFrame()
     if not fuseScroll then
@@ -1785,7 +1785,7 @@ local function parseWeaponInventoryFromFrame()
             weaponName = weaponName ~= "" and weaponName:gsub("^%s*(.-)%s*$", "%1") or "Unknown"
             table.insert(parsed, {
                 name = weaponName,
-                oneIn = oneIn or 0,
+                oneIn = oneIn,
                 oneInRaw = chanceText,
                 amount = qty,
                 frame = child,
@@ -1795,33 +1795,135 @@ local function parseWeaponInventoryFromFrame()
     return parsed
 end
 
-local function normalizeWeaponInventory(rawInventory)
+local function lookupFusionWeaponAsset(weaponName)
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    local weaponsFolder = assets and assets:FindFirstChild("Weapons")
+    if not weaponsFolder then
+        return nil
+    end
+
+    local byName = weaponsFolder:FindFirstChild(weaponName, true)
+    if byName then
+        return byName
+    end
+
+    for _, candidate in ipairs(weaponsFolder:GetDescendants()) do
+        if candidate:IsA("Model") and candidate.Name == weaponName then
+            return candidate
+        end
+    end
+
+    return nil
+end
+
+local function parseFusionInventoryRemote()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local invRemote = remotes and remotes:FindFirstChild("GetWeaponsInv")
+    if not invRemote then
+        return nil
+    end
+
+    local ok, raw = pcall(function()
+        return invRemote:InvokeServer()
+    end)
+    if not ok or type(raw) ~= "table" then
+        return nil
+    end
+    return raw
+end
+
+local function normalizeFusionWeaponInventory(rawInventory)
     local parsed = {}
     if type(rawInventory) ~= "table" then
         return parsed
     end
 
-    for key, item in pairs(rawInventory) do
+    local function insertNormalizedEntry(weaponName, amount, oneIn, oneInRaw)
+        local trimmedName = tostring(weaponName or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
+        local parsedAmount = tonumber(amount) or 1
+        parsedAmount = math.max(0, math.floor(parsedAmount))
+        local parsedOneIn = tonumber(oneIn)
+        if (not parsedOneIn) then
+            local asset = lookupFusionWeaponAsset(trimmedName)
+            if asset then
+                parsedOneIn = tonumber(asset:GetAttribute("OneIn"))
+            end
+        end
+
+        table.insert(parsed, {
+            name = trimmedName,
+            oneIn = parsedOneIn or math.huge,
+            oneInRaw = oneInRaw or (parsedOneIn and tostring(parsedOneIn) or "Unknown"),
+            amount = parsedAmount,
+        })
+    end
+
+    local function pushEntry(item, fallbackName)
         if type(item) == "table" then
-            local weaponName = item.WeaponName or item.Name or item.ItemName or key
-            local amount = tonumber(item.Amount or item.Qty or item.ItemQty or item.Count) or 1
+            local weaponName = item.WeaponName or item.WepName or item.Name or item.ItemName or fallbackName
+            local amount = tonumber(item.Quantity or item.Amount or item.Qty or item.ItemQty or item.Count or item.amount) or 1
             local oneIn = tonumber(item.OneIn or item.Chance or item.ItemChance) or parseOneInFromText(item.ItemChanceText)
             if (not oneIn) and type(item.RarityText) == "string" then
                 oneIn = parseOneInFromText(item.RarityText)
             end
+
+            insertNormalizedEntry(weaponName, amount, oneIn, item.ItemChanceText)
+        elseif type(item) == "number" then
+            insertNormalizedEntry(fallbackName, item)
+        elseif type(item) == "string" and fallbackName then
+            -- Handle sparse structures where keys are names and values are descriptor strings.
+            insertNormalizedEntry(fallbackName, 1, parseOneInFromText(item), item)
         end
     end
+
+    if rawInventory[1] ~= nil then
+        for _, item in ipairs(rawInventory) do
+            pushEntry(item)
+        end
+    else
+        for key, item in pairs(rawInventory) do
+            pushEntry(item, key)
+        end
+    end
+
     return parsed
 end
 
+local function attachFusionFramesToInventory(inventory, frames)
+    local frameBuckets = {}
+    for _, frameEntry in ipairs(frames) do
+        local key = tostring(frameEntry.name or "Unknown")
+        frameBuckets[key] = frameBuckets[key] or {}
+        table.insert(frameBuckets[key], frameEntry.frame)
+    end
+
+    for _, entry in ipairs(inventory) do
+        local key = tostring(entry.name or "Unknown")
+        local bucket = frameBuckets[key]
+        if bucket and #bucket > 0 then
+            entry.frame = table.remove(bucket, 1)
+        end
+    end
+end
+
 local function getWeaponInventoryForFusion()
-    local inventory = parseWeaponInventoryFromFrame()
+    local frameInventory = parseFusionWeaponFrames()
+    local remoteInventory = parseFusionInventoryRemote()
+    local inventory = normalizeFusionWeaponInventory(remoteInventory)
+
+    if #inventory == 0 then
+        inventory = frameInventory
+    else
+        attachFusionFramesToInventory(inventory, frameInventory)
+    end
 
     table.sort(inventory, function(a, b)
-        if a.oneIn == b.oneIn then
+        local ao = tonumber(a.oneIn) or math.huge
+        local bo = tonumber(b.oneIn) or math.huge
+        if ao == bo then
             return a.name < b.name
         end
-        return a.oneIn < b.oneIn
+        return ao < bo
     end)
 
     return inventory
@@ -1910,7 +2012,7 @@ end
 local function tryFuseWeaponsFromInventory(inventory)
     local fusedCount = 0
     for _, item in ipairs(inventory) do
-        if shouldFuseWeaponEntry(item) then
+        if shouldFuseWeaponEntry(item) and item.frame then
             if tryFuseViaUiButton(item) then
                 fusedCount += 1
                 task.wait(0.3)
