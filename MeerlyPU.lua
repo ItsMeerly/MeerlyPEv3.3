@@ -1819,7 +1819,7 @@ end
 local function parseFusionInventoryRemote()
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local invRemote = remotes and remotes:FindFirstChild("GetWeaponsInv")
-    if not invRemote or not invRemote:IsA("RemoteFunction") then
+    if not invRemote then
         return nil
     end
 
@@ -1838,30 +1838,41 @@ local function normalizeFusionWeaponInventory(rawInventory)
         return parsed
     end
 
+    local function insertNormalizedEntry(weaponName, amount, oneIn, oneInRaw)
+        local trimmedName = tostring(weaponName or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
+        local parsedAmount = tonumber(amount) or 1
+        parsedAmount = math.max(0, math.floor(parsedAmount))
+        local parsedOneIn = tonumber(oneIn)
+        if (not parsedOneIn) then
+            local asset = lookupFusionWeaponAsset(trimmedName)
+            if asset then
+                parsedOneIn = tonumber(asset:GetAttribute("OneIn"))
+            end
+        end
+
+        table.insert(parsed, {
+            name = trimmedName,
+            oneIn = parsedOneIn or math.huge,
+            oneInRaw = oneInRaw or (parsedOneIn and tostring(parsedOneIn) or "Unknown"),
+            amount = parsedAmount,
+        })
+    end
+
     local function pushEntry(item, fallbackName)
         if type(item) == "table" then
             local weaponName = item.WeaponName or item.WepName or item.Name or item.ItemName or fallbackName
-            weaponName = tostring(weaponName or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
             local amount = tonumber(item.Quantity or item.Amount or item.Qty or item.ItemQty or item.Count or item.amount) or 1
-            amount = math.max(0, math.floor(amount))
             local oneIn = tonumber(item.OneIn or item.Chance or item.ItemChance) or parseOneInFromText(item.ItemChanceText)
             if (not oneIn) and type(item.RarityText) == "string" then
                 oneIn = parseOneInFromText(item.RarityText)
             end
 
-            if not oneIn then
-                local asset = lookupFusionWeaponAsset(weaponName)
-                if asset then
-                    oneIn = tonumber(asset:GetAttribute("OneIn"))
-                end
-            end
-
-            table.insert(parsed, {
-                name = weaponName,
-                oneIn = oneIn or math.huge,
-                oneInRaw = item.ItemChanceText or (oneIn and tostring(oneIn) or "Unknown"),
-                amount = amount,
-            })
+            insertNormalizedEntry(weaponName, amount, oneIn, item.ItemChanceText)
+        elseif type(item) == "number" then
+            insertNormalizedEntry(fallbackName, item)
+        elseif type(item) == "string" and fallbackName then
+            -- Handle sparse structures where keys are names and values are descriptor strings.
+            insertNormalizedEntry(fallbackName, 1, parseOneInFromText(item), item)
         end
     end
 
