@@ -967,7 +967,7 @@ end
 
 -- ---- Main UI construction ----
 local screen = Instance.new("ScreenGui")
-screen.Name = "Meerly_Unititled_Melee_RNG"
+screen.Name = "Unititled_Melee_RNG"
 screen.ResetOnSpawn = false
 screen.IgnoreGuiInset = true
 screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -1075,7 +1075,7 @@ local function setMainUiUnlocked(unlocked)
     tabBar.Visible = keyAccepted
     tabPagesRoot.Visible = keyAccepted
     logBox.Visible = keyAccepted
-    title.Text = keyAccepted and "Meerly Untitled Melee RNG - hide/open with ;" or "Key System"
+    title.Text = keyAccepted and "Untitled Melee RNG - hide/open with ;" or "Key System"
 end
 
 setMainUiUnlocked(false)
@@ -2429,7 +2429,7 @@ function clearTabRows(tabName)
 end
 
 local memoryGui = Instance.new("ScreenGui")
-memoryGui.Name = "Meerly_Untitled_Melee_RNG"
+memoryGui.Name = "Untitled_Melee_RNG"
 memoryGui.ResetOnSpawn = false
 memoryGui.IgnoreGuiInset = true
 memoryGui.Enabled = false
@@ -3521,4 +3521,4 @@ task.spawn(function()
     end
 end)
 
-log("Meerly Untitled Melee RNG Script Loaded")
+log("Untitled Melee RNG Script Loaded")
