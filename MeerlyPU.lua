@@ -71,11 +71,11 @@ local autoFusionEnabled = false
 local fusionStatusOutput = nil
 local fusionSettings = {
     All = { enabled = true, min = 10, max = math.huge },
-    Green = { enabled = true, min = 10, max = 40 },
-    Blue = { enabled = true, min = 60, max = 150 },
-    Purple = { enabled = true, min = 320, max = 4700 },
-    Orange = { enabled = true, min = 8500, max = 43000 },
-    Pink = { enabled = true, min = 71000, max = 770000 },
+    Uncommon = { enabled = true, min = 10, max = 40 },
+    Rare = { enabled = true, min = 60, max = 150 },
+    Epic = { enabled = true, min = 320, max = 4700 },
+    Legendary = { enabled = true, min = 8500, max = 43000 },
+    Mythic = { enabled = true, min = 71000, max = 770000 },
 }
 
 local hardcodedAccessKey = "ForLoveWithLove"
@@ -1714,7 +1714,7 @@ end
 
 local function parseOneInFromText(raw)
     local text = tostring(raw or ""):lower()
-    local value = text:match("onein%s*[:|%-]*%s*([%d,%.]+)") or text:match("1%s*/%s*([%d,%.]+)") or text:match("([%d,%.]+)")
+    local value = text:match("one%s*in%s*[:|%-]*%s*([%d,%.]+)") or text:match("1%s*/%s*([%d,%.]+)") or text:match("([%d,%.]+)")
     if not value then
         return nil
     end
@@ -1729,76 +1729,37 @@ end
 local function parseWeaponInventoryFromFrame()
     local parsed = {}
     local localPlayer = Players.LocalPlayer
-    local fuseFrame = localPlayer
-        and localPlayer:FindFirstChild("PlayerGui")
-        and localPlayer.PlayerGui:FindFirstChild("MainGUI")
-    fuseFrame = fuseFrame and fuseFrame:FindFirstChild("GeneralUI")
-    fuseFrame = fuseFrame and fuseFrame:FindFirstChild("FuseFrame")
-    if not fuseFrame then
+    local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
+    local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
+    local weaponsFrame = generalUi and generalUi:FindFirstChild("WeaponsFrame")
+    local weaponsScroll = weaponsFrame and weaponsFrame:FindFirstChild("ScrollingFrame")
+    if not weaponsScroll then
         return parsed
     end
 
-    for _, descendant in ipairs(fuseFrame:GetDescendants()) do
-        if descendant.Name == "WeaponFrame" then
+    for _, descendant in ipairs(weaponsScroll:GetDescendants()) do
+        if descendant:IsA("Frame") and descendant.Name == "WeaponFrame" then
             local chanceLabel = descendant:FindFirstChild("ItemChance", true)
             local nameLabel = descendant:FindFirstChild("ItemName", true)
             local qtyLabel = descendant:FindFirstChild("ItemQty", true)
             local oneIn = chanceLabel and parseOneInFromText(chanceLabel.Text)
-            local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 1
-            local weaponName = nameLabel and nameLabel.Text or descendant.Name
-            table.insert(parsed, {
-                name = weaponName or "Unknown",
-                oneIn = oneIn or 0,
-                amount = math.max(1, qty or 1),
-            })
-        end
-    end
-    return parsed
-end
-
-local function normalizeWeaponInventory(rawInventory)
-    local parsed = {}
-    if type(rawInventory) ~= "table" then
-        return parsed
-    end
-
-    for key, item in pairs(rawInventory) do
-        if type(item) == "table" then
-            local weaponName = item.WeaponName or item.Name or item.ItemName or key
-            local amount = tonumber(item.Amount or item.Qty or item.ItemQty or item.Count) or 1
-            local oneIn = tonumber(item.OneIn or item.Chance or item.ItemChance) or parseOneInFromText(item.ItemChanceText)
-            if (not oneIn) and type(item.RarityText) == "string" then
-                oneIn = parseOneInFromText(item.RarityText)
+            local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 0
+            local weaponName = (nameLabel and nameLabel.Text or descendant.Name):gsub("^%s*(.-)%s*$", "%1")
+            if qty >= 3 and (not weaponName:match("Fused%s*$")) then
+                table.insert(parsed, {
+                    name = weaponName or "Unknown",
+                    oneIn = oneIn or 0,
+                    amount = math.max(1, qty or 1),
+                })
             end
-            table.insert(parsed, {
-                name = tostring(weaponName or key),
-                oneIn = math.max(0, math.floor((oneIn or 0) + 0.5)),
-                amount = math.max(1, math.floor(amount + 0.5)),
-            })
         end
     end
     return parsed
 end
 
 local function getWeaponInventoryForFusion()
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local getInvRemote = remotes and remotes:FindFirstChild("GetWeaponsInv")
-    local inventory
-    if getInvRemote then
-        local ok, result = pcall(function()
-            if getInvRemote:IsA("RemoteFunction") then
-                return getInvRemote:InvokeServer()
-            end
-            return nil
-        end)
-        if ok then
-            inventory = normalizeWeaponInventory(result)
-        end
-    end
-
-    if not inventory or #inventory == 0 then
-        inventory = parseWeaponInventoryFromFrame()
-    end
+    local inventory = parseWeaponInventoryFromFrame()
 
     table.sort(inventory, function(a, b)
         if a.oneIn == b.oneIn then
@@ -1852,8 +1813,8 @@ local function tryFuseWeaponsFromInventory(inventory)
     for _, item in ipairs(inventory) do
         if shouldFuseWeaponEntry(item) then
             local attemptArgs = {
-                { item.name, 1 },
                 { item.name },
+                { item.name, 1 },
                 { item.name, item.oneIn, item.amount },
             }
             for _, args in ipairs(attemptArgs) do
@@ -1866,6 +1827,7 @@ local function tryFuseWeaponsFromInventory(inventory)
                 end)
                 if ok then
                     fusedCount += 1
+                    task.wait(0.3)
                     break
                 end
             end
@@ -2257,28 +2219,12 @@ makeToggle("Auto Fusion On/Off", autoFusionEnabled, function(v)
     log(v and "Weapon Fusion enabled" or "Weapon Fusion disabled")
 end, "Weapon Fusion")
 
-for _, category in ipairs({ "All", "Green", "Blue", "Purple", "Orange", "Pink" }) do
+for _, category in ipairs({ "All", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }) do
     local config = fusionSettings[category]
     if config then
         makeToggle(string.format("%s OneIn Enabled", category), config.enabled, function(v)
             config.enabled = v
         end, "Weapon Fusion")
-        makeInput(string.format("%s OneIn Min", category), tostring(config.min), function(text)
-            local val = tonumber((text or ""):gsub(",", ""))
-            if val then
-                config.min = math.max(0, math.floor(val + 0.5))
-            end
-            return tostring(config.min)
-        end, "Weapon Fusion")
-        if config.max < math.huge then
-            makeInput(string.format("%s OneIn Max", category), tostring(config.max), function(text)
-                local val = tonumber((text or ""):gsub(",", ""))
-                if val then
-                    config.max = math.max(config.min, math.floor(val + 0.5))
-                end
-                return tostring(config.max)
-            end, "Weapon Fusion")
-        end
     end
 end
 
