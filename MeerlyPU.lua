@@ -2274,7 +2274,7 @@ local function invokeRemoteFunction(remoteName, ...)
     return result
 end
 
-local function coerceUpgradeLevel(raw)
+function coerceUpgradeLevel(raw)
     if raw == nil or raw == false then
         return 0
     end
@@ -2293,7 +2293,7 @@ local function coerceUpgradeLevel(raw)
     return 0
 end
 
-local function coerceUpgradePrice(raw)
+function coerceUpgradePrice(raw)
     if type(raw) == "number" and raw == raw and raw > 0 then
         return raw
     end
@@ -2306,7 +2306,7 @@ local function coerceUpgradePrice(raw)
     return nil
 end
 
-local function readUpgradeLevel(upgradeName)
+function readUpgradeLevel(upgradeName)
     return coerceUpgradeLevel(invokeRemoteFunction("GetUpgradeLevel", upgradeName))
 end
 
@@ -2327,7 +2327,7 @@ local function readCurrentSkillPoints()
     return nil
 end
 
-local function getUpgradeNextPrice(upgradeName, currentLevel)
+function getUpgradeNextPrice(upgradeName, currentLevel)
     local remotePrice = coerceUpgradePrice(
         invokeRemoteFunction("GetUpgradePrice", upgradeName, currentLevel)
         or invokeRemoteFunction("GetNextUpgradePrice", upgradeName, currentLevel)
@@ -2354,7 +2354,7 @@ local function getUpgradeNextPrice(upgradeName, currentLevel)
     return nil
 end
 
-local function parseUpgradeCapInput(text)
+function parseUpgradeCapInput(text)
     local parsed = tonumber(tostring(text or ""):gsub("^%s*(.-)%s*$", "%1"))
     if not parsed or parsed < 1 then
         return nil
@@ -2362,7 +2362,7 @@ local function parseUpgradeCapInput(text)
     return math.floor(parsed)
 end
 
-local function getUpgradeCandidates()
+function getUpgradeCandidates()
     local candidates = {}
     for _, upgradeName in ipairs(UPGRADE_ORDER) do
         if upgradeSelected[upgradeName] then
@@ -2391,7 +2391,7 @@ local function getUpgradeCandidates()
     return candidates
 end
 
-local function refreshUpgradesLiveOutput()
+function refreshUpgradesLiveOutput()
     if not upgradeLiveOutput then
         return
     end
@@ -2410,7 +2410,7 @@ local function refreshUpgradesLiveOutput()
     upgradeLiveOutput.Text = table.concat(lines, "\n")
 end
 
-local function clearTabRows(tabName)
+function clearTabRows(tabName)
     local page = tabPages[tabName]
     if not page then
         return
@@ -2822,7 +2822,6 @@ makeInput("Always Keep Qty", tostring(sacrificeKeepQuantity), function(text)
     return tostring(sacrificeKeepQuantity)
 end, "Sacrifice")
 
-local sacrificeTierButton
 sacrificeTierButton = makeButton("Tier Cap: --", function()
     sacrificeRarityCapIndex += 1
     if sacrificeRarityCapIndex > #sacrificeTierCaps then
@@ -2832,10 +2831,7 @@ sacrificeTierButton = makeButton("Tier Cap: --", function()
     sacrificeTierButton.Text = "Tier Cap: " .. label
     updateSacrificeInventoryOutput(sacrificeInventory)
 end, "Sacrifice")
-do
-    local _, label = getSacrificeTierCap()
-    sacrificeTierButton.Text = "Tier Cap: " .. label
-end
+sacrificeTierButton.Text = "Tier Cap: " .. select(2, getSacrificeTierCap())
 
 makeButton("Refresh Sacrifice List", function()
     refreshSacrificeInventory(false)
