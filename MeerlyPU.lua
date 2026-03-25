@@ -105,8 +105,8 @@ local sacrificeTierCaps = {
     { label = "Omni (<= 99M)", cap = 99000000 },
 }
 
-local hardcodedAccessKey = "ForLoveWithLove"
-local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
+local hardcodedAccessKey = "TheyPatchedUsOnce"
+local keychainUrl = "https://work.ink/2kaV/meerlymrng2"
 
 local fxCullConnection = nil
 local weaponChildAddedConnection = nil
