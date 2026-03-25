@@ -98,44 +98,6 @@ local sacrificeTierCaps = {
     { label = "Godly (<= 11M)", cap = 11000000 },
     { label = "Omni (<= 99M)", cap = 99000000 },
 }
-local autoUpgradeEnabled = false
-local upgradeStatusOutput = nil
-local upgradeQueueOutput = nil
-local upgradeLiveOutput = nil
-local upgradeToggles = {}
-local upgradeCaps = {}
-local UPGRADE_ORDER = {
-    "Weapons Equipped",
-    "Damage Multiplier",
-    "Enemy Spawn Rate",
-    "Enemy Limit",
-    "Mana Multiplier",
-    "Spin Speed",
-    "RNG Luck",
-    "Kill Multiplier",
-    "Skill Point Multiplier",
-    "Boss Spawn Chance",
-}
-local UPGRADE_PRICE_FORMULAS = {
-    ["Weapons Equipped"] = function(p) return 1 + p ^ 2 * p end,
-    ["Damage Multiplier"] = function(p) return p ^ 4 + 5 end,
-    ["Enemy Spawn Rate"] = function(p) return math.floor(p ^ 1.5 + 10) end,
-    ["Enemy Limit"] = function(p) return math.round(p ^ 1.1 + 1) end,
-    ["Mana Multiplier"] = function(p) return math.round(8 + p ^ 2.35 * p) end,
-    ["Spin Speed"] = function(p) return p ^ 4 + 5 end,
-    ["RNG Luck"] = function(p) return p ^ 4 + 5 end,
-    ["Kill Multiplier"] = function(p) return math.round(p ^ 3.9 + 100) end,
-    ["Skill Point Multiplier"] = function(p) return math.round(p ^ 4.5) + 1 end,
-    ["Boss Spawn Chance"] = function(p) return math.round(p ^ 4) + 150 end,
-}
-local UPGRADE_PRICE_REMOTE_NAMES = {
-    "GetUpgradePrice",
-    "GetNextUpgradePrice",
-    "GetUpgradeCost",
-    "CalculateUpgradePrice",
-}
-local upgradePriceCache = {}
-local upgradePriceCacheTtl = 2.5
 
 local hardcodedAccessKey = "ForLoveWithLove"
 local keychainUrl = "https://work.ink/2kaV/meerlyunrng"
@@ -1254,14 +1216,13 @@ end
 
 createTab("OP Settings")
 createTab("Utility")
-createTab("Upgrades")
 createTab("Weapon Fusion")
 createTab("Sacrifice")
 createTab("Settings")
 createTab("Teleports")
 
 -- Keep tab buttons contained within bar width regardless of window size.
-local tabNames = { "OP Settings", "Utility", "Upgrades", "Weapon Fusion", "Sacrifice", "Settings", "Teleports" }
+local tabNames = { "OP Settings", "Utility", "Weapon Fusion", "Sacrifice", "Settings", "Teleports" }
 local function updateTabButtonSizes()
     local paddingPx = tabLayout.Padding.Offset
     local barWidth = tabBar.AbsoluteSize.X
@@ -2147,204 +2108,6 @@ local function runSacrificePass()
     return attempted, succeeded, nil
 end
 
-local function invokeRemoteByName(remoteName, ...)
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local remote = remotes and remotes:FindFirstChild(remoteName)
-    if not remote then
-        return nil, "missing remote"
-    end
-    local args = table.pack(...)
-    local ok, result = pcall(function()
-        return remote:InvokeServer(table.unpack(args, 1, args.n))
-    end)
-    if not ok then
-        return nil, result
-    end
-    return result, nil
-end
-
-local function upgradeNormalizeNumber(raw, fallback)
-    if type(raw) == "number" and raw == raw then
-        return raw
-    end
-    if type(raw) == "string" then
-        local parsed = tonumber(raw:gsub(",", ""))
-        if parsed then
-            return parsed
-        end
-    end
-    if type(raw) == "table" then
-        local candidate = raw[1] or raw.Level or raw.level or raw.Price or raw.price or raw.Cost or raw.cost or raw.Value or raw.value
-        if candidate ~= nil then
-            return upgradeNormalizeNumber(candidate, fallback)
-        end
-    end
-    return fallback
-end
-
-local function readSkillPoints()
-    local statsFolder = player:FindFirstChild("leaderstats") or player:FindFirstChild("Stats")
-    if statsFolder then
-        local spValue = statsFolder:FindFirstChild("SP") or statsFolder:FindFirstChild("SkillPoints") or statsFolder:FindFirstChild("Skill Point")
-        if spValue and spValue:IsA("NumberValue") then
-            return spValue.Value
-        end
-        if spValue and spValue:IsA("IntValue") then
-            return spValue.Value
-        end
-    end
-
-    local spRemoteValue = invokeRemoteByName("GetPlayerStat", "SP")
-    local parsed = upgradeNormalizeNumber(spRemoteValue, nil)
-    return parsed or 0
-end
-
-local function readUpgradeLevel(upgradeName)
-    local raw = invokeRemoteByName("GetUpgradeLevel", upgradeName)
-    local lvl = upgradeNormalizeNumber(raw, 0) or 0
-    lvl = math.max(0, math.floor(lvl))
-    return lvl
-end
-
-local function readUpgradePriceRemote(upgradeName, level)
-    for _, remoteName in ipairs(UPGRADE_PRICE_REMOTE_NAMES) do
-        local value = invokeRemoteByName(remoteName, upgradeName, level)
-        local parsed = upgradeNormalizeNumber(value, nil)
-        if parsed and parsed > 0 then
-            return parsed
-        end
-        value = invokeRemoteByName(remoteName, upgradeName)
-        parsed = upgradeNormalizeNumber(value, nil)
-        if parsed and parsed > 0 then
-            return parsed
-        end
-    end
-    return nil
-end
-
-local function readUpgradeNextPrice(upgradeName, level)
-    local key = string.format("%s#%d", tostring(upgradeName), math.floor(level))
-    local now = os.clock()
-    local cached = upgradePriceCache[key]
-    if cached and (now - cached.t) <= upgradePriceCacheTtl then
-        return cached.price
-    end
-
-    local remotePrice = readUpgradePriceRemote(upgradeName, level)
-    if remotePrice then
-        upgradePriceCache[key] = { t = now, price = remotePrice }
-        return remotePrice
-    end
-
-    local formula = UPGRADE_PRICE_FORMULAS[upgradeName]
-    if not formula then
-        return nil
-    end
-
-    local ok, fallbackPrice = pcall(function()
-        return formula(level + 1)
-    end)
-    if ok and type(fallbackPrice) == "number" and fallbackPrice > 0 then
-        upgradePriceCache[key] = { t = now, price = fallbackPrice }
-        return fallbackPrice
-    end
-    return nil
-end
-
-local function buildUpgradeCandidates()
-    local candidates = {}
-    for _, name in ipairs(UPGRADE_ORDER) do
-        if upgradeToggles[name] == true then
-            local level = readUpgradeLevel(name)
-            local cap = upgradeCaps[name]
-            if not (cap and level >= cap) then
-                local price = readUpgradeNextPrice(name, level)
-                if price then
-                    table.insert(candidates, {
-                        name = name,
-                        level = level,
-                        price = price,
-                    })
-                end
-            end
-        end
-    end
-    table.sort(candidates, function(a, b)
-        if a.price == b.price then
-            return a.name < b.name
-        end
-        return a.price < b.price
-    end)
-    return candidates
-end
-
-local function refreshUpgradeOutputs()
-    local candidates = buildUpgradeCandidates()
-    local sp = readSkillPoints()
-
-    if upgradeStatusOutput then
-        local head = candidates[1]
-        if head then
-            upgradeStatusOutput.Text = string.format(
-                "Auto: %s | SP: %d | Next: %s (%d)",
-                autoUpgradeEnabled and "ON" or "OFF",
-                math.floor(sp),
-                head.name,
-                math.floor(head.price)
-            )
-        else
-            upgradeStatusOutput.Text = string.format(
-                "Auto: %s | SP: %d | Next: none",
-                autoUpgradeEnabled and "ON" or "OFF",
-                math.floor(sp)
-            )
-        end
-    end
-
-    if upgradeQueueOutput then
-        local lines = {}
-        for _, row in ipairs(candidates) do
-            table.insert(lines, string.format("%s | L%d | Next %d SP", row.name, row.level, math.floor(row.price)))
-        end
-        upgradeQueueOutput.Text = (#lines > 0) and table.concat(lines, "\n") or "No enabled upgrade candidates."
-    end
-
-    if upgradeLiveOutput then
-        local lines = {}
-        for _, name in ipairs(UPGRADE_ORDER) do
-            local level = readUpgradeLevel(name)
-            local cap = upgradeCaps[name]
-            local capText = cap and string.format(" | cap %d", cap) or ""
-            local toggleText = upgradeToggles[name] and "ON" or "OFF"
-            table.insert(lines, string.format("%s | L%d | %s%s", name, level, toggleText, capText))
-        end
-        upgradeLiveOutput.Text = table.concat(lines, "\n")
-    end
-end
-
-local function runAutoUpgradeTick()
-    if not autoUpgradeEnabled then
-        return
-    end
-
-    local candidates = buildUpgradeCandidates()
-    local sp = readSkillPoints()
-    local spNum = tonumber(sp) or 0
-
-    for _, row in ipairs(candidates) do
-        if spNum >= row.price then
-            local result = invokeRemoteByName("BuyUpgrade", row.name)
-            if result ~= nil and result ~= false then
-                upgradePriceCache = {}
-                if upgradeStatusOutput then
-                    upgradeStatusOutput.Text = string.format("Bought: %s L%d->L%d", row.name, row.level, row.level + 1)
-                end
-                return
-            end
-        end
-    end
-end
-
 local function getWeaponInventoryForFusion()
     local frameInventory = parseFusionWeaponFrames()
     local remoteInventory = parseFusionInventoryRemote()
@@ -2747,11 +2510,6 @@ local function resolveMainGui()
 end
 
 -- ---- Feature wiring (UI -> behavior) ----
-for _, upgradeName in ipairs(UPGRADE_ORDER) do
-    if upgradeToggles[upgradeName] == nil then
-        upgradeToggles[upgradeName] = true
-    end
-end
 
 -- OP Settings page.
 makeToggle("Hitbox Expander", hitboxExpanderMasterEnabled, function(v)
@@ -2841,44 +2599,6 @@ makeInput("Target FPS (30-240)", tostring(targetFPS), function(text)
     end
     return tostring(targetFPS)
 end, "Utility")
-
--- Upgrades page.
-makeSectionLabel("Auto Upgrades", "Upgrades")
-makeToggle("Auto Upgrade", autoUpgradeEnabled, function(v)
-    autoUpgradeEnabled = v
-    log(v and "Auto Upgrade enabled" or "Auto Upgrade disabled")
-    refreshUpgradeOutputs()
-end, "Upgrades")
-
-makeButton("Refresh Upgrade Status", function()
-    refreshUpgradeOutputs()
-    log("Upgrade status refreshed")
-end, "Upgrades")
-
-makeSectionLabel("Enabled Upgrades + Caps", "Upgrades")
-for _, upgradeName in ipairs(UPGRADE_ORDER) do
-    makeToggle("Enable: " .. upgradeName, upgradeToggles[upgradeName] == true, function(v)
-        upgradeToggles[upgradeName] = v
-        refreshUpgradeOutputs()
-    end, "Upgrades")
-
-    makeInput("Cap: " .. upgradeName, upgradeCaps[upgradeName] and tostring(upgradeCaps[upgradeName]) or "", function(text)
-        local parsed = tonumber((tostring(text or "")):gsub("%s+", ""))
-        if parsed and parsed >= 1 then
-            upgradeCaps[upgradeName] = math.floor(parsed)
-            refreshUpgradeOutputs()
-            return tostring(upgradeCaps[upgradeName])
-        end
-        upgradeCaps[upgradeName] = nil
-        refreshUpgradeOutputs()
-        return ""
-    end, "Upgrades")
-end
-
-upgradeStatusOutput = makeOutputField("Upgrade Status", "Loading...", "Upgrades")
-upgradeQueueOutput = makeOutputField("Upgrade Queue (cheapest first)", "Loading...", "Upgrades")
-upgradeLiveOutput = makeOutputField("Live Upgrade Levels", "Loading...", "Upgrades")
-refreshUpgradeOutputs()
 
 -- Weapon Fusion page.
 makeSectionLabel("Weapon Fusion", "Weapon Fusion")
@@ -3368,18 +3088,6 @@ task.spawn(function()
         else
             task.wait(0.1)
         end
-    end
-end)
-
-task.spawn(function()
-    while running do
-        pcall(function()
-            runAutoUpgradeTick()
-        end)
-        pcall(function()
-            refreshUpgradeOutputs()
-        end)
-        task.wait(autoUpgradeEnabled and 1 or 4)
     end
 end)
 
