@@ -1726,27 +1726,63 @@ local function parseOneInFromText(raw)
     return nil
 end
 
-local function parseWeaponInventoryFromFrame()
-    local parsed = {}
+local function readGuiText(node)
+    if not node then
+        return ""
+    end
+
+    local textValue = ""
+    pcall(function()
+        textValue = tostring(node.Text or "")
+    end)
+
+    if textValue == "" then
+        pcall(function()
+            textValue = tostring(node.ContentText or "")
+        end)
+    end
+
+    return textValue
+end
+
+local function resolveFusionScrollFrame()
     local localPlayer = Players.LocalPlayer
     local playerGui = localPlayer and localPlayer:FindFirstChild("PlayerGui")
     local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
     local generalUi = mainGui and mainGui:FindFirstChild("GeneralUI")
-    local fuseFrame = generalUi and generalUi:FindFirstChild("FuseFrame")
-    local fuseScroll = fuseFrame and fuseFrame:FindFirstChild("ScrollingFrame")
+    if not generalUi then
+        return nil
+    end
+
+    local fuseFrame = generalUi:FindFirstChild("FuseFrame") or generalUi:FindFirstChild("FuseFrame", true)
+    if not fuseFrame then
+        return nil
+    end
+
+    return fuseFrame:FindFirstChild("ScrollingFrame") or fuseFrame:FindFirstChild("ScrollingFrame", true)
+end
+
+local function parseWeaponInventoryFromFrame()
+    local parsed = {}
+    local fuseScroll = resolveFusionScrollFrame()
     if not fuseScroll then
         return parsed
     end
 
-    for _, child in ipairs(fuseScroll:GetChildren()) do
+    for _, child in ipairs(fuseScroll:GetDescendants()) do
         if child:IsA("GuiObject") and child.Name == "WeaponFrame" then
             local chanceLabel = child:FindFirstChild("ItemChance", true)
             local nameLabel = child:FindFirstChild("ItemName", true)
             local qtyLabel = child:FindFirstChild("ItemQuantity", true) or child:FindFirstChild("ItemQty", true)
-            local chanceText = chanceLabel and tostring(chanceLabel.Text or "") or "Unknown"
+            local chanceText = readGuiText(chanceLabel)
+            if chanceText == "" then
+                chanceText = "Unknown"
+            end
             local oneIn = parseOneInFromText(chanceText)
-            local qty = qtyLabel and tonumber((tostring(qtyLabel.Text or "")):gsub("[^%d]", "")) or 0
-            local weaponName = (nameLabel and nameLabel.Text or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
+            local qtyText = readGuiText(qtyLabel)
+            local qty = tonumber((qtyText):gsub("[^%d]", "")) or 0
+            local weaponName = readGuiText(nameLabel)
+            weaponName = weaponName ~= "" and weaponName:gsub("^%s*(.-)%s*$", "%1") or "Unknown"
             table.insert(parsed, {
                 name = weaponName,
                 oneIn = oneIn or 0,
