@@ -1738,19 +1738,20 @@ local function parseWeaponInventoryFromFrame()
         return parsed
     end
 
-    for _, descendant in ipairs(fuseScroll:GetDescendants()) do
-        if descendant:IsA("Frame") and descendant.Name == "WeaponFrame" then
-            local chanceLabel = descendant:FindFirstChild("ItemChance", true)
-            local nameLabel = descendant:FindFirstChild("ItemName", true)
-            local qtyLabel = descendant:FindFirstChild("ItemQty", true)
+    for _, child in ipairs(fuseScroll:GetChildren()) do
+        if child:IsA("GuiObject") and child.Name == "WeaponFrame" then
+            local chanceLabel = child:FindFirstChild("ItemChance", true)
+            local nameLabel = child:FindFirstChild("ItemName", true)
+            local qtyLabel = child:FindFirstChild("ItemQuantity", true) or child:FindFirstChild("ItemQty", true)
             local oneIn = chanceLabel and parseOneInFromText(chanceLabel.Text)
             local qty = qtyLabel and tonumber((qtyLabel.Text or ""):gsub("[^%d]", "")) or 0
-            local weaponName = (nameLabel and nameLabel.Text or descendant.Name):gsub("^%s*(.-)%s*$", "%1")
+            local weaponName = (nameLabel and nameLabel.Text or "Unknown"):gsub("^%s*(.-)%s*$", "%1")
             if qty >= 3 and (not weaponName:match("Fused%s*$")) then
                 table.insert(parsed, {
-                    name = weaponName or "Unknown",
+                    name = weaponName,
                     oneIn = oneIn or 0,
-                    amount = math.max(1, qty or 1),
+                    amount = qty,
+                    frame = child,
                 })
             end
         end
@@ -1791,7 +1792,7 @@ local function getWeaponInventoryForFusion()
 end
 
 local function shouldFuseWeaponEntry(entry)
-    if not entry or entry.amount < 2 then
+    if not entry or entry.amount < 3 then
         return false
     end
 
@@ -1821,34 +1822,70 @@ local function updateFusionStatusOutput(inventory)
     fusionStatusOutput.Text = #lines > 0 and table.concat(lines, "\n") or "No weapons found."
 end
 
+local function tryFuseViaUiButton(entry)
+    local frame = entry and entry.frame
+    if not frame then
+        return false
+    end
+
+    local fuseButton = frame:FindFirstChild("FuseButton", true)
+    if not fuseButton then
+        for _, obj in ipairs(frame:GetDescendants()) do
+            if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and string.find(string.lower(obj.Name), "fuse", 1, true) then
+                fuseButton = obj
+                break
+            end
+        end
+    end
+
+    if not (fuseButton and (fuseButton:IsA("TextButton") or fuseButton:IsA("ImageButton"))) then
+        return false
+    end
+
+    local ok = pcall(function()
+        fuseButton:Activate()
+    end)
+    return ok
+end
+
 local function tryFuseWeaponsFromInventory(inventory)
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local fuseRemote = remotes and remotes:FindFirstChild("FuseWeapons")
-    if not fuseRemote then
-        return 0
-    end
 
     local fusedCount = 0
     for _, item in ipairs(inventory) do
         if shouldFuseWeaponEntry(item) then
-            local attemptArgs = {
-                { item.name },
-                { item.name, 1 },
-                { item.name, item.oneIn, item.amount },
-            }
-            for _, args in ipairs(attemptArgs) do
-                local ok = pcall(function()
-                    if fuseRemote:IsA("RemoteFunction") then
-                        fuseRemote:InvokeServer(unpack(args))
-                    else
+            local didFuse = false
+
+            if fuseRemote then
+                local attemptArgs = {
+                    { item.name },
+                    { item.name, 3 },
+                    { item.name, item.amount },
+                    { item.name, item.oneIn, item.amount },
+                }
+                for _, args in ipairs(attemptArgs) do
+                    local ok, result = pcall(function()
+                        if fuseRemote:IsA("RemoteFunction") then
+                            return fuseRemote:InvokeServer(unpack(args))
+                        end
                         fuseRemote:FireServer(unpack(args))
+                        return true
+                    end)
+                    if ok and result ~= false then
+                        didFuse = true
+                        break
                     end
-                end)
-                if ok then
-                    fusedCount += 1
-                    task.wait(0.3)
-                    break
                 end
+            end
+
+            if (not didFuse) and tryFuseViaUiButton(item) then
+                didFuse = true
+            end
+
+            if didFuse then
+                fusedCount += 1
+                task.wait(0.3)
             end
         end
     end
