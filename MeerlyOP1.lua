@@ -42,7 +42,14 @@ local defaultConfig = {
         wallcheckColour = false,
         teamcheck = false,
         traceLines = false,
-    }
+    },
+    colors = {
+        highlightColour = {r = 0, g = 255, b = 120},
+        skeletonColour = {r = 255, g = 255, b = 255},
+        wallcheckColour = {r = 255, g = 70, b = 70},
+        traceLineColour = {r = 255, g = 255, b = 255},
+        nameTagColour = {r = 80, g = 255, b = 120},
+    },
 }
 
 local config = table.clone(defaultConfig)
@@ -78,6 +85,27 @@ end
 local function saveTeleportConfig()
     if config.saveConfiguration then
         TeleportService:SetTeleportSetting(TELEPORT_KEY, config)
+    end
+end
+
+local function rgbTableToColor3(rgb)
+    if type(rgb) ~= "table" then
+        return Color3.fromRGB(255, 255, 255)
+    end
+    return Color3.fromRGB(tonumber(rgb.r) or 255, tonumber(rgb.g) or 255, tonumber(rgb.b) or 255)
+end
+
+local function color3ToRgbTable(color)
+    return {
+        r = math.floor(math.clamp(color.R * 255, 0, 255) + 0.5),
+        g = math.floor(math.clamp(color.G * 255, 0, 255) + 0.5),
+        b = math.floor(math.clamp(color.B * 255, 0, 255) + 0.5),
+    }
+end
+
+local function persistConfig()
+    if config.saveConfiguration then
+        saveTeleportConfig()
     end
 end
 
@@ -223,6 +251,88 @@ local function makeToggle(labelText, parent, order)
     return row, toggle
 end
 
+local function makeColorPicker(labelText, parent, order, configKey)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 38)
+    row.Position = UDim2.fromOffset(4, (order - 1) * 42)
+    row.BackgroundColor3 = THEME.panelAltBg
+    row.BorderSizePixel = 0
+    row.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 4)
+    corner.Parent = row
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromOffset(130, 38)
+    label.Position = UDim2.fromOffset(12, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextColor3 = THEME.textPrimary
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+    label.Parent = row
+
+    local function makeChannelBox(channel, offset)
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.fromOffset(42, 24)
+        box.Position = UDim2.new(0, offset, 0.5, -12)
+        box.BackgroundColor3 = Color3.fromRGB(24, 26, 30)
+        box.TextColor3 = THEME.textPrimary
+        box.PlaceholderText = channel
+        box.TextSize = 11
+        box.Font = Enum.Font.Code
+        box.ClearTextOnFocus = false
+        box.Parent = row
+        local boxCorner = Instance.new("UICorner")
+        boxCorner.CornerRadius = UDim.new(0, 4)
+        boxCorner.Parent = box
+        return box
+    end
+
+    local rBox = makeChannelBox("R", 148)
+    local gBox = makeChannelBox("G", 194)
+    local bBox = makeChannelBox("B", 240)
+
+    local preview = Instance.new("Frame")
+    preview.Size = UDim2.fromOffset(26, 24)
+    preview.Position = UDim2.new(1, -36, 0.5, -12)
+    preview.BorderSizePixel = 0
+    preview.Parent = row
+    local previewCorner = Instance.new("UICorner")
+    previewCorner.CornerRadius = UDim.new(0, 4)
+    previewCorner.Parent = preview
+
+    local function applyBoxes()
+        local parsed = {
+            r = math.clamp(tonumber(rBox.Text) or 255, 0, 255),
+            g = math.clamp(tonumber(gBox.Text) or 255, 0, 255),
+            b = math.clamp(tonumber(bBox.Text) or 255, 0, 255),
+        }
+        config.colors[configKey] = parsed
+        preview.BackgroundColor3 = rgbTableToColor3(parsed)
+        persistConfig()
+    end
+
+    local function syncBoxes()
+        local existing = config.colors[configKey] or {r = 255, g = 255, b = 255}
+        rBox.Text = tostring(existing.r or 255)
+        gBox.Text = tostring(existing.g or 255)
+        bBox.Text = tostring(existing.b or 255)
+        preview.BackgroundColor3 = rgbTableToColor3(existing)
+    end
+
+    for _, box in ipairs({rBox, gBox, bBox}) do
+        box.FocusLost:Connect(function()
+            applyBoxes()
+            syncBoxes()
+        end)
+    end
+
+    syncBoxes()
+end
+
 local loginOverlay = Instance.new("Frame")
 loginOverlay.Size = UDim2.fromScale(1, 1)
 loginOverlay.BackgroundColor3 = Color3.fromRGB(16, 18, 22)
@@ -305,6 +415,7 @@ local function makeVisualToggle(configKey, text, order)
     button.MouseButton1Click:Connect(function()
         config.visual[configKey] = not config.visual[configKey]
         setToggleVisual(button, config.visual[configKey])
+        persistConfig()
     end)
 end
 
@@ -326,14 +437,19 @@ setTabActive(customTabBtn, false)
 autoInjectBtn.MouseButton1Click:Connect(function()
     config.autoInject = not config.autoInject
     setToggleVisual(autoInjectBtn, config.autoInject)
-    saveTeleportConfig()
+    persistConfig()
 end)
 
 saveConfigBtn.MouseButton1Click:Connect(function()
     config.saveConfiguration = not config.saveConfiguration
     setToggleVisual(saveConfigBtn, config.saveConfiguration)
-    saveTeleportConfig()
+    persistConfig()
 end)
+
+makeColorPicker("Highlight Colour", customPage, 3, "highlightColour")
+makeColorPicker("Skeleton Colour", customPage, 4, "skeletonColour")
+makeColorPicker("Wallcheck Colour", customPage, 5, "wallcheckColour")
+makeColorPicker("Trace Line Colour", customPage, 6, "traceLineColour")
 
 visualTabBtn.MouseButton1Click:Connect(function()
     visualPage.Visible = true
@@ -356,6 +472,26 @@ local visuals = {
     skeletons = {},
     tracers = {},
 }
+
+local function getTargetVisibility(targetCharacter)
+    local camera = workspace.CurrentCamera
+    if not camera or not targetCharacter then
+        return false
+    end
+
+    local localCharacter = localPlayer.Character
+    local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then
+        return false
+    end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {localCharacter, targetCharacter}
+    local direction = targetRoot.Position - camera.CFrame.Position
+    local hit = workspace:Raycast(camera.CFrame.Position, direction, params)
+    return not hit
+end
 
 local function getCharacterParts(character)
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
@@ -395,24 +531,14 @@ local function ensureHighlight(targetPlayer)
         visuals.highlights[targetPlayer] = highlight
     end
 
-    if config.visual.wallcheckColour then
-        local localCharacter = localPlayer.Character
-        local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
-        local targetRoot = character:FindFirstChild("HumanoidRootPart")
-        if localRoot and targetRoot then
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {localCharacter, character}
-            local direction = (targetRoot.Position - localRoot.Position)
-            local hit = workspace:Raycast(localRoot.Position, direction, params)
-            local visible = not hit
-            highlight.FillColor = visible and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 75, 75)
-            highlight.OutlineColor = visible and Color3.fromRGB(170, 255, 170) or Color3.fromRGB(255, 170, 170)
-        end
-    else
-        highlight.FillColor = Color3.fromRGB(255, 200, 45)
-        highlight.OutlineColor = Color3.fromRGB(255, 240, 190)
+    local visibleColour = rgbTableToColor3(config.colors.highlightColour)
+    local occludedColour = rgbTableToColor3(config.colors.wallcheckColour)
+    local resolved = visibleColour
+    if config.visual.wallcheckColour and not getTargetVisibility(character) then
+        resolved = occludedColour
     end
+    highlight.FillColor = resolved
+    highlight.OutlineColor = resolved
 end
 
 local function ensureNameTag(targetPlayer)
@@ -438,13 +564,24 @@ local function ensureNameTag(targetPlayer)
         label.Size = UDim2.fromScale(1, 1)
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.GothamBold
-        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextColor3 = rgbTableToColor3(config.colors.nameTagColour or config.colors.highlightColour)
         label.TextStrokeTransparency = 0.35
         label.TextSize = 14
         label.Text = targetPlayer.DisplayName .. " (@" .. targetPlayer.Name .. ")"
         label.Parent = billboard
 
         visuals.nameTags[targetPlayer] = billboard
+    else
+        local label = billboard:FindFirstChildOfClass("TextLabel")
+        if label then
+            local visibleColour = rgbTableToColor3(config.colors.nameTagColour or config.colors.highlightColour)
+            local occludedColour = rgbTableToColor3(config.colors.wallcheckColour)
+            local resolved = visibleColour
+            if config.visual.wallcheckColour and not getTargetVisibility(character) then
+                resolved = occludedColour
+            end
+            label.TextColor3 = resolved
+        end
     end
 end
 
@@ -456,22 +593,53 @@ local function ensureSkeleton(targetPlayer)
         visuals.skeletons[targetPlayer] = {}
     end
 
-    for _, part in ipairs(character:GetChildren()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            local adornName = "MeerlyOP1_Skeleton_" .. part.Name
-            local adorn = part:FindFirstChild(adornName)
-            if not adorn then
-                adorn = Instance.new("BoxHandleAdornment")
-                adorn.Name = adornName
-                adorn.Adornee = part
-                adorn.AlwaysOnTop = true
-                adorn.ZIndex = 5
-                adorn.Size = part.Size + Vector3.new(0.04, 0.04, 0.04)
-                adorn.Transparency = 0.75
-                adorn.Color3 = Color3.fromRGB(130, 220, 255)
-                adorn.Parent = part
+    local rig = character:FindFirstChildOfClass("Humanoid")
+    local isR15 = rig and rig.RigType == Enum.HumanoidRigType.R15
+    local pairs = isR15 and {
+        {"Head", "UpperTorso"},
+        {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
+    } or {
+        {"Head", "Torso"},
+        {"Torso", "Left Arm"}, {"Left Arm", "Left Leg"},
+        {"Torso", "Right Arm"}, {"Right Arm", "Right Leg"},
+        {"Torso", "Left Leg"}, {"Torso", "Right Leg"},
+    }
+
+    for _, link in ipairs(pairs) do
+        local part0 = character:FindFirstChild(link[1])
+        local part1 = character:FindFirstChild(link[2])
+        if part0 and part1 and part0:IsA("BasePart") and part1:IsA("BasePart") then
+            local key = link[1] .. "_" .. link[2]
+            local beamObj = visuals.skeletons[targetPlayer][key]
+            if not beamObj then
+                local a0 = Instance.new("Attachment")
+                a0.Parent = part0
+                local a1 = Instance.new("Attachment")
+                a1.Parent = part1
+                local beam = Instance.new("Beam")
+                beam.Attachment0 = a0
+                beam.Attachment1 = a1
+                beam.FaceCamera = true
+                beam.Width0 = 0.05
+                beam.Width1 = 0.05
+                beam.LightEmission = 1
+                beam.Transparency = NumberSequence.new(0)
+                beam.Parent = part0
+                beamObj = {a0 = a0, a1 = a1, beam = beam}
+                visuals.skeletons[targetPlayer][key] = beamObj
             end
-            visuals.skeletons[targetPlayer][part] = adorn
+
+            local visibleColour = rgbTableToColor3(config.colors.skeletonColour)
+            local occludedColour = rgbTableToColor3(config.colors.wallcheckColour)
+            local resolved = visibleColour
+            if config.visual.wallcheckColour and not getTargetVisibility(character) then
+                resolved = occludedColour
+            end
+            beamObj.beam.Color = ColorSequence.new(resolved)
         end
     end
 end
@@ -482,8 +650,7 @@ local function ensureTracer(targetPlayer)
     if not character or not localCharacter then return end
 
     local targetRoot = character:FindFirstChild("HumanoidRootPart")
-    local localRoot = localCharacter:FindFirstChild("HumanoidRootPart")
-    if not targetRoot or not localRoot then return end
+    if not targetRoot then return end
 
     local tracer = visuals.tracers[targetPlayer]
     if not tracer then
@@ -495,29 +662,41 @@ local function ensureTracer(targetPlayer)
         part.CanCollide = false
         part.Parent = workspace
 
+        part.CFrame = CFrame.new()
+
         local a0 = Instance.new("Attachment")
         a0.Name = "A0"
-        a0.Parent = localRoot
+        a0.Parent = part
 
         local a1 = Instance.new("Attachment")
         a1.Name = "A1"
-        a1.Parent = targetRoot
+        a1.Parent = part
 
         local beam = Instance.new("Beam")
         beam.Attachment0 = a0
         beam.Attachment1 = a1
         beam.Width0 = 0.08
         beam.Width1 = 0.08
-        beam.Color = ColorSequence.new(Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 220, 120))
+        beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
         beam.FaceCamera = true
         beam.Parent = part
 
         tracer = {holder = part, a0 = a0, a1 = a1, beam = beam}
         visuals.tracers[targetPlayer] = tracer
-    else
-        if tracer.a0.Parent ~= localRoot then tracer.a0.Parent = localRoot end
-        if tracer.a1.Parent ~= targetRoot then tracer.a1.Parent = targetRoot end
     end
+
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    tracer.a0.Position = camera.CFrame.Position
+    tracer.a1.Position = targetRoot.Position
+    local visibleColour = rgbTableToColor3(config.colors.traceLineColour)
+    local occludedColour = rgbTableToColor3(config.colors.wallcheckColour)
+    local resolved = visibleColour
+    if config.visual.wallcheckColour and not getTargetVisibility(character) then
+        resolved = occludedColour
+    end
+    tracer.beam.Color = ColorSequence.new(resolved)
 end
 
 local function clearFeature(feature)
