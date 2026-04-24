@@ -28,6 +28,7 @@ end
 -- Change this to your chosen password, then copy hash output and replace below.
 local HARDCODED_PASSWORD_HASH = "1185274955" -- simpleHash("MeerlyMagickAdmin")
 
+
 --////////////// Cross-instance settings //////////////
 local TELEPORT_KEY = "MeerlyOP1_Config"
 
@@ -229,6 +230,12 @@ loginOverlay.BorderSizePixel = 0
 loginOverlay.Parent = root
 
 local splashKillButton = makeKillButton(loginOverlay)
+
+local splashKillButton = makeButton("X", loginOverlay, UDim2.fromOffset(26, 22), UDim2.new(1, -34, 0, 8))
+splashKillButton.BackgroundColor3 = THEME.danger
+splashKillButton.Font = Enum.Font.GothamBold
+splashKillButton.TextSize = 14
+
 
 local loginTitle = Instance.new("TextLabel")
 loginTitle.Size = UDim2.new(1, 0, 0, 26)
