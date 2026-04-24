@@ -26,7 +26,11 @@ local function simpleHash(input)
 end
 
 -- Change this to your chosen password, then copy hash output and replace below.
+<<<<<<< codex/create-admin-script-for-magick-online-tawvjm
 local HARDCODED_PASSWORD_HASH = "1185274955" -- simpleHash("MeerlyMagickAdmin")
+=======
+local HARDCODED_PASSWORD_HASH = "1466015504" -- simpleHash("MeerlyMagickAdmin")
+>>>>>>> main
 
 --////////////// Cross-instance settings //////////////
 local TELEPORT_KEY = "MeerlyOP1_Config"
@@ -222,11 +226,14 @@ loginOverlay.BackgroundColor3 = Color3.fromRGB(16, 18, 22)
 loginOverlay.BorderSizePixel = 0
 loginOverlay.Parent = root
 
+<<<<<<< codex/create-admin-script-for-magick-online-tawvjm
 local splashKillButton = makeButton("X", loginOverlay, UDim2.fromOffset(26, 22), UDim2.new(1, -34, 0, 8))
 splashKillButton.BackgroundColor3 = THEME.danger
 splashKillButton.Font = Enum.Font.GothamBold
 splashKillButton.TextSize = 14
 
+=======
+>>>>>>> main
 local loginTitle = Instance.new("TextLabel")
 loginTitle.Size = UDim2.new(1, 0, 0, 26)
 loginTitle.Position = UDim2.new(0, 0, 0, 20)
@@ -557,17 +564,22 @@ local function setMenuVisible(visible)
     root.Visible = visible
 end
 
+<<<<<<< codex/create-admin-script-for-magick-online-tawvjm
 local function killScript()
     if isScriptKilled then
         return
     end
 
+=======
+closeButton.MouseButton1Click:Connect(function()
+>>>>>>> main
     isScriptKilled = true
     clearFeature("highlights")
     clearFeature("nameTags")
     clearFeature("skeletons")
     clearFeature("tracers")
     screenGui:Destroy()
+<<<<<<< codex/create-admin-script-for-magick-online-tawvjm
 end
 
 closeButton.MouseButton1Click:Connect(function()
@@ -576,6 +588,8 @@ end)
 
 splashKillButton.MouseButton1Click:Connect(function()
     killScript()
+=======
+>>>>>>> main
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
