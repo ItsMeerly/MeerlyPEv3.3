@@ -738,6 +738,49 @@ local function shouldTrackTarget(targetPlayer)
     return true
 end
 
+local function isCharacterAlive(targetPlayer)
+    if not targetPlayer then
+        return false
+    end
+
+    local character = targetPlayer.Character
+    if not character or not character.Parent then
+        return false
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local head = character:FindFirstChild("Head")
+    if not humanoid or humanoid.Health <= 0 then
+        return false
+    end
+
+    return root ~= nil and head ~= nil
+end
+
+local function pruneInvalidVisualTargets()
+    for targetPlayer, _ in pairs(visuals.highlights) do
+        if not targetPlayer.Parent or not isCharacterAlive(targetPlayer) then
+            clearPlayerVisuals(targetPlayer)
+        end
+    end
+    for targetPlayer, _ in pairs(visuals.nameTags) do
+        if not targetPlayer.Parent or not isCharacterAlive(targetPlayer) then
+            clearPlayerVisuals(targetPlayer)
+        end
+    end
+    for targetPlayer, _ in pairs(visuals.skeletons) do
+        if not targetPlayer.Parent or not isCharacterAlive(targetPlayer) then
+            clearPlayerVisuals(targetPlayer)
+        end
+    end
+    for targetPlayer, _ in pairs(visuals.tracers) do
+        if not targetPlayer.Parent or not isCharacterAlive(targetPlayer) then
+            clearPlayerVisuals(targetPlayer)
+        end
+    end
+end
+
 local isMenuVisible = true
 local isScriptKilled = false
 
@@ -784,7 +827,7 @@ RunService.RenderStepped:Connect(function()
 
     if not loginOverlay.Visible then
         for _, targetPlayer in ipairs(Players:GetPlayers()) do
-            if shouldTrackTarget(targetPlayer) then
+            if shouldTrackTarget(targetPlayer) and isCharacterAlive(targetPlayer) then
                 if config.visual.highlightPlayers then
                     ensureHighlight(targetPlayer)
                 elseif visuals.highlights[targetPlayer] then
@@ -816,6 +859,8 @@ RunService.RenderStepped:Connect(function()
                 clearPlayerVisuals(targetPlayer)
             end
         end
+
+        pruneInvalidVisualTargets()
     else
         clearFeature("highlights")
         clearFeature("nameTags")
@@ -827,6 +872,26 @@ end)
 Players.PlayerRemoving:Connect(function(player)
     clearPlayerVisuals(player)
 end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        clearPlayerVisuals(player)
+    end)
+    player.CharacterRemoving:Connect(function()
+        clearPlayerVisuals(player)
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        player.CharacterAdded:Connect(function()
+            clearPlayerVisuals(player)
+        end)
+        player.CharacterRemoving:Connect(function()
+            clearPlayerVisuals(player)
+        end)
+    end
+end
 
 --////////////// Login behavior //////////////
 local function unlockWithKey(candidate)
