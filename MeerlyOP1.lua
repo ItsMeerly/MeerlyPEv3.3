@@ -38,6 +38,7 @@ local defaultConfig = {
         viewPlayerNames = false,
         playerSkeletons = false,
         wallcheckColour = false,
+        teamcheck = false,
         traceLines = false,
     }
 }
@@ -81,6 +82,17 @@ end
 loadTeleportConfig()
 
 --////////////// UI //////////////
+local THEME = {
+    windowBg = Color3.fromRGB(20, 22, 25),
+    panelBg = Color3.fromRGB(25, 27, 31),
+    panelAltBg = Color3.fromRGB(32, 35, 40),
+    textPrimary = Color3.fromRGB(232, 234, 237),
+    textMuted = Color3.fromRGB(170, 174, 181),
+    accent = Color3.fromRGB(0, 168, 255),
+    accentActive = Color3.fromRGB(0, 196, 120),
+    danger = Color3.fromRGB(175, 70, 70),
+}
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "MeerlyOP1"
 screenGui.ResetOnSpawn = false
@@ -89,47 +101,57 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
 local root = Instance.new("Frame")
-root.Size = UDim2.fromOffset(460, 330)
+root.Size = UDim2.fromOffset(480, 345)
 root.Position = UDim2.fromScale(0.5, 0.5)
 root.AnchorPoint = Vector2.new(0.5, 0.5)
-root.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+root.BackgroundColor3 = THEME.windowBg
 root.BorderSizePixel = 0
 root.Visible = true
 root.Parent = screenGui
 
 local uiCorner = Instance.new("UICorner")
-uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.CornerRadius = UDim.new(0, 4)
 uiCorner.Parent = root
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -12, 0, 30)
-title.Position = UDim2.fromOffset(6, 4)
+title.Size = UDim2.new(1, -70, 0, 30)
+title.Position = UDim2.fromOffset(8, 4)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.TextSize = 16
+title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = Color3.fromRGB(240, 240, 255)
-title.Text = "MeerlyOP1 - Magick Online Admin"
+title.TextColor3 = THEME.textPrimary
+title.Text = "[ MeerlyOP1 ]  Magick Online Admin"
 title.Parent = root
 
 local tabRow = Instance.new("Frame")
-tabRow.Size = UDim2.new(1, -12, 0, 32)
-tabRow.Position = UDim2.fromOffset(6, 36)
+tabRow.Size = UDim2.new(1, -16, 0, 32)
+tabRow.Position = UDim2.fromOffset(8, 36)
 tabRow.BackgroundTransparency = 1
 tabRow.Parent = root
 
 local body = Instance.new("Frame")
-body.Size = UDim2.new(1, -12, 1, -74)
-body.Position = UDim2.fromOffset(6, 68)
-body.BackgroundTransparency = 1
+body.Size = UDim2.new(1, -16, 1, -76)
+body.Position = UDim2.fromOffset(8, 68)
+body.BackgroundColor3 = THEME.panelBg
+body.BorderSizePixel = 0
 body.Parent = root
+
+local bodyCorner = Instance.new("UICorner")
+bodyCorner.CornerRadius = UDim.new(0, 4)
+bodyCorner.Parent = body
+
+local bodyStroke = Instance.new("UIStroke")
+bodyStroke.Color = Color3.fromRGB(45, 49, 56)
+bodyStroke.Thickness = 1
+bodyStroke.Parent = body
 
 local function makeButton(text, parent, size, pos)
     local button = Instance.new("TextButton")
     button.Size = size or UDim2.fromOffset(150, 28)
     button.Position = pos or UDim2.fromOffset(0, 0)
-    button.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    button.TextColor3 = Color3.fromRGB(235, 235, 245)
+    button.BackgroundColor3 = THEME.panelAltBg
+    button.TextColor3 = THEME.textPrimary
     button.Font = Enum.Font.Gotham
     button.TextSize = 13
     button.Text = text
@@ -137,22 +159,32 @@ local function makeButton(text, parent, size, pos)
     button.Parent = parent
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
+    corner.CornerRadius = UDim.new(0, 4)
     corner.Parent = button
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(56, 61, 69)
+    stroke.Thickness = 1
+    stroke.Parent = button
 
     return button
 end
+
+local closeButton = makeButton("X", root, UDim2.fromOffset(26, 22), UDim2.new(1, -34, 0, 8))
+closeButton.BackgroundColor3 = THEME.danger
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
 
 local function makeToggle(labelText, parent, order)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, -8, 0, 34)
     row.Position = UDim2.fromOffset(4, (order - 1) * 38)
-    row.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+    row.BackgroundColor3 = THEME.panelAltBg
     row.BorderSizePixel = 0
     row.Parent = parent
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
+    corner.CornerRadius = UDim.new(0, 4)
     corner.Parent = row
 
     local label = Instance.new("TextLabel")
@@ -161,20 +193,20 @@ local function makeToggle(labelText, parent, order)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.Gotham
     label.TextSize = 13
-    label.TextColor3 = Color3.fromRGB(230, 230, 240)
+    label.TextColor3 = THEME.textPrimary
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Text = labelText
     label.Parent = row
 
     local toggle = makeButton("OFF", row, UDim2.fromOffset(90, 24), UDim2.new(1, -100, 0.5, -12))
-    toggle.BackgroundColor3 = Color3.fromRGB(90, 30, 30)
+    toggle.BackgroundColor3 = THEME.danger
 
     return row, toggle
 end
 
 local loginOverlay = Instance.new("Frame")
 loginOverlay.Size = UDim2.fromScale(1, 1)
-loginOverlay.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
+loginOverlay.BackgroundColor3 = Color3.fromRGB(16, 18, 22)
 loginOverlay.BorderSizePixel = 0
 loginOverlay.Parent = root
 
@@ -185,23 +217,23 @@ loginTitle.BackgroundTransparency = 1
 loginTitle.Font = Enum.Font.GothamBold
 loginTitle.TextSize = 18
 loginTitle.Text = "Admin Key Required"
-loginTitle.TextColor3 = Color3.fromRGB(245, 245, 255)
+loginTitle.TextColor3 = THEME.textPrimary
 loginTitle.Parent = loginOverlay
 
 local keyBox = Instance.new("TextBox")
 keyBox.Size = UDim2.new(0, 280, 0, 34)
 keyBox.Position = UDim2.new(0.5, -140, 0.5, -18)
-keyBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+keyBox.BackgroundColor3 = THEME.panelAltBg
 keyBox.Font = Enum.Font.Code
 keyBox.TextSize = 14
 keyBox.PlaceholderText = "Enter hardcoded key"
 keyBox.Text = ""
-keyBox.TextColor3 = Color3.fromRGB(245, 245, 255)
+keyBox.TextColor3 = THEME.textPrimary
 keyBox.ClearTextOnFocus = false
 keyBox.Parent = loginOverlay
 
 local keyCorner = Instance.new("UICorner")
-keyCorner.CornerRadius = UDim.new(0, 6)
+keyCorner.CornerRadius = UDim.new(0, 4)
 keyCorner.Parent = keyBox
 
 local submit = makeButton("Unlock", loginOverlay, UDim2.fromOffset(100, 30), UDim2.new(0.5, -50, 0.5, 26))
@@ -211,7 +243,7 @@ loginStatus.Position = UDim2.new(0, 0, 0.5, 62)
 loginStatus.BackgroundTransparency = 1
 loginStatus.Font = Enum.Font.Gotham
 loginStatus.TextSize = 12
-loginStatus.TextColor3 = Color3.fromRGB(255, 120, 120)
+loginStatus.TextColor3 = Color3.fromRGB(255, 130, 130)
 loginStatus.Text = ""
 loginStatus.Parent = loginOverlay
 
@@ -229,10 +261,14 @@ customPage.BackgroundTransparency = 1
 customPage.Visible = false
 customPage.Parent = body
 
+local function setTabActive(button, active)
+    button.BackgroundColor3 = active and THEME.accent or THEME.panelAltBg
+end
+
 local toggles = {}
 local function setToggleVisual(btn, state)
     btn.Text = state and "ON" or "OFF"
-    btn.BackgroundColor3 = state and Color3.fromRGB(35, 100, 35) or Color3.fromRGB(90, 30, 30)
+    btn.BackgroundColor3 = state and THEME.accentActive or THEME.danger
 end
 
 local function makeVisualToggle(configKey, text, order)
@@ -249,13 +285,16 @@ makeVisualToggle("highlightPlayers", "Highlight Players", 1)
 makeVisualToggle("viewPlayerNames", "View Player Names", 2)
 makeVisualToggle("playerSkeletons", "Player Skeletons", 3)
 makeVisualToggle("wallcheckColour", "Wallcheck Colour", 4)
-makeVisualToggle("traceLines", "Trace Lines", 5)
+makeVisualToggle("teamcheck", "Teamcheck", 5)
+makeVisualToggle("traceLines", "Trace Lines", 6)
 
 local _, autoInjectBtn = makeToggle("Auto-Inject", customPage, 1)
 local _, saveConfigBtn = makeToggle("Save Configuration", customPage, 2)
 
 setToggleVisual(autoInjectBtn, config.autoInject)
 setToggleVisual(saveConfigBtn, config.saveConfiguration)
+setTabActive(visualTabBtn, true)
+setTabActive(customTabBtn, false)
 
 autoInjectBtn.MouseButton1Click:Connect(function()
     config.autoInject = not config.autoInject
@@ -272,11 +311,15 @@ end)
 visualTabBtn.MouseButton1Click:Connect(function()
     visualPage.Visible = true
     customPage.Visible = false
+    setTabActive(visualTabBtn, true)
+    setTabActive(customTabBtn, false)
 end)
 
 customTabBtn.MouseButton1Click:Connect(function()
     visualPage.Visible = false
     customPage.Visible = true
+    setTabActive(visualTabBtn, false)
+    setTabActive(customTabBtn, true)
 end)
 
 --////////////// Visual feature internals //////////////
@@ -454,10 +497,59 @@ local function clearFeature(feature)
     clearMap(visuals[feature])
 end
 
+local function clearPlayerVisuals(targetPlayer)
+    if visuals.highlights[targetPlayer] then
+        visuals.highlights[targetPlayer]:Destroy()
+        visuals.highlights[targetPlayer] = nil
+    end
+    if visuals.nameTags[targetPlayer] then
+        visuals.nameTags[targetPlayer]:Destroy()
+        visuals.nameTags[targetPlayer] = nil
+    end
+    if visuals.skeletons[targetPlayer] then
+        clearMap(visuals.skeletons[targetPlayer])
+        visuals.skeletons[targetPlayer] = nil
+    end
+    if visuals.tracers[targetPlayer] then
+        clearMap(visuals.tracers[targetPlayer])
+        visuals.tracers[targetPlayer] = nil
+    end
+end
+
+local function shouldTrackTarget(targetPlayer)
+    if targetPlayer == localPlayer then
+        return false
+    end
+
+    if config.visual.teamcheck then
+        local localTeam = localPlayer.Team
+        local targetTeam = targetPlayer.Team
+        if localTeam and targetTeam and localTeam == targetTeam then
+            return false
+        end
+    end
+
+    return true
+end
+
+local isClosed = false
+closeButton.MouseButton1Click:Connect(function()
+    isClosed = true
+    clearFeature("highlights")
+    clearFeature("nameTags")
+    clearFeature("skeletons")
+    clearFeature("tracers")
+    screenGui:Destroy()
+end)
+
 RunService.RenderStepped:Connect(function()
+    if isClosed then
+        return
+    end
+
     if not loginOverlay.Visible then
         for _, targetPlayer in ipairs(Players:GetPlayers()) do
-            if targetPlayer ~= localPlayer then
+            if shouldTrackTarget(targetPlayer) then
                 if config.visual.highlightPlayers then
                     ensureHighlight(targetPlayer)
                 elseif visuals.highlights[targetPlayer] then
@@ -485,6 +577,8 @@ RunService.RenderStepped:Connect(function()
                     clearMap(visuals.tracers[targetPlayer])
                     visuals.tracers[targetPlayer] = nil
                 end
+            else
+                clearPlayerVisuals(targetPlayer)
             end
         end
     else
@@ -496,22 +590,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    if visuals.highlights[player] then
-        visuals.highlights[player]:Destroy()
-        visuals.highlights[player] = nil
-    end
-    if visuals.nameTags[player] then
-        visuals.nameTags[player]:Destroy()
-        visuals.nameTags[player] = nil
-    end
-    if visuals.skeletons[player] then
-        clearMap(visuals.skeletons[player])
-        visuals.skeletons[player] = nil
-    end
-    if visuals.tracers[player] then
-        clearMap(visuals.tracers[player])
-        visuals.tracers[player] = nil
-    end
+    clearPlayerVisuals(player)
 end)
 
 --////////////// Login behavior //////////////
