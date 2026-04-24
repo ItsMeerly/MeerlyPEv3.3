@@ -26,7 +26,7 @@ local function simpleHash(input)
 end
 
 -- Change this to your chosen password, then copy hash output and replace below.
-local HARDCODED_PASSWORD_HASH = "1466015504" -- simpleHash("MeerlyMagickAdmin")
+local HARDCODED_PASSWORD_HASH = "1185274955" -- simpleHash("MeerlyMagickAdmin")
 
 --////////////// Cross-instance settings //////////////
 local TELEPORT_KEY = "MeerlyOP1_Config"
