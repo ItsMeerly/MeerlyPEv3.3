@@ -38,6 +38,7 @@ local defaultConfig = {
         viewPlayerNames = false,
         playerSkeletons = false,
         wallcheckColour = false,
+        teamcheck = false,
         traceLines = false,
     }
 }
@@ -249,7 +250,8 @@ makeVisualToggle("highlightPlayers", "Highlight Players", 1)
 makeVisualToggle("viewPlayerNames", "View Player Names", 2)
 makeVisualToggle("playerSkeletons", "Player Skeletons", 3)
 makeVisualToggle("wallcheckColour", "Wallcheck Colour", 4)
-makeVisualToggle("traceLines", "Trace Lines", 5)
+makeVisualToggle("teamcheck", "Teamcheck", 5)
+makeVisualToggle("traceLines", "Trace Lines", 6)
 
 local _, autoInjectBtn = makeToggle("Auto-Inject", customPage, 1)
 local _, saveConfigBtn = makeToggle("Save Configuration", customPage, 2)
@@ -454,10 +456,45 @@ local function clearFeature(feature)
     clearMap(visuals[feature])
 end
 
+local function clearPlayerVisuals(targetPlayer)
+    if visuals.highlights[targetPlayer] then
+        visuals.highlights[targetPlayer]:Destroy()
+        visuals.highlights[targetPlayer] = nil
+    end
+    if visuals.nameTags[targetPlayer] then
+        visuals.nameTags[targetPlayer]:Destroy()
+        visuals.nameTags[targetPlayer] = nil
+    end
+    if visuals.skeletons[targetPlayer] then
+        clearMap(visuals.skeletons[targetPlayer])
+        visuals.skeletons[targetPlayer] = nil
+    end
+    if visuals.tracers[targetPlayer] then
+        clearMap(visuals.tracers[targetPlayer])
+        visuals.tracers[targetPlayer] = nil
+    end
+end
+
+local function shouldTrackTarget(targetPlayer)
+    if targetPlayer == localPlayer then
+        return false
+    end
+
+    if config.visual.teamcheck then
+        local localTeam = localPlayer.Team
+        local targetTeam = targetPlayer.Team
+        if localTeam and targetTeam and localTeam == targetTeam then
+            return false
+        end
+    end
+
+    return true
+end
+
 RunService.RenderStepped:Connect(function()
     if not loginOverlay.Visible then
         for _, targetPlayer in ipairs(Players:GetPlayers()) do
-            if targetPlayer ~= localPlayer then
+            if shouldTrackTarget(targetPlayer) then
                 if config.visual.highlightPlayers then
                     ensureHighlight(targetPlayer)
                 elseif visuals.highlights[targetPlayer] then
@@ -485,6 +522,8 @@ RunService.RenderStepped:Connect(function()
                     clearMap(visuals.tracers[targetPlayer])
                     visuals.tracers[targetPlayer] = nil
                 end
+            else
+                clearPlayerVisuals(targetPlayer)
             end
         end
     else
@@ -496,22 +535,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    if visuals.highlights[player] then
-        visuals.highlights[player]:Destroy()
-        visuals.highlights[player] = nil
-    end
-    if visuals.nameTags[player] then
-        visuals.nameTags[player]:Destroy()
-        visuals.nameTags[player] = nil
-    end
-    if visuals.skeletons[player] then
-        clearMap(visuals.skeletons[player])
-        visuals.skeletons[player] = nil
-    end
-    if visuals.tracers[player] then
-        clearMap(visuals.tracers[player])
-        visuals.tracers[player] = nil
-    end
+    clearPlayerVisuals(player)
 end)
 
 --////////////// Login behavior //////////////
