@@ -49,6 +49,18 @@ local closestAimTarget = nil
 local textCache = {}
 local highlightCache = {}
 local tpSlots = {}
+local gui
+
+local function clearTable(tbl)
+    if table.clear then
+        table.clear(tbl)
+    else
+        for key in pairs(tbl) do
+            tbl[key] = nil
+        end
+    end
+end
+
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -59,8 +71,13 @@ end
 local function removeVisualForPart(part)
     local text = textCache[part]
     if text then
-        text.Visible = false
-        text:Remove()
+        if text.gui then
+            text.gui:Destroy()
+        elseif text.Destroy then
+            text:Destroy()
+        elseif text.Remove then
+            text:Remove()
+        end
         textCache[part] = nil
         activeVisualParts[part] = nil
     end
@@ -76,7 +93,7 @@ local function clearAllVisuals()
     for part in pairs(textCache) do
         removeVisualForPart(part)
     end
-    table.clear(activeVisualParts)
+    clearTable(activeVisualParts)
 end
 
 local function hideUnusedVisuals(seenParts)
@@ -86,6 +103,7 @@ local function hideUnusedVisuals(seenParts)
             activeVisualParts[part] = nil
         end
     end
+    return false
 end
 
 local function cleanDeadCache()
@@ -118,31 +136,42 @@ end
 local function ensureVisual(part, color, label)
     local text = textCache[part]
     if not text then
-        text = Drawing.new("Text")
-        text.Size = 17
-        text.Center = true
-        text.Outline = true
-        textCache[part] = text
-    end
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "CommanderESPLabel"
+        billboard.Adornee = part
+        billboard.AlwaysOnTop = true
+        billboard.LightInfluence = 0
+        billboard.MaxDistance = maxVisualDistance
+        billboard.Size = UDim2.fromOffset(160, 34)
+        billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+        billboard.Parent = gui
 
-    local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
-    if not onScreen then
-        text.Visible = false
-        return
+        local labelText = Instance.new("TextLabel")
+        labelText.BackgroundTransparency = 1
+        labelText.Size = UDim2.fromScale(1, 1)
+        labelText.Font = Enum.Font.GothamBold
+        labelText.TextSize = 14
+        labelText.TextStrokeTransparency = 0.25
+        labelText.TextWrapped = true
+        labelText.Parent = billboard
+
+        text = { gui = billboard, label = labelText }
+        textCache[part] = text
     end
 
     local hrp = getHRP(player.Character)
     if not hrp then
-        text.Visible = false
+        text.gui.Enabled = false
         return
     end
 
     local offset = hrp.Position - part.Position
     local dist = offset.Magnitude
-    text.Text = string.format("%s [%dm]", label, math.floor(dist + 0.5))
-    text.Color = color
-    text.Position = Vector2.new(screenPos.X, screenPos.Y - 20)
-    text.Visible = true
+    text.gui.Enabled = true
+    text.gui.Adornee = part
+    text.gui.MaxDistance = maxVisualDistance
+    text.label.Text = string.format("%s [%dm]", label, math.floor(dist + 0.5))
+    text.label.TextColor3 = color
 
     local h = highlightCache[part]
     if not h then
@@ -150,8 +179,8 @@ local function ensureVisual(part, color, label)
         h = Instance.new("Highlight")
         h.Name = "CommanderESP"
         h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        h.FillTransparency = 0.6
-        h.OutlineTransparency = 0.1
+        h.FillTransparency = 0.8
+        h.OutlineTransparency = 0.2
         h.Parent = target
         highlightCache[part] = h
     end
@@ -160,7 +189,7 @@ local function ensureVisual(part, color, label)
 end
 
 local function refreshEnemyList()
-    table.clear(enemyEntries)
+    clearTable(enemyEntries)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return end
     for _, enemy in ipairs(enemies:GetChildren()) do
@@ -172,7 +201,7 @@ local function refreshEnemyList()
 end
 
 local function refreshItemList()
-    table.clear(itemEntries)
+    clearTable(itemEntries)
     local util = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Util")
     local items = util and util:FindFirstChild("Items")
     if not items then return end
@@ -189,7 +218,7 @@ local theme = {
     text = Color3.fromRGB(236, 236, 236), muted = Color3.fromRGB(170, 174, 181), accent = Color3.fromRGB(0, 168, 255), danger = Color3.fromRGB(180, 70, 70),
 }
 
-local gui = Instance.new("ScreenGui")
+gui = Instance.new("ScreenGui")
 gui.Name = "MeerlyON"
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
@@ -444,6 +473,42 @@ conns[#conns + 1] = UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end
 updatePageCanvas(visualsPage)
+
+makeToggle(actionsPage, 6, "Aimbot (RMB)", config.actions.aimbot, function(v) config.actions.aimbot = v end)
+makeToggle(actionsPage, 44, "WalkSpeed Override", config.actions.walkSpeedEnabled, function(v) config.actions.walkSpeedEnabled = v end)
+
+local wsLabel = Instance.new("TextLabel", actionsPage)
+wsLabel.Size = UDim2.new(1, -8, 0, 28)
+wsLabel.Position = UDim2.fromOffset(4, 82)
+wsLabel.BackgroundColor3 = theme.alt
+wsLabel.TextColor3 = theme.text
+wsLabel.Text = "WalkSpeed: " .. tostring(config.actions.walkSpeedValue)
+wsLabel.Font = Enum.Font.Gotham
+wsLabel.TextSize = 12
+Instance.new("UICorner", wsLabel)
+local wsMinus = makeButton(actionsPage, "-", UDim2.fromOffset(4, 114), UDim2.fromOffset(44, 24))
+local wsPlus = makeButton(actionsPage, "+", UDim2.fromOffset(52, 114), UDim2.fromOffset(44, 24))
+wsMinus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.max(0, config.actions.walkSpeedValue - 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
+wsPlus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.min(120, config.actions.walkSpeedValue + 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
+updatePageCanvas(actionsPage)
+
+for i = 1, 5 do
+    local row = Instance.new("Frame", teleportsPage)
+    row.Size = UDim2.new(1, -8, 0, 34)
+    row.Position = UDim2.fromOffset(4, 6 + (i - 1) * 38)
+    row.BackgroundColor3 = theme.alt
+    Instance.new("UICorner", row)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(0, 80, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Slot " .. i
+    lbl.TextColor3 = theme.text
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 12
+
+    local save = makeButton(row, "Save", UDim2.fromOffset(85, 5), UDim2.fromOffset(80, 24))
+    local tp = makeButton(row, "Teleport", UDim2.fromOffset(172, 5), UDim2.fromOffset(90, 24))
 
 local function shutdown()
     if stopped then return end
