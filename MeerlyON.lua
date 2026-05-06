@@ -442,7 +442,8 @@ conns[#conns + 1] = UserInputService.InputBegan:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.Semicolon then
         root.Visible = not root.Visible
     end
-end)
+end
+updatePageCanvas(visualsPage)
 
 local function shutdown()
     if stopped then return end
@@ -492,6 +493,18 @@ local function updateAimbotTarget()
         end
     end
 end
+kill.MouseButton1Click:Connect(shutdown)
+
+RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 1, function(dt)
+    if stopped then return end
+
+    itemScanAccumulator = itemScanAccumulator + dt
+    if itemScanAccumulator >= scanInterval then
+        itemScanAccumulator = 0
+        refreshEnemyList()
+        refreshItemList()
+        cleanDeadCache()
+    end
 
 local function updateVisuals()
     local char = player.Character
