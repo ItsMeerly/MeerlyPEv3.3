@@ -103,6 +103,7 @@ local function hideUnusedVisuals(seenParts)
             activeVisualParts[part] = nil
         end
     end
+    return false
 end
 
 local function cleanDeadCache()
@@ -470,7 +471,44 @@ conns[#conns + 1] = UserInputService.InputBegan:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.Semicolon then
         root.Visible = not root.Visible
     end
-end)
+end
+updatePageCanvas(visualsPage)
+
+makeToggle(actionsPage, 6, "Aimbot (RMB)", config.actions.aimbot, function(v) config.actions.aimbot = v end)
+makeToggle(actionsPage, 44, "WalkSpeed Override", config.actions.walkSpeedEnabled, function(v) config.actions.walkSpeedEnabled = v end)
+
+local wsLabel = Instance.new("TextLabel", actionsPage)
+wsLabel.Size = UDim2.new(1, -8, 0, 28)
+wsLabel.Position = UDim2.fromOffset(4, 82)
+wsLabel.BackgroundColor3 = theme.alt
+wsLabel.TextColor3 = theme.text
+wsLabel.Text = "WalkSpeed: " .. tostring(config.actions.walkSpeedValue)
+wsLabel.Font = Enum.Font.Gotham
+wsLabel.TextSize = 12
+Instance.new("UICorner", wsLabel)
+local wsMinus = makeButton(actionsPage, "-", UDim2.fromOffset(4, 114), UDim2.fromOffset(44, 24))
+local wsPlus = makeButton(actionsPage, "+", UDim2.fromOffset(52, 114), UDim2.fromOffset(44, 24))
+wsMinus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.max(0, config.actions.walkSpeedValue - 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
+wsPlus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.min(120, config.actions.walkSpeedValue + 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
+updatePageCanvas(actionsPage)
+
+for i = 1, 5 do
+    local row = Instance.new("Frame", teleportsPage)
+    row.Size = UDim2.new(1, -8, 0, 34)
+    row.Position = UDim2.fromOffset(4, 6 + (i - 1) * 38)
+    row.BackgroundColor3 = theme.alt
+    Instance.new("UICorner", row)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(0, 80, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Slot " .. i
+    lbl.TextColor3 = theme.text
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 12
+
+    local save = makeButton(row, "Save", UDim2.fromOffset(85, 5), UDim2.fromOffset(80, 24))
+    local tp = makeButton(row, "Teleport", UDim2.fromOffset(172, 5), UDim2.fromOffset(90, 24))
 
 local function shutdown()
     if stopped then return end
@@ -520,6 +558,18 @@ local function updateAimbotTarget()
         end
     end
 end
+kill.MouseButton1Click:Connect(shutdown)
+
+RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 1, function(dt)
+    if stopped then return end
+
+    itemScanAccumulator = itemScanAccumulator + dt
+    if itemScanAccumulator >= scanInterval then
+        itemScanAccumulator = 0
+        refreshEnemyList()
+        refreshItemList()
+        cleanDeadCache()
+    end
 
 local function updateVisuals()
     local char = player.Character
