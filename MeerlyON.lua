@@ -34,35 +34,13 @@ for cat, words in pairs(keywords) do
     end
 end
 
-local scanInterval = 1.5
-local visualUpdateInterval = 0.25
-local aimScanInterval = 0.05
-local maxVisualDistance = 900
-local maxVisualsPerTick = 80
+local scanInterval = 0.2
 local itemScanAccumulator = 0
-local visualUpdateAccumulator = 0
-local aimScanAccumulator = 0
 local itemEntries = {}
 local enemyEntries = {}
-local activeVisualParts = {}
-local closestAimTarget = nil
 local textCache = {}
 local highlightCache = {}
 local tpSlots = {}
-local gui
-
-local function clearTable(tbl)
-    if table.clear then
-        table.clear(tbl)
-    else
-        for key in pairs(tbl) do
-            tbl[key] = nil
-        end
-    end
-end
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 local function getHRP(character)
     return character and character:FindFirstChild("HumanoidRootPart")
@@ -71,21 +49,14 @@ end
 local function removeVisualForPart(part)
     local text = textCache[part]
     if text then
-        if text.gui then
-            text.gui:Destroy()
-        elseif text.Destroy then
-            text:Destroy()
-        elseif text.Remove then
-            text:Remove()
-        end
+        text.Visible = false
+        text:Remove()
         textCache[part] = nil
-        activeVisualParts[part] = nil
     end
     local h = highlightCache[part]
     if h then
         h:Destroy()
         highlightCache[part] = nil
-        activeVisualParts[part] = nil
     end
 end
 
@@ -93,17 +64,6 @@ local function clearAllVisuals()
     for part in pairs(textCache) do
         removeVisualForPart(part)
     end
-    clearTable(activeVisualParts)
-end
-
-local function hideUnusedVisuals(seenParts)
-    for part in pairs(activeVisualParts) do
-        if not seenParts[part] then
-            removeVisualForPart(part)
-            activeVisualParts[part] = nil
-        end
-    end
-    return false
 end
 
 local function cleanDeadCache()
@@ -126,6 +86,8 @@ end
 
 local function isVisible(targetPart)
     local char = player.Character
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.FilterDescendantsInstances = {char, targetPart.Parent}
     local origin = camera.CFrame.Position
     local direction = targetPart.Position - origin
@@ -136,42 +98,30 @@ end
 local function ensureVisual(part, color, label)
     local text = textCache[part]
     if not text then
-        local billboard = Instance.new("BillboardGui")
-        billboard.Name = "CommanderESPLabel"
-        billboard.Adornee = part
-        billboard.AlwaysOnTop = true
-        billboard.LightInfluence = 0
-        billboard.MaxDistance = maxVisualDistance
-        billboard.Size = UDim2.fromOffset(160, 34)
-        billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-        billboard.Parent = gui
-
-        local labelText = Instance.new("TextLabel")
-        labelText.BackgroundTransparency = 1
-        labelText.Size = UDim2.fromScale(1, 1)
-        labelText.Font = Enum.Font.GothamBold
-        labelText.TextSize = 14
-        labelText.TextStrokeTransparency = 0.25
-        labelText.TextWrapped = true
-        labelText.Parent = billboard
-
-        text = { gui = billboard, label = labelText }
+        text = Drawing.new("Text")
+        text.Size = 17
+        text.Center = true
+        text.Outline = true
         textCache[part] = text
+    end
+
+    local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
+    if not onScreen then
+        text.Visible = false
+        return
     end
 
     local hrp = getHRP(player.Character)
     if not hrp then
-        text.gui.Enabled = false
+        text.Visible = false
         return
     end
 
-    local offset = hrp.Position - part.Position
-    local dist = offset.Magnitude
-    text.gui.Enabled = true
-    text.gui.Adornee = part
-    text.gui.MaxDistance = maxVisualDistance
-    text.label.Text = string.format("%s [%dm]", label, math.floor(dist + 0.5))
-    text.label.TextColor3 = color
+    local dist = (hrp.Position - part.Position).Magnitude
+    text.Text = string.format("%s [%dm]", label, math.floor(dist + 0.5))
+    text.Color = color
+    text.Position = Vector2.new(screenPos.X, screenPos.Y - 20)
+    text.Visible = true
 
     local h = highlightCache[part]
     if not h then
@@ -179,8 +129,8 @@ local function ensureVisual(part, color, label)
         h = Instance.new("Highlight")
         h.Name = "CommanderESP"
         h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        h.FillTransparency = 0.8
-        h.OutlineTransparency = 0.2
+        h.FillTransparency = 0.6
+        h.OutlineTransparency = 0.1
         h.Parent = target
         highlightCache[part] = h
     end
@@ -189,7 +139,7 @@ local function ensureVisual(part, color, label)
 end
 
 local function refreshEnemyList()
-    clearTable(enemyEntries)
+    table.clear(enemyEntries)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return end
     for _, enemy in ipairs(enemies:GetChildren()) do
@@ -201,14 +151,14 @@ local function refreshEnemyList()
 end
 
 local function refreshItemList()
-    clearTable(itemEntries)
+    table.clear(itemEntries)
     local util = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Util")
     local items = util and util:FindFirstChild("Items")
     if not items then return end
     for _, folder in ipairs(items:GetChildren()) do
         local part = folder:FindFirstChildWhichIsA("BasePart", true)
         if part then
-            itemEntries[#itemEntries + 1] = { folder = folder, part = part, lowerName = string.lower(folder.Name) }
+            itemEntries[#itemEntries + 1] = { folder = folder, part = part }
         end
     end
 end
@@ -218,7 +168,7 @@ local theme = {
     text = Color3.fromRGB(236, 236, 236), muted = Color3.fromRGB(170, 174, 181), accent = Color3.fromRGB(0, 168, 255), danger = Color3.fromRGB(180, 70, 70),
 }
 
-gui = Instance.new("ScreenGui")
+local gui = Instance.new("ScreenGui")
 gui.Name = "MeerlyON"
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
@@ -471,92 +421,15 @@ conns[#conns + 1] = UserInputService.InputBegan:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.Semicolon then
         root.Visible = not root.Visible
     end
-end
-updatePageCanvas(visualsPage)
-
-makeToggle(actionsPage, 6, "Aimbot (RMB)", config.actions.aimbot, function(v) config.actions.aimbot = v end)
-makeToggle(actionsPage, 44, "WalkSpeed Override", config.actions.walkSpeedEnabled, function(v) config.actions.walkSpeedEnabled = v end)
-
-local wsLabel = Instance.new("TextLabel", actionsPage)
-wsLabel.Size = UDim2.new(1, -8, 0, 28)
-wsLabel.Position = UDim2.fromOffset(4, 82)
-wsLabel.BackgroundColor3 = theme.alt
-wsLabel.TextColor3 = theme.text
-wsLabel.Text = "WalkSpeed: " .. tostring(config.actions.walkSpeedValue)
-wsLabel.Font = Enum.Font.Gotham
-wsLabel.TextSize = 12
-Instance.new("UICorner", wsLabel)
-local wsMinus = makeButton(actionsPage, "-", UDim2.fromOffset(4, 114), UDim2.fromOffset(44, 24))
-local wsPlus = makeButton(actionsPage, "+", UDim2.fromOffset(52, 114), UDim2.fromOffset(44, 24))
-wsMinus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.max(0, config.actions.walkSpeedValue - 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
-wsPlus.MouseButton1Click:Connect(function() config.actions.walkSpeedValue = math.min(120, config.actions.walkSpeedValue + 1); wsLabel.Text = "WalkSpeed: " .. config.actions.walkSpeedValue end)
-updatePageCanvas(actionsPage)
-
-for i = 1, 5 do
-    local row = Instance.new("Frame", teleportsPage)
-    row.Size = UDim2.new(1, -8, 0, 34)
-    row.Position = UDim2.fromOffset(4, 6 + (i - 1) * 38)
-    row.BackgroundColor3 = theme.alt
-    Instance.new("UICorner", row)
-
-    local lbl = Instance.new("TextLabel", row)
-    lbl.Size = UDim2.new(0, 80, 1, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = "Slot " .. i
-    lbl.TextColor3 = theme.text
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 12
-
-    local save = makeButton(row, "Save", UDim2.fromOffset(85, 5), UDim2.fromOffset(80, 24))
-    local tp = makeButton(row, "Teleport", UDim2.fromOffset(172, 5), UDim2.fromOffset(90, 24))
+end)
 
 local function shutdown()
     if stopped then return end
     stopped = true
     for _, c in ipairs(conns) do c:Disconnect() end
-    local char = player.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum and defaultWalkSpeed then
-        hum.WalkSpeed = defaultWalkSpeed
-    end
+    RunService:UnbindFromRenderStep("MeerlyON_Main")
     clearAllVisuals()
     if gui then gui:Destroy() end
-end
-kill.MouseButton1Click:Connect(shutdown)
-
-local function updateWalkSpeed()
-    local char = player.Character
-    if not char then return end
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-
-    defaultWalkSpeed = defaultWalkSpeed or hum.WalkSpeed
-    hum.WalkSpeed = config.actions.walkSpeedEnabled and config.actions.walkSpeedValue or defaultWalkSpeed
-end
-
-local function updateAimbotTarget()
-    closestAimTarget = nil
-
-    if not config.actions.aimbot or not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        return
-    end
-
-    local shortest = config.visuals.fov
-    local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
-
-    for _, targetPart in ipairs(enemyEntries) do
-        if targetPart and targetPart.Parent then
-            local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-            if onScreen then
-                local dist = (center - Vector2.new(sp.X, sp.Y)).Magnitude
-                if dist < shortest and isVisible(targetPart) then
-                    closestAimTarget = targetPart
-                    shortest = dist
-                end
-            end
-        end
-    end
 end
 kill.MouseButton1Click:Connect(shutdown)
 
@@ -571,98 +444,52 @@ RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 
         cleanDeadCache()
     end
 
-local function updateVisuals()
     local char = player.Character
     local hrp = getHRP(char)
-    if not hrp then
-        clearAllVisuals()
-        return
+    if not hrp then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        defaultWalkSpeed = defaultWalkSpeed or hum.WalkSpeed
+        hum.WalkSpeed = config.actions.walkSpeedEnabled and config.actions.walkSpeedValue or defaultWalkSpeed
     end
 
-    if not config.visuals.employees and not config.visuals.food and not config.visuals.heals and not config.visuals.guns then
-        clearAllVisuals()
-        return
-    end
+    local closest, shortest = nil, config.visuals.fov
+    local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
 
-    local seenParts = {}
-    local visualCount = 0
-    local maxDistanceSquared = maxVisualDistance * maxVisualDistance
-
-    if config.visuals.employees then
+    if config.visuals.employees or config.actions.aimbot then
         for _, targetPart in ipairs(enemyEntries) do
-            if visualCount >= maxVisualsPerTick then break end
             if targetPart and targetPart.Parent then
-                local offset = targetPart.Position - hrp.Position
-                if offset:Dot(offset) <= maxDistanceSquared then
-                    seenParts[targetPart] = true
-                    activeVisualParts[targetPart] = true
-                    ensureVisual(targetPart, Color3.fromRGB(255, 70, 70), "EMPLOYEE")
-                    visualCount = visualCount + 1
+                if config.visuals.employees then ensureVisual(targetPart, Color3.fromRGB(255, 70, 70), "EMPLOYEE") else removeVisualForPart(targetPart) end
+                if config.actions.aimbot then
+                    local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen and isVisible(targetPart) then
+                        local dist = (center - Vector2.new(sp.X, sp.Y)).Magnitude
+                        if dist < shortest then closest, shortest = targetPart, dist end
+                    end
                 end
             end
         end
     end
 
     for _, entry in ipairs(itemEntries) do
-        if visualCount >= maxVisualsPerTick then break end
-
         local folder, part = entry.folder, entry.part
         if folder and part and part.Parent then
-            local offset = part.Position - hrp.Position
-            if offset:Dot(offset) <= maxDistanceSquared then
-                local lowerName = entry.lowerName or string.lower(folder.Name)
-                local drawColor = nil
+            local name = folder.Name
+            local drawCat = nil
+            if config.visuals.food and checkCategory(name, "food") then drawCat = { Color3.fromRGB(40, 230, 145), name }
+            elseif config.visuals.heals and checkCategory(name, "heals") then drawCat = { Color3.fromRGB(60, 185, 255), name }
+            elseif config.visuals.guns and checkCategory(name, "guns") then drawCat = { Color3.fromRGB(255, 190, 60), name } end
 
-                if config.visuals.food and checkCategory(lowerName, "food") then
-                    drawColor = Color3.fromRGB(40, 230, 145)
-                elseif config.visuals.heals and checkCategory(lowerName, "heals") then
-                    drawColor = Color3.fromRGB(60, 185, 255)
-                elseif config.visuals.guns and checkCategory(lowerName, "guns") then
-                    drawColor = Color3.fromRGB(255, 190, 60)
-                end
-
-                if drawColor then
-                    seenParts[part] = true
-                    activeVisualParts[part] = true
-                    ensureVisual(part, drawColor, folder.Name)
-                    visualCount = visualCount + 1
-                end
+            if drawCat then
+                ensureVisual(part, drawCat[1], drawCat[2])
+            else
+                removeVisualForPart(part)
             end
         end
     end
 
-    hideUnusedVisuals(seenParts)
-end
-
-refreshEnemyList()
-refreshItemList()
-
-conns[#conns + 1] = RunService.Heartbeat:Connect(function(dt)
-    if stopped then return end
-
-    itemScanAccumulator = itemScanAccumulator + dt
-    visualUpdateAccumulator = visualUpdateAccumulator + dt
-    aimScanAccumulator = aimScanAccumulator + dt
-
-    if itemScanAccumulator >= scanInterval then
-        itemScanAccumulator = 0
-        refreshEnemyList()
-        refreshItemList()
-        cleanDeadCache()
-    end
-
-    if aimScanAccumulator >= aimScanInterval then
-        aimScanAccumulator = 0
-        updateAimbotTarget()
-    end
-
-    if visualUpdateAccumulator >= visualUpdateInterval then
-        visualUpdateAccumulator = 0
-        updateWalkSpeed()
-        updateVisuals()
-    end
-
-    if config.actions.aimbot and closestAimTarget and closestAimTarget.Parent and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closestAimTarget.Position)
+    if config.actions.aimbot and closest and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closest.Position)
     end
 end)
