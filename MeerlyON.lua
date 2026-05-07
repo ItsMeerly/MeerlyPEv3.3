@@ -34,13 +34,26 @@ for cat, words in pairs(keywords) do
     end
 end
 
-local scanInterval = 0.2
-local itemScanAccumulator = 0
+local ENEMY_SCAN_INTERVAL = 0.5
+local ITEM_FOLDER_POLL_INTERVAL = 2
+local VISUAL_UPDATE_INTERVAL = 1 / 30
+local CACHE_CLEAN_INTERVAL = 5
+
+local enemyScanAccumulator = ENEMY_SCAN_INTERVAL
+local itemFolderPollAccumulator = ITEM_FOLDER_POLL_INTERVAL
+local visualUpdateAccumulator = VISUAL_UPDATE_INTERVAL
+local cacheCleanAccumulator = 0
+
 local itemEntries = {}
+local itemEntryByFolder = {}
 local enemyEntries = {}
 local textCache = {}
 local highlightCache = {}
 local tpSlots = {}
+local itemFolder = nil
+local itemFolderConnections = {}
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 local function getHRP(character)
     return character and character:FindFirstChild("HumanoidRootPart")
@@ -55,6 +68,7 @@ local function removeVisualForPart(part)
     end
     local h = highlightCache[part]
     if h then
+        h.Enabled = false
         h:Destroy()
         highlightCache[part] = nil
     end
@@ -72,10 +86,14 @@ local function cleanDeadCache()
             removeVisualForPart(part)
         end
     end
+    for part, h in pairs(highlightCache) do
+        if not part.Parent or not part:IsDescendantOf(workspace) or not h.Parent then
+            removeVisualForPart(part)
+        end
+    end
 end
 
-local function checkCategory(name, category)
-    local lowered = string.lower(name)
+local function checkCategoryLower(lowered, category)
     for _, word in ipairs(keywords[category]) do
         if keywordEnabled[category][word] and string.find(lowered, word, 1, true) then
             return true
@@ -84,11 +102,8 @@ local function checkCategory(name, category)
     return false
 end
 
-local function isVisible(targetPart)
-    local char = player.Character
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = {char, targetPart.Parent}
+local function isVisible(targetPart, char)
+    rayParams.FilterDescendantsInstances = { char, targetPart.Parent }
     local origin = camera.CFrame.Position
     local direction = targetPart.Position - origin
     local result = workspace:Raycast(origin, direction, rayParams)
@@ -108,12 +123,16 @@ local function ensureVisual(part, color, label)
     local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
     if not onScreen then
         text.Visible = false
+        local h = highlightCache[part]
+        if h then h.Enabled = false end
         return
     end
 
     local hrp = getHRP(player.Character)
     if not hrp then
         text.Visible = false
+        local h = highlightCache[part]
+        if h then h.Enabled = false end
         return
     end
 
@@ -134,6 +153,7 @@ local function ensureVisual(part, color, label)
         h.Parent = target
         highlightCache[part] = h
     end
+    h.Enabled = true
     h.FillColor = color
     h.OutlineColor = color
 end
@@ -150,17 +170,77 @@ local function refreshEnemyList()
     end
 end
 
-local function refreshItemList()
-    table.clear(itemEntries)
-    local util = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Util")
-    local items = util and util:FindFirstChild("Items")
-    if not items then return end
-    for _, folder in ipairs(items:GetChildren()) do
-        local part = folder:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            itemEntries[#itemEntries + 1] = { folder = folder, part = part }
+local function clearItemFolderConnections()
+    for _, conn in ipairs(itemFolderConnections) do
+        conn:Disconnect()
+    end
+    table.clear(itemFolderConnections)
+end
+
+local function untrackItemFolder(folder)
+    local entry = itemEntryByFolder[folder]
+    if not entry then return end
+
+    removeVisualForPart(entry.part)
+    itemEntryByFolder[folder] = nil
+
+    local write = 1
+    for read = 1, #itemEntries do
+        if itemEntries[read].folder ~= folder then
+            itemEntries[write] = itemEntries[read]
+            write = write + 1
         end
     end
+    for index = write, #itemEntries do
+        itemEntries[index] = nil
+    end
+end
+
+local function trackItemFolder(folder)
+    if itemEntryByFolder[folder] then return end
+
+    local part = folder:FindFirstChildWhichIsA("BasePart", true)
+    if not part then return end
+
+    local entry = {
+        folder = folder,
+        part = part,
+        label = folder.Name,
+        lowerName = string.lower(folder.Name),
+    }
+    itemEntryByFolder[folder] = entry
+    itemEntries[#itemEntries + 1] = entry
+end
+
+local function findItemsFolder()
+    local map = workspace:FindFirstChild("Map")
+    local util = map and map:FindFirstChild("Util")
+    return util and util:FindFirstChild("Items")
+end
+
+local function setItemsFolder(newFolder)
+    if itemFolder == newFolder then return end
+
+    clearItemFolderConnections()
+    for _, entry in ipairs(itemEntries) do
+        removeVisualForPart(entry.part)
+    end
+    table.clear(itemEntries)
+    table.clear(itemEntryByFolder)
+
+    itemFolder = newFolder
+    if not itemFolder then return end
+
+    for _, folder in ipairs(itemFolder:GetChildren()) do
+        trackItemFolder(folder)
+    end
+
+    itemFolderConnections[#itemFolderConnections + 1] = itemFolder.ChildAdded:Connect(trackItemFolder)
+    itemFolderConnections[#itemFolderConnections + 1] = itemFolder.ChildRemoved:Connect(untrackItemFolder)
+end
+
+local function refreshItemsFolder()
+    setItemsFolder(findItemsFolder())
 end
 
 local theme = {
@@ -414,6 +494,7 @@ updatePageCanvas(teleportsPage)
 
 local stopped = false
 local defaultWalkSpeed = nil
+local lastHumanoid = nil
 local conns = {}
 
 conns[#conns + 1] = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -427,6 +508,7 @@ local function shutdown()
     if stopped then return end
     stopped = true
     for _, c in ipairs(conns) do c:Disconnect() end
+    clearItemFolderConnections()
     RunService:UnbindFromRenderStep("MeerlyON_Main")
     clearAllVisuals()
     if gui then gui:Destroy() end
@@ -436,12 +518,28 @@ kill.MouseButton1Click:Connect(shutdown)
 RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 1, function(dt)
     if stopped then return end
 
-    itemScanAccumulator = itemScanAccumulator + dt
-    if itemScanAccumulator >= scanInterval then
-        itemScanAccumulator = 0
+    enemyScanAccumulator = enemyScanAccumulator + dt
+    if enemyScanAccumulator >= ENEMY_SCAN_INTERVAL then
+        enemyScanAccumulator = 0
         refreshEnemyList()
-        refreshItemList()
+    end
+
+    itemFolderPollAccumulator = itemFolderPollAccumulator + dt
+    if itemFolderPollAccumulator >= ITEM_FOLDER_POLL_INTERVAL then
+        itemFolderPollAccumulator = 0
+        refreshItemsFolder()
+    end
+
+    cacheCleanAccumulator = cacheCleanAccumulator + dt
+    if cacheCleanAccumulator >= CACHE_CLEAN_INTERVAL then
+        cacheCleanAccumulator = 0
         cleanDeadCache()
+    end
+
+    visualUpdateAccumulator = visualUpdateAccumulator + dt
+    local shouldUpdateVisuals = visualUpdateAccumulator >= VISUAL_UPDATE_INTERVAL
+    if shouldUpdateVisuals then
+        visualUpdateAccumulator = 0
     end
 
     local char = player.Character
@@ -450,20 +548,38 @@ RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 
 
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        defaultWalkSpeed = defaultWalkSpeed or hum.WalkSpeed
-        hum.WalkSpeed = config.actions.walkSpeedEnabled and config.actions.walkSpeedValue or defaultWalkSpeed
+        if hum ~= lastHumanoid then
+            defaultWalkSpeed = hum.WalkSpeed
+            lastHumanoid = hum
+        end
+
+        local targetWalkSpeed = config.actions.walkSpeedEnabled and config.actions.walkSpeedValue or defaultWalkSpeed
+        if hum.WalkSpeed ~= targetWalkSpeed then
+            hum.WalkSpeed = targetWalkSpeed
+        end
     end
 
+    local aiming = config.actions.aimbot and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     local closest, shortest = nil, config.visuals.fov
-    local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+    local center = nil
+    if aiming then
+        center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
+    end
 
-    if config.visuals.employees or config.actions.aimbot then
+    if config.visuals.employees or aiming then
         for _, targetPart in ipairs(enemyEntries) do
             if targetPart and targetPart.Parent then
-                if config.visuals.employees then ensureVisual(targetPart, Color3.fromRGB(255, 70, 70), "EMPLOYEE") else removeVisualForPart(targetPart) end
-                if config.actions.aimbot then
+                if shouldUpdateVisuals then
+                    if config.visuals.employees then
+                        ensureVisual(targetPart, Color3.fromRGB(255, 70, 70), "EMPLOYEE")
+                    else
+                        removeVisualForPart(targetPart)
+                    end
+                end
+
+                if aiming then
                     local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-                    if onScreen and isVisible(targetPart) then
+                    if onScreen and isVisible(targetPart, char) then
                         local dist = (center - Vector2.new(sp.X, sp.Y)).Magnitude
                         if dist < shortest then closest, shortest = targetPart, dist end
                     end
@@ -472,24 +588,32 @@ RunService:BindToRenderStep("MeerlyON_Main", Enum.RenderPriority.Camera.Value + 
         end
     end
 
-    for _, entry in ipairs(itemEntries) do
-        local folder, part = entry.folder, entry.part
-        if folder and part and part.Parent then
-            local name = folder.Name
-            local drawCat = nil
-            if config.visuals.food and checkCategory(name, "food") then drawCat = { Color3.fromRGB(40, 230, 145), name }
-            elseif config.visuals.heals and checkCategory(name, "heals") then drawCat = { Color3.fromRGB(60, 185, 255), name }
-            elseif config.visuals.guns and checkCategory(name, "guns") then drawCat = { Color3.fromRGB(255, 190, 60), name } end
+    if shouldUpdateVisuals then
+        for index = #itemEntries, 1, -1 do
+            local entry = itemEntries[index]
+            local folder, part = entry.folder, entry.part
+            if folder and part and part.Parent then
+                local drawColor, drawLabel = nil, nil
+                if config.visuals.food and checkCategoryLower(entry.lowerName, "food") then
+                    drawColor, drawLabel = Color3.fromRGB(40, 230, 145), entry.label
+                elseif config.visuals.heals and checkCategoryLower(entry.lowerName, "heals") then
+                    drawColor, drawLabel = Color3.fromRGB(60, 185, 255), entry.label
+                elseif config.visuals.guns and checkCategoryLower(entry.lowerName, "guns") then
+                    drawColor, drawLabel = Color3.fromRGB(255, 190, 60), entry.label
+                end
 
-            if drawCat then
-                ensureVisual(part, drawCat[1], drawCat[2])
+                if drawColor then
+                    ensureVisual(part, drawColor, drawLabel)
+                else
+                    removeVisualForPart(part)
+                end
             else
-                removeVisualForPart(part)
+                untrackItemFolder(folder)
             end
         end
     end
 
-    if config.actions.aimbot and closest and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+    if aiming and closest then
         camera.CFrame = CFrame.lookAt(camera.CFrame.Position, closest.Position)
     end
 end)
