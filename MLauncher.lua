@@ -7,7 +7,7 @@
 ]]
 
 local Launcher = {}
-Launcher.Version = "0.1.1"
+Launcher.Version = "0.1.2"
 Launcher.RepositoryRoot = "https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/main"
 Launcher.LibraryUrl = Launcher.RepositoryRoot .. "/MUILib.lua"
 
@@ -17,6 +17,11 @@ Launcher.ValidKeys = {
 
 Launcher.Games = {
     Places = {
+        [127380660530951] = {
+            Name = "Superstore Sleep-Over",
+            Url = Launcher.RepositoryRoot .. "/MeerlyON2.lua",
+            Enabled = true,
+        },
         -- [1234567890] = {
         --     Name = "Example Place",
         --     Url = Launcher.RepositoryRoot .. "/Games/Example.lua",
@@ -24,6 +29,11 @@ Launcher.Games = {
         -- },
     },
     Universes = {
+        [127380660530951] = {
+            Name = "Superstore Sleep-Over",
+            Url = Launcher.RepositoryRoot .. "/MeerlyON2.lua",
+            Enabled = true,
+        },
         -- [1234567890] = {
         --     Name = "Example Universe",
         --     Url = Launcher.RepositoryRoot .. "/Games/Example.lua",
