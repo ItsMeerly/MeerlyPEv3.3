@@ -9,7 +9,7 @@
 ]]
 
 local MUILib = {}
-MUILib.Version = "0.1.3"
+MUILib.Version = "0.1.4"
 MUILib.ConfigFile = "MeerlyUniversalConfig.json"
 
 local Players = game:GetService("Players")
@@ -997,7 +997,7 @@ function SectionClass:CreateToggle(config)
         set(not state)
     end)
 
-    return { Set = set, Get = function() return state end, Instance = row }
+    return { Set = set, Get = function() return state end, Instance = row, Label = label, Box = box }
 end
 
 function SectionClass:CreateSlider(config)
