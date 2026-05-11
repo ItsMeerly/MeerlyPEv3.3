@@ -9,7 +9,7 @@
 ]]
 
 local MUILib = {}
-MUILib.Version = "0.1.4"
+MUILib.Version = "0.1.5"
 MUILib.ConfigFile = "MeerlyUniversalConfig.json"
 
 local Players = game:GetService("Players")
@@ -485,6 +485,8 @@ function UIClass:SetMinimized(minimized)
         self.Window.Size = self.StoredSize or self.DefaultSize
         self.MinimizeButton.Text = "-"
     end
+
+    self:_refreshTabButtons()
 end
 
 function UIClass:ToggleMinimized()
@@ -630,6 +632,7 @@ function UIClass:_createBase(config)
         Position = UDim2.fromOffset(0, 24),
         Size = UDim2.new(1, 0, 0, 25),
         BorderSizePixel = 0,
+        ClipsDescendants = true,
     })
     self:_track(self.TabBar, "Panel")
     self.TabBar.Parent = self.Window
@@ -671,6 +674,10 @@ function UIClass:_createBase(config)
 
     self.KillButton.MouseButton1Click:Connect(function()
         self:Kill()
+    end)
+
+    self.Window:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        self:_refreshTabButtons()
     end)
 
     self:_wireDrag()
@@ -733,6 +740,7 @@ function UIClass:_wireResize()
             local newX = math.max(self.MinSize.X, startSize.X.Offset + delta.X)
             local newY = math.max(self.MinSize.Y, startSize.Y.Offset + delta.Y)
             self.Window.Size = UDim2.fromOffset(newX, newY)
+            self:_refreshTabButtons()
         end
     end)
 end
@@ -749,6 +757,38 @@ function UIClass:_wireKeybinds()
     end)
 end
 
+function UIClass:_refreshTabButtons()
+    if not self.TabBar or not self.TabOrder then
+        return
+    end
+
+    local count = #self.TabOrder
+    if count == 0 then
+        return
+    end
+
+    local totalWidth = self.TabBar.AbsoluteSize.X
+    if totalWidth <= 0 and self.Window then
+        totalWidth = self.Window.Size.X.Offset
+    end
+
+    if totalWidth <= 0 then
+        return
+    end
+
+    local padding = self.TabList and self.TabList.Padding.Offset or 0
+    local available = math.max(1, totalWidth - (padding * math.max(0, count - 1)))
+    local width = math.max(30, math.floor(available / count))
+
+    for _, tabName in ipairs(self.TabOrder) do
+        local tab = self.Tabs[tabName]
+        if tab and tab.Button then
+            tab.Button.Size = UDim2.fromOffset(width, 25)
+            tab.Button.TextTruncate = Enum.TextTruncate.AtEnd
+        end
+    end
+end
+
 function UIClass:CreateTab(name)
     if self.Tabs[name] then
         return self.Tabs[name]
@@ -762,7 +802,7 @@ function UIClass:CreateTab(name)
 
     tab.Button = make("TextButton", {
         Name = name .. "TabButton",
-        Size = UDim2.fromOffset(math.max(72, (#name * 7) + 18), 25),
+        Size = UDim2.fromOffset(72, 25),
         BorderSizePixel = 0,
         Text = name,
         TextSize = 12,
@@ -804,6 +844,7 @@ function UIClass:CreateTab(name)
 
     self.Tabs[name] = tab
     table.insert(self.TabOrder, name)
+    self:_refreshTabButtons()
 
     if not self.ActiveTab then
         self:SelectTab(name)
