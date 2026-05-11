@@ -9,7 +9,7 @@
 ]]
 
 local MUILib = {}
-MUILib.Version = "0.1.1"
+MUILib.Version = "0.1.2"
 MUILib.ConfigFile = "MeerlyUniversalConfig.json"
 
 local Players = game:GetService("Players")
@@ -394,6 +394,35 @@ function UIClass:SetThemeValue(key, value)
     self.ThemeName = "Custom"
     self:_applyTheme()
     self:SaveUIConfig()
+end
+
+function UIClass:SaveThemeProfile()
+    self.Config["UI Library Config"] = self.Config["UI Library Config"] or {}
+    self.Config["UI Library Config"].SavedTheme = {
+        ThemeName = self.ThemeName,
+        Theme = serializeTheme(self.Theme),
+        SavedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+    return MUILib.SaveUniversalConfig(self.Config)
+end
+
+function UIClass:LoadThemeProfile()
+    local uiConfig = self.Config["UI Library Config"] or {}
+    local savedTheme = uiConfig.SavedTheme
+
+    if type(savedTheme) ~= "table" or type(savedTheme.Theme) ~= "table" then
+        return false, "No saved theme found."
+    end
+
+    local themeName = savedTheme.ThemeName or "Custom"
+    local baseTheme = MUILib.Themes[themeName] or self.Theme or MUILib.Themes.MeerlyDark
+    self.ThemeName = themeName
+    self.Theme = hydrateTheme(savedTheme.Theme, baseTheme)
+    self:_applyTheme()
+    self:SaveUIConfig()
+
+    return true, "Loaded saved theme."
 end
 
 function UIClass:SaveUIConfig()
@@ -1416,17 +1445,49 @@ function UIClass:CreateThemeTab()
     local tab = self:CreateTab("Theme")
     local colors = tab:CreateSection("Colors")
     local effects = tab:CreateSection("Effects")
+    local saves = tab:CreateSection("Saved Theme")
+    local colorKeys = { "Background", "Topbar", "Panel", "PanelAlt", "Control", "Border", "Accent", "AccentDark", "Text", "MutedText" }
+    local colorBoxes = {}
+    local transparencyControl = nil
+    local blurControl = nil
+    local presetControl = nil
+
+    local function rgbText(color)
+        return string.format("%d,%d,%d", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5))
+    end
+
+    local function syncThemeControls()
+        for _, key in ipairs(colorKeys) do
+            if colorBoxes[key] and self.Theme[key] then
+                colorBoxes[key].Text = rgbText(self.Theme[key])
+            end
+        end
+
+        if transparencyControl then
+            transparencyControl.Set(self.Theme.Transparency or 0, true)
+        end
+
+        if blurControl then
+            blurControl.Set(self.Theme.Blur or 0, true)
+        end
+
+        if presetControl then
+            presetControl.Set(self.ThemeName or "Custom", true)
+        end
+    end
 
     local function colorControl(key)
         local color = self.Theme[key]
-        colors:CreateTextbox({
+        colors:CreateLabel(key .. " RGB")
+        colorBoxes[key] = colors:CreateTextbox({
             Text = key .. " RGB",
             Placeholder = "R,G,B",
-            Default = string.format("%d,%d,%d", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5)),
+            Default = rgbText(color),
             Callback = function(text)
                 local r, g, b = string.match(text, "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
                 if r and g and b then
                     self:SetThemeValue(key, Color3.fromRGB(clamp(tonumber(r), 0, 255), clamp(tonumber(g), 0, 255), clamp(tonumber(b), 0, 255)))
+                    syncThemeControls()
                     self.Logger:Info("Updated theme color " .. key, "Theme")
                 else
                     self.Logger:Warn("Use RGB format like 224,42,91 for " .. key, "Theme")
@@ -1435,11 +1496,11 @@ function UIClass:CreateThemeTab()
         })
     end
 
-    for _, key in ipairs({ "Background", "Topbar", "Panel", "PanelAlt", "Control", "Border", "Accent", "AccentDark", "Text", "MutedText" }) do
+    for _, key in ipairs(colorKeys) do
         colorControl(key)
     end
 
-    effects:CreateSlider({
+    transparencyControl = effects:CreateSlider({
         Text = "Transparency",
         Min = 0,
         Max = 0.75,
@@ -1450,7 +1511,7 @@ function UIClass:CreateThemeTab()
         end,
     })
 
-    effects:CreateSlider({
+    blurControl = effects:CreateSlider({
         Text = "Blur",
         Min = 0,
         Max = 24,
@@ -1461,16 +1522,45 @@ function UIClass:CreateThemeTab()
         end,
     })
 
-    effects:CreateDropdown({
+    presetControl = effects:CreateDropdown({
         Text = "Preset",
         Options = { "MeerlyDark", "MeerlyBlue", "ClassicDark" },
         Default = self.ThemeName,
         Callback = function(value)
             self:SetTheme(value)
+            syncThemeControls()
             self.Logger:Info("Applied theme preset " .. value, "Theme")
         end,
     })
 
+    local saveStatus = saves:CreateLabel(self.Config["UI Library Config"].SavedTheme and "Saved theme: Available." or "Saved theme: None yet.")
+    saves:CreateButton({
+        Text = "Save Current Theme",
+        Callback = function()
+            local saved = self:SaveThemeProfile()
+            saveStatus.Text = saved and "Saved theme: Saved." or "Saved theme: Save unavailable."
+            if saved then
+                self.Logger:Info("Saved current theme to universal config.", "Theme")
+            else
+                self.Logger:Warn("Theme save unavailable; executor file APIs may be missing.", "Theme")
+            end
+        end,
+    })
+    saves:CreateButton({
+        Text = "Load Saved Theme",
+        Callback = function()
+            local loaded, message = self:LoadThemeProfile()
+            saveStatus.Text = "Saved theme: " .. message
+            if loaded then
+                syncThemeControls()
+                self.Logger:Info(message, "Theme")
+            else
+                self.Logger:Warn(message, "Theme")
+            end
+        end,
+    })
+
+    syncThemeControls()
     return tab
 end
 
