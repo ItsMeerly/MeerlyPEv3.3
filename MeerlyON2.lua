@@ -1,7 +1,6 @@
-
 --[[
     MeerlyON2 - Superstore Sleep-Over support module.
-    Loaded by MLauncher for GameId 127380660530951.
+    Loaded by MLauncher for Superstore Sleep-Over place/universe ids.
 ]]
 
 return function(context)
@@ -191,12 +190,16 @@ return function(context)
         ObjectESP = false,
         AimAssist = false,
         ItemCategories = {},
+        ItemNames = {},
         EnemyTypes = {},
         ObjectTypes = {},
     }
 
     for _, category in ipairs(itemCategories) do
         state.ItemCategories[category.Name] = true
+        for _, itemName in ipairs(category.Items) do
+            state.ItemNames[itemName] = true
+        end
     end
 
     for _, enemyName in ipairs(enemyOrder) do
@@ -306,8 +309,9 @@ return function(context)
             return
         end
 
-        local category = itemLookup[cleanName(item.Name)]
-        if not category or not state.ItemCategories[category.Name] then
+        local itemName = cleanName(item.Name)
+        local category = itemLookup[itemName]
+        if not category or not state.ItemNames[itemName] then
             return
         end
 
@@ -607,15 +611,48 @@ return function(context)
         end,
     })
 
+    local itemToggles = {}
+    local categoryToggles = {}
     for _, category in ipairs(itemCategories) do
-        itemSection:CreateToggle({
-            Text = category.Name,
+        local categoryRef = category
+        itemSection:CreateLabel(categoryRef.Name)
+        categoryToggles[categoryRef.Name] = itemSection:CreateToggle({
+            Text = categoryRef.Name .. " (All)",
             Default = true,
             Callback = function(value)
-                state.ItemCategories[category.Name] = value and true or false
+                state.ItemCategories[categoryRef.Name] = value and true or false
+                for _, itemName in ipairs(categoryRef.Items) do
+                    state.ItemNames[itemName] = value and true or false
+                    if itemToggles[itemName] then
+                        itemToggles[itemName].Set(value, true)
+                    end
+                end
                 refreshItems()
             end,
         })
+
+        for _, itemName in ipairs(categoryRef.Items) do
+            local itemNameRef = itemName
+            itemToggles[itemName] = itemSection:CreateToggle({
+                Text = itemNameRef,
+                Default = true,
+                Callback = function(value)
+                    state.ItemNames[itemNameRef] = value and true or false
+                    local allEnabled = true
+                    for _, childName in ipairs(categoryRef.Items) do
+                        if not state.ItemNames[childName] then
+                            allEnabled = false
+                            break
+                        end
+                    end
+                    state.ItemCategories[categoryRef.Name] = allEnabled
+                    if categoryToggles[categoryRef.Name] then
+                        categoryToggles[categoryRef.Name].Set(allEnabled, true)
+                    end
+                    refreshItems()
+                end,
+            })
+        end
     end
 
     enemySection:CreateToggle({
