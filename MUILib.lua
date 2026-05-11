@@ -4,12 +4,12 @@
     pop-out console, kill callbacks, semicolon minimize keybind, and universal config storage.
 
     Usage:
-        local MUILib = loadstring(game:HttpGet("https://raw.githubusercontent.com/ItsMeerly/Meerly-Peak-Evolution/main/MUILib.lua"))()
+        local MUILib = loadstring(game:HttpGet("https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/main/MUILib.lua"))()
         local UI = MUILib.new({ Title = "Meerly", Console = true })
 ]]
 
 local MUILib = {}
-MUILib.Version = "0.1.0"
+MUILib.Version = "0.1.1"
 MUILib.ConfigFile = "MeerlyUniversalConfig.json"
 
 local Players = game:GetService("Players")
@@ -20,15 +20,35 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")
+local unpackArgs = table.unpack or unpack
+
+local function getEnvironment()
+    if type(getgenv) == "function" then
+        local ok, env = pcall(getgenv)
+        if ok and type(env) == "table" then
+            return env
+        end
+    end
+
+    if type(getfenv) == "function" then
+        local ok, env = pcall(getfenv)
+        if ok and type(env) == "table" then
+            return env
+        end
+    end
+
+    return _G
+end
 
 local function hasFunction(name)
-    return type(getfenv()[name]) == "function"
+    return type(getEnvironment()[name]) == "function"
 end
 
 local function readLocalFile(path)
     if hasFunction("isfile") and hasFunction("readfile") and isfile(path) then
         return readfile(path)
     end
+
     return nil
 end
 
@@ -37,6 +57,7 @@ local function writeLocalFile(path, content)
         writefile(path, content)
         return true
     end
+
     return false
 end
 
@@ -44,22 +65,12 @@ local function deepCopy(value)
     if type(value) ~= "table" then
         return value
     end
+
     local output = {}
     for key, child in pairs(value) do
         output[deepCopy(key)] = deepCopy(child)
     end
-    return output
-end
 
-local function merge(base, patch)
-    local output = deepCopy(base or {})
-    for key, value in pairs(patch or {}) do
-        if type(value) == "table" and type(output[key]) == "table" then
-            output[key] = merge(output[key], value)
-        else
-            output[key] = deepCopy(value)
-        end
-    end
     return output
 end
 
@@ -72,6 +83,7 @@ local function roundToIncrement(value, increment)
     if increment <= 0 then
         return value
     end
+
     return math.floor((value / increment) + 0.5) * increment
 end
 
@@ -80,9 +92,11 @@ local function make(className, props, children)
     for key, value in pairs(props or {}) do
         instance[key] = value
     end
+
     for _, child in ipairs(children or {}) do
         child.Parent = instance
     end
+
     return instance
 end
 
@@ -90,11 +104,13 @@ local function safeCallback(callback, logger, source, ...)
     if type(callback) ~= "function" then
         return
     end
+
     local args = { ... }
     task.spawn(function()
         local ok, err = pcall(function()
-            callback(unpack(args))
+            callback(unpackArgs(args))
         end)
+
         if not ok and logger then
             logger:Error(tostring(err), source or "Callback")
         end
@@ -113,9 +129,11 @@ local function tableToColor(value, fallback)
     if typeof(value) == "Color3" then
         return value
     end
+
     if type(value) == "table" and value.R and value.G and value.B then
         return Color3.fromRGB(value.R, value.G, value.B)
     end
+
     return fallback or Color3.fromRGB(255, 255, 255)
 end
 
@@ -128,6 +146,7 @@ local function serializeTheme(theme)
             output[key] = value
         end
     end
+
     return output
 end
 
@@ -140,6 +159,7 @@ local function hydrateTheme(theme, fallback)
             output[key] = value
         end
     end
+
     return output
 end
 
@@ -211,10 +231,12 @@ function MUILib.LoadUniversalConfig()
         local ok, decoded = pcall(function()
             return HttpService:JSONDecode(raw)
         end)
+
         if ok and type(decoded) == "table" then
             MemoryConfig = decoded
         end
     end
+
     MemoryConfig["UI Library Config"] = MemoryConfig["UI Library Config"] or {}
     MemoryConfig["Last Launcher Key Input"] = MemoryConfig["Last Launcher Key Input"] or { Key = "" }
     return MemoryConfig
@@ -259,20 +281,34 @@ function LoggerClass:_push(level, message, source)
         Source = source or "System",
         Message = tostring(message),
     }
+
     table.insert(self.History, entry)
     while #self.History > self.MaxHistory do
         table.remove(self.History, 1)
     end
+
     for _, sink in ipairs(self.Sinks) do
         safeCallback(sink, nil, nil, entry)
     end
+
     return entry
 end
 
-function LoggerClass:Info(message, source) return self:_push("INFO", message, source) end
-function LoggerClass:Warn(message, source) return self:_push("WARN", message, source) end
-function LoggerClass:Error(message, source) return self:_push("ERROR", message, source) end
-function LoggerClass:Debug(message, source) return self:_push("DEBUG", message, source) end
+function LoggerClass:Info(message, source)
+    return self:_push("INFO", message, source)
+end
+
+function LoggerClass:Warn(message, source)
+    return self:_push("WARN", message, source)
+end
+
+function LoggerClass:Error(message, source)
+    return self:_push("ERROR", message, source)
+end
+
+function LoggerClass:Debug(message, source)
+    return self:_push("DEBUG", message, source)
+end
 
 function LoggerClass:Clear()
     self.History = {}
@@ -304,13 +340,15 @@ function UIClass:_track(instance, role, prop)
 end
 
 function UIClass:_applyTo(instance, role, prop)
-    if not instance or not instance.Parent then
+    if not instance then
         return
     end
+
     local value = self.Theme[role]
     if value ~= nil then
         instance[prop] = value
     end
+
     if prop == "BackgroundColor3" and instance:IsA("GuiObject") then
         local transparentRoles = { Background = true, Panel = true, PanelAlt = true, Topbar = true, Control = true }
         if transparentRoles[role] then
@@ -323,9 +361,14 @@ function UIClass:_applyTheme()
     for _, item in ipairs(self.Tracked) do
         self:_applyTo(item.Instance, item.Role, item.Prop)
     end
+
     if self.BlurEffect then
         self.BlurEffect.Size = self.Theme.Blur or 0
         self.BlurEffect.Enabled = (self.Theme.Blur or 0) > 0
+    end
+
+    if self.ActiveTab then
+        self:SelectTab(self.ActiveTab)
     end
 end
 
@@ -341,6 +384,7 @@ function UIClass:SetTheme(theme)
         self.ThemeName = "Custom"
         self.Theme = hydrateTheme(theme, self.Theme)
     end
+
     self:_applyTheme()
     self:SaveUIConfig()
 end
@@ -366,6 +410,7 @@ function UIClass:SaveUIConfig()
         YScale = self.Window.Position.Y.Scale,
         YOffset = self.Window.Position.Y.Offset,
     }
+
     local saved = MUILib.SaveUniversalConfig(self.Config)
     if not saved and self.Logger then
         self.Logger:Warn("Local file save unavailable; using in-memory config for this session.", "Config")
@@ -401,6 +446,7 @@ function UIClass:SetMinimized(minimized)
     self.Content.Visible = not self.Minimized
     self.TabBar.Visible = not self.Minimized
     self.ResizeGrip.Visible = not self.Minimized
+
     if self.Minimized then
         self.StoredSize = self.Window.Size
         self.Window.Size = UDim2.fromOffset(self.StoredSize.X.Offset, 24)
@@ -431,14 +477,18 @@ function UIClass:Kill()
     if self.Killed then
         return
     end
+
     self.Killed = true
     self.Logger:Warn("Kill requested; running registered revert callbacks.", "UI")
+
     for _, callback in ipairs(self.KillCallbacks) do
         safeCallback(callback, self.Logger, "Kill")
     end
+
     if self.BlurEffect then
         self.BlurEffect:Destroy()
     end
+
     if self.Gui then
         self.Gui:Destroy()
     end
@@ -458,6 +508,7 @@ function UIClass:_makeButton(parent, text, width)
         Font = Enum.Font.Code,
         AutoButtonColor = false,
     })
+
     self:_track(button, "Control")
     self:_track(button, "Text", "TextColor3")
     button.Parent = parent
@@ -536,7 +587,7 @@ function UIClass:_createBase(config)
             FillDirection = Enum.FillDirection.Horizontal,
             HorizontalAlignment = Enum.HorizontalAlignment.Right,
             Padding = UDim.new(0, 3),
-        })
+        }),
     })
     titleButtons.Parent = self.TitleBar
 
@@ -574,7 +625,7 @@ function UIClass:_createBase(config)
         AnchorPoint = Vector2.new(1, 1),
         Position = UDim2.new(1, -2, 1, -2),
         Size = UDim2.fromOffset(14, 14),
-        Text = "◢",
+        Text = "/",
         TextSize = 10,
         Font = Enum.Font.Code,
         AutoButtonColor = false,
@@ -661,6 +712,7 @@ function UIClass:_wireKeybinds()
         if processed then
             return
         end
+
         if input.KeyCode == Enum.KeyCode.Semicolon then
             self:ToggleMinimized()
         end
@@ -722,24 +774,29 @@ function UIClass:CreateTab(name)
 
     self.Tabs[name] = tab
     table.insert(self.TabOrder, name)
+
     if not self.ActiveTab then
         self:SelectTab(name)
     end
+
     return tab
 end
 
-function UIClass:GetTab(name)
-    return self.Tabs[name]
-end
-
 function UIClass:SelectTab(name)
+    local selectedTab = self.Tabs[name]
+    if not selectedTab then
+        return nil
+    end
+
     self.ActiveTab = name
     for tabName, tab in pairs(self.Tabs) do
-        local active = tabName == name
-        tab.Page.Visible = active
-        tab.Button.BackgroundColor3 = active and self.Theme.Accent or self.Theme.Control
-        tab.Button.TextColor3 = self.Theme.Text
+        local selected = tabName == name
+        tab.Page.Visible = selected
+        tab.Button.BackgroundColor3 = selected and self.Theme.AccentDark or self.Theme.Control
+        tab.Button.TextColor3 = selected and self.Theme.Text or self.Theme.MutedText
     end
+
+    return selectedTab
 end
 
 function TabClass:CreateSection(title)
@@ -787,12 +844,34 @@ function TabClass:CreateSection(title)
     return section
 end
 
-function TabClass:CreateLabel(text) return self:CreateSection("Info"):CreateLabel(text) end
-function TabClass:CreateButton(config) return self:CreateSection(config.Section or "Main"):CreateButton(config) end
-function TabClass:CreateToggle(config) return self:CreateSection(config.Section or "Main"):CreateToggle(config) end
-function TabClass:CreateSlider(config) return self:CreateSection(config.Section or "Main"):CreateSlider(config) end
-function TabClass:CreateDropdown(config) return self:CreateSection(config.Section or "Main"):CreateDropdown(config) end
-function TabClass:CreateTextbox(config) return self:CreateSection(config.Section or "Main"):CreateTextbox(config) end
+function TabClass:CreateLabel(text)
+    return self:CreateSection("Info"):CreateLabel(text)
+end
+
+function TabClass:CreateButton(config)
+    config = config or {}
+    return self:CreateSection(config.Section or "Main"):CreateButton(config)
+end
+
+function TabClass:CreateToggle(config)
+    config = config or {}
+    return self:CreateSection(config.Section or "Main"):CreateToggle(config)
+end
+
+function TabClass:CreateSlider(config)
+    config = config or {}
+    return self:CreateSection(config.Section or "Main"):CreateSlider(config)
+end
+
+function TabClass:CreateDropdown(config)
+    config = config or {}
+    return self:CreateSection(config.Section or "Main"):CreateDropdown(config)
+end
+
+function TabClass:CreateTextbox(config)
+    config = config or {}
+    return self:CreateSection(config.Section or "Main"):CreateTextbox(config)
+end
 
 function SectionClass:_row(height)
     local row = make("Frame", {
@@ -833,9 +912,11 @@ function SectionClass:CreateButton(config)
     self.UI:_track(button, "Border", "BorderColor3")
     self.UI:_track(button, "Text", "TextColor3")
     button.Parent = row
+
     button.MouseButton1Click:Connect(function()
         safeCallback(config.Callback, self.UI.Logger, config.Text or "Button")
     end)
+
     return button
 end
 
@@ -847,7 +928,7 @@ function SectionClass:CreateToggle(config)
         Size = UDim2.fromOffset(18, 18),
         Position = UDim2.fromOffset(0, 2),
         BorderSizePixel = 1,
-        Text = state and "✓" or "",
+        Text = state and "X" or "",
         TextSize = 12,
         Font = Enum.Font.Code,
         AutoButtonColor = false,
@@ -872,15 +953,20 @@ function SectionClass:CreateToggle(config)
 
     local function set(value, silent)
         state = value and true or false
-        box.Text = state and "✓" or ""
+        box.Text = state and "X" or ""
         box.BackgroundColor3 = state and self.UI.Theme.Accent or self.UI.Theme.Control
         if not silent then
             safeCallback(config.Callback, self.UI.Logger, config.Text or "Toggle", state)
         end
     end
 
-    box.MouseButton1Click:Connect(function() set(not state) end)
-    label.MouseButton1Click:Connect(function() set(not state) end)
+    box.MouseButton1Click:Connect(function()
+        set(not state)
+    end)
+    label.MouseButton1Click:Connect(function()
+        set(not state)
+    end)
+
     return { Set = set, Get = function() return state end, Instance = row }
 end
 
@@ -889,6 +975,7 @@ function SectionClass:CreateSlider(config)
     local minValue = config.Min or 0
     local maxValue = config.Max or 100
     local increment = config.Increment or 1
+    local range = math.max(1, maxValue - minValue)
     local value = clamp(config.Default or minValue, minValue, maxValue)
     local row = self:_row(36)
 
@@ -929,39 +1016,46 @@ function SectionClass:CreateSlider(config)
 
     local fill = make("Frame", {
         BorderSizePixel = 0,
-        Size = UDim2.fromScale((value - minValue) / (maxValue - minValue), 1),
+        Size = UDim2.fromScale((value - minValue) / range, 1),
     })
     self.UI:_track(fill, "Accent")
     fill.Parent = bar
 
     local dragging = false
-    local function setFromX(x, silent)
-        local alpha = clamp((x - bar.AbsolutePosition.X) / math.max(1, bar.AbsoluteSize.X), 0, 1)
-        local nextValue = roundToIncrement(minValue + ((maxValue - minValue) * alpha), increment)
-        value = clamp(nextValue, minValue, maxValue)
+
+    local function setValue(nextValue, silent)
+        value = clamp(roundToIncrement(nextValue, increment), minValue, maxValue)
         valueLabel.Text = tostring(value)
-        fill.Size = UDim2.fromScale((value - minValue) / math.max(1, maxValue - minValue), 1)
+        fill.Size = UDim2.fromScale((value - minValue) / range, 1)
+
         if not silent then
             safeCallback(config.Callback, self.UI.Logger, config.Text or "Slider", value)
         end
+    end
+
+    local function setFromX(x, silent)
+        local alpha = clamp((x - bar.AbsolutePosition.X) / math.max(1, bar.AbsoluteSize.X), 0, 1)
+        setValue(minValue + (range * alpha), silent)
     end
 
     bar.MouseButton1Down:Connect(function(x)
         dragging = true
         setFromX(x)
     end)
+
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
+
     UserInputService.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             setFromX(input.Position.X)
         end
     end)
 
-    return { Set = function(nextValue, silent) setFromX(bar.AbsolutePosition.X + (((nextValue - minValue) / (maxValue - minValue)) * bar.AbsoluteSize.X), silent) end, Get = function() return value end, Instance = row }
+    return { Set = setValue, Get = function() return value end, Instance = row }
 end
 
 function SectionClass:CreateDropdown(config)
@@ -990,7 +1084,7 @@ function SectionClass:CreateDropdown(config)
         Position = UDim2.new(1, 0, 0, 0),
         Size = UDim2.fromOffset(22, 22),
         BorderSizePixel = 0,
-        Text = "▼",
+        Text = "v",
         TextSize = 10,
         Font = Enum.Font.Code,
     })
@@ -1017,6 +1111,7 @@ function SectionClass:CreateDropdown(config)
         menu.Visible = false
         open = false
         row.Size = UDim2.new(1, 0, 0, 24)
+
         if not silent then
             safeCallback(config.Callback, self.UI.Logger, config.Text or "Dropdown", selected)
         end
@@ -1067,13 +1162,19 @@ function SectionClass:CreateTextbox(config)
     self.UI:_track(box, "Border", "BorderColor3")
     self.UI:_track(box, "Text", "TextColor3")
     box.Parent = row
+
     box.FocusLost:Connect(function(enterPressed)
         safeCallback(config.Callback, self.UI.Logger, config.Text or "Textbox", box.Text, enterPressed)
     end)
+
     return box
 end
 
 function UIClass:_buildConsole()
+    if self.ConsoleTab then
+        return self.ConsoleTab
+    end
+
     self.ConsoleTab = self:CreateTab("Console")
     local toolbar = self.ConsoleTab:CreateSection("Console Controls")
     local filter = "ALL"
@@ -1095,15 +1196,21 @@ function UIClass:_buildConsole()
     output.Parent = holder.Body
     make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
 
+    local function resetOutput()
+        output:ClearAllChildren()
+        make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
+    end
+
     local function addEntry(entry)
         if entry.Clear then
-            output:ClearAllChildren()
-            make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
+            resetOutput()
             return
         end
+
         if filter ~= "ALL" and entry.Level ~= filter then
             return
         end
+
         local line = make("TextLabel", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, -4, 0, 18),
@@ -1115,6 +1222,7 @@ function UIClass:_buildConsole()
         local role = ({ INFO = "Text", WARN = "Warning", ERROR = "Error", DEBUG = "Debug" })[entry.Level] or "Text"
         self:_track(line, role, "TextColor3")
         line.Parent = output
+
         if autoScroll then
             task.defer(function()
                 output.CanvasPosition = Vector2.new(0, math.max(0, output.AbsoluteCanvasSize.Y))
@@ -1128,8 +1236,7 @@ function UIClass:_buildConsole()
         Default = "ALL",
         Callback = function(value)
             filter = value
-            output:ClearAllChildren()
-            make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
+            resetOutput()
             for _, entry in ipairs(self.Logger:GetHistory()) do
                 addEntry(entry)
             end
@@ -1160,15 +1267,26 @@ function UIClass:_buildConsole()
 
     self.Console = {
         Output = output,
-        SetFilter = function(_, value) filter = value end,
-        PopOut = function() self:PopOutConsole() end,
-        Dock = function() if self.PopoutWindow then self.PopoutWindow:Destroy() self.PopoutWindow = nil end end,
+        SetFilter = function(_, value)
+            filter = value
+        end,
+        PopOut = function()
+            self:PopOutConsole()
+        end,
+        Dock = function()
+            if self.PopoutWindow then
+                self.PopoutWindow:Destroy()
+                self.PopoutWindow = nil
+            end
+        end,
     }
 
     self.Logger:Connect(addEntry)
     for _, entry in ipairs(self.Logger:GetHistory()) do
         addEntry(entry)
     end
+
+    return self.ConsoleTab
 end
 
 function UIClass:PopOutConsole()
@@ -1189,7 +1307,11 @@ function UIClass:PopOutConsole()
     pop.Parent = self.Gui
     self.PopoutWindow = pop
 
-    local bar = make("Frame", { Size = UDim2.new(1, 0, 0, 22), BorderSizePixel = 0, Active = true })
+    local bar = make("Frame", {
+        Size = UDim2.new(1, 0, 0, 22),
+        BorderSizePixel = 0,
+        Active = true,
+    })
     self:_track(bar, "Topbar")
     bar.Parent = pop
 
@@ -1227,12 +1349,17 @@ function UIClass:PopOutConsole()
     output.Parent = pop
     make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
 
+    local function resetOutput()
+        output:ClearAllChildren()
+        make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
+    end
+
     local function add(entry)
         if entry.Clear then
-            output:ClearAllChildren()
-            make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1) }).Parent = output
+            resetOutput()
             return
         end
+
         local line = make("TextLabel", {
             BackgroundTransparency = 1,
             Size = UDim2.new(1, -4, 0, 18),
@@ -1244,6 +1371,7 @@ function UIClass:PopOutConsole()
         local role = ({ INFO = "Text", WARN = "Warning", ERROR = "Error", DEBUG = "Debug" })[entry.Level] or "Text"
         self:_track(line, role, "TextColor3")
         line.Parent = output
+
         task.defer(function()
             output.CanvasPosition = Vector2.new(0, math.max(0, output.AbsoluteCanvasSize.Y))
         end)
@@ -1257,6 +1385,7 @@ function UIClass:PopOutConsole()
     local dragging = false
     local start = nil
     local startPos = nil
+
     bar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
@@ -1264,11 +1393,13 @@ function UIClass:PopOutConsole()
             startPos = pop.Position
         end
     end)
+
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
+
     UserInputService.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - start
@@ -1278,15 +1409,20 @@ function UIClass:PopOutConsole()
 end
 
 function UIClass:CreateThemeTab()
+    if self.Tabs.Theme then
+        return self.Tabs.Theme
+    end
+
     local tab = self:CreateTab("Theme")
     local colors = tab:CreateSection("Colors")
     local effects = tab:CreateSection("Effects")
 
     local function colorControl(key)
+        local color = self.Theme[key]
         colors:CreateTextbox({
             Text = key .. " RGB",
             Placeholder = "R,G,B",
-            Default = string.format("%d,%d,%d", self.Theme[key].R * 255, self.Theme[key].G * 255, self.Theme[key].B * 255),
+            Default = string.format("%d,%d,%d", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5)),
             Callback = function(text)
                 local r, g, b = string.match(text, "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
                 if r and g and b then
@@ -1365,6 +1501,7 @@ function MUILib.new(config)
     if config.ThemeTab ~= false then
         self:CreateThemeTab()
     end
+
     if config.Console ~= false then
         self:_buildConsole()
     end
