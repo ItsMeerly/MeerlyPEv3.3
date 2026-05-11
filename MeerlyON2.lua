@@ -15,7 +15,7 @@ return function(context)
         if context.Logger then
             context.Logger:Warn("MeerlyON2 is already loaded.", "Superstore")
         end
-        UI:SelectTab("Superstore")
+        UI:SelectTab("Item ESP")
         return
     end
     UI._MeerlyON2Loaded = true
@@ -185,9 +185,13 @@ return function(context)
 
     local state = {
         ItemESP = false,
+        ItemESPNames = true,
         EnemyESP = false,
+        EnemyESPNames = true,
         AlarmESP = false,
+        AlarmESPNames = true,
         ObjectESP = false,
+        ObjectESPNames = true,
         AimAssist = false,
         ItemCategories = {},
         ItemNames = {},
@@ -206,7 +210,7 @@ return function(context)
         state.EnemyTypes[enemyName] = true
     end
 
-    local function createVisual(registry, object, label, color)
+    local function createVisual(registry, object, label, color, showName)
         if not object or not object.Parent then
             return
         end
@@ -222,6 +226,7 @@ return function(context)
             existing.Highlight.FillColor = color
             existing.Highlight.OutlineColor = color
             existing.Billboard.Adornee = part
+            existing.Billboard.Enabled = showName ~= false
             existing.Label.Text = label
             existing.Label.TextColor3 = color
             return
@@ -241,6 +246,7 @@ return function(context)
         billboard.Name = "MeerlyON2Label"
         billboard.Adornee = part
         billboard.AlwaysOnTop = true
+        billboard.Enabled = showName ~= false
         billboard.Size = UDim2.fromOffset(180, 34)
         billboard.StudsOffset = Vector3.new(0, 3, 0)
         billboard.Parent = espFolder
@@ -279,6 +285,14 @@ return function(context)
         }
     end
 
+    local function setRegistryNamesVisible(registry, visible)
+        for _, record in pairs(registry) do
+            if record.Billboard then
+                record.Billboard.Enabled = visible and true or false
+            end
+        end
+    end
+
     local function removeVisual(registry, object)
         local record = registry[object]
         if not record then
@@ -315,7 +329,7 @@ return function(context)
             return
         end
 
-        createVisual(itemVisuals, item, item.Name, category.Color)
+        createVisual(itemVisuals, item, item.Name, category.Color, state.ItemESPNames)
     end
 
     local function refreshItems()
@@ -355,7 +369,7 @@ return function(context)
             return
         end
 
-        createVisual(enemyVisuals, enemy, enemy.Name, color)
+        createVisual(enemyVisuals, enemy, enemy.Name, color, state.EnemyESPNames)
     end
 
     local function refreshEnemies()
@@ -391,7 +405,7 @@ return function(context)
         for _, alarm in ipairs(folder:GetChildren()) do
             if alarm:IsA("BasePart") or alarm:FindFirstChildWhichIsA("BasePart", true) then
                 index = index + 1
-                createVisual(alarmVisuals, alarm, "Alarm " .. tostring(index), Color3.fromRGB(255, 45, 45))
+                createVisual(alarmVisuals, alarm, "Alarm " .. tostring(index), Color3.fromRGB(255, 45, 45), state.AlarmESPNames)
             end
         end
     end
@@ -411,7 +425,7 @@ return function(context)
         for objectName, enabled in pairs(state.ObjectTypes) do
             if enabled and objectScan.ObjectsByName[objectName] then
                 for _, object in ipairs(objectScan.ObjectsByName[objectName]) do
-                    createVisual(objectVisuals, object, objectName, Color3.fromRGB(95, 210, 255))
+                    createVisual(objectVisuals, object, objectName, Color3.fromRGB(95, 210, 255), state.ObjectESPNames)
                 end
             end
         end
@@ -589,17 +603,14 @@ return function(context)
         return closestPart
     end
 
-    local tab = UI:CreateTab("Superstore")
-    local statusSection = tab:CreateSection(GAME_NAME)
-    local itemSection = tab:CreateSection("Item ESP")
-    local enemySection = tab:CreateSection("Enemy ESP")
-    local alarmSection = tab:CreateSection("Alarm ESP")
-    local objectSection = tab:CreateSection("Object ESP")
-    local actionSection = tab:CreateSection("Actions")
-    local teleportSection = tab:CreateSection("Teleports")
-
-    statusSection:CreateLabel("Game support loaded for GameId " .. tostring(context.GameId or "Unknown") .. ".")
-    statusSection:CreateLabel("All ESP masters start off. Category filters are ready before use.")
+    local itemTab = UI:CreateTab("Item ESP")
+    local otherTab = UI:CreateTab("Other ESP")
+    local teleportTab = UI:CreateTab("Teleports")
+    local itemSection = itemTab:CreateSection("Item ESP")
+    local alarmSection = otherTab:CreateSection("Alarm ESP")
+    local enemySection = otherTab:CreateSection("Enemy ESP")
+    local objectSection = otherTab:CreateSection("Object ESP")
+    local teleportSection = teleportTab:CreateSection("Teleports")
 
     itemSection:CreateToggle({
         Text = "Items ESP",
@@ -608,6 +619,15 @@ return function(context)
             state.ItemESP = value and true or false
             refreshItems()
             logInfo(state.ItemESP and "Items ESP enabled." or "Items ESP disabled.")
+        end,
+    })
+
+    itemSection:CreateToggle({
+        Text = "ESP Names",
+        Default = true,
+        Callback = function(value)
+            state.ItemESPNames = value and true or false
+            setRegistryNamesVisible(itemVisuals, state.ItemESPNames)
         end,
     })
 
@@ -655,6 +675,25 @@ return function(context)
         end
     end
 
+    alarmSection:CreateToggle({
+        Text = "Alarms ESP",
+        Default = false,
+        Callback = function(value)
+            state.AlarmESP = value and true or false
+            refreshAlarms()
+            logInfo(state.AlarmESP and "Alarms ESP enabled." or "Alarms ESP disabled.")
+        end,
+    })
+
+    alarmSection:CreateToggle({
+        Text = "ESP Names",
+        Default = true,
+        Callback = function(value)
+            state.AlarmESPNames = value and true or false
+            setRegistryNamesVisible(alarmVisuals, state.AlarmESPNames)
+        end,
+    })
+
     enemySection:CreateToggle({
         Text = "Enemies ESP",
         Default = false,
@@ -662,6 +701,15 @@ return function(context)
             state.EnemyESP = value and true or false
             refreshEnemies()
             logInfo(state.EnemyESP and "Enemies ESP enabled." or "Enemies ESP disabled.")
+        end,
+    })
+
+    enemySection:CreateToggle({
+        Text = "ESP Names",
+        Default = true,
+        Callback = function(value)
+            state.EnemyESPNames = value and true or false
+            setRegistryNamesVisible(enemyVisuals, state.EnemyESPNames)
         end,
     })
 
@@ -676,13 +724,12 @@ return function(context)
         })
     end
 
-    alarmSection:CreateToggle({
-        Text = "Alarms ESP",
+    enemySection:CreateToggle({
+        Text = "Enemy Aim Assist (RMB)",
         Default = false,
         Callback = function(value)
-            state.AlarmESP = value and true or false
-            refreshAlarms()
-            logInfo(state.AlarmESP and "Alarms ESP enabled." or "Alarms ESP disabled.")
+            state.AimAssist = value and true or false
+            logInfo(state.AimAssist and "Enemy aim assist enabled." or "Enemy aim assist disabled.")
         end,
     })
 
@@ -696,6 +743,15 @@ return function(context)
         end,
     })
 
+    objectSection:CreateToggle({
+        Text = "ESP Names",
+        Default = true,
+        Callback = function(value)
+            state.ObjectESPNames = value and true or false
+            setRegistryNamesVisible(objectVisuals, state.ObjectESPNames)
+        end,
+    })
+
     objectScan.Status = objectSection:CreateLabel("Objects: not scanned.")
     objectSection:CreateButton({
         Text = "Scan Objects",
@@ -704,44 +760,74 @@ return function(context)
         end,
     })
 
-    actionSection:CreateToggle({
-        Text = "Enemy Aim Assist (RMB)",
-        Default = false,
-        Callback = function(value)
-            state.AimAssist = value and true or false
-            logInfo(state.AimAssist and "Enemy aim assist enabled." or "Enemy aim assist disabled.")
-        end,
-    })
+    local function createTeleportRow(index)
+        local row = teleportSection:_row(24)
+
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Position = UDim2.fromOffset(0, 0)
+        label.Size = UDim2.new(1, -176, 1, 0)
+        label.Text = "Slot " .. tostring(index)
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextSize = 12
+        label.Font = Enum.Font.Code
+        UI:_track(label, "Text", "TextColor3")
+        label.Parent = row
+
+        local saveButton = Instance.new("TextButton")
+        saveButton.AnchorPoint = Vector2.new(1, 0)
+        saveButton.Position = UDim2.new(1, -90, 0, 1)
+        saveButton.Size = UDim2.fromOffset(82, 22)
+        saveButton.BorderSizePixel = 1
+        saveButton.Text = "Save"
+        saveButton.TextSize = 12
+        saveButton.Font = Enum.Font.Code
+        saveButton.AutoButtonColor = false
+        UI:_track(saveButton, "Control")
+        UI:_track(saveButton, "Border", "BorderColor3")
+        UI:_track(saveButton, "Text", "TextColor3")
+        saveButton.Parent = row
+
+        local loadButton = Instance.new("TextButton")
+        loadButton.AnchorPoint = Vector2.new(1, 0)
+        loadButton.Position = UDim2.new(1, 0, 0, 1)
+        loadButton.Size = UDim2.fromOffset(82, 22)
+        loadButton.BorderSizePixel = 1
+        loadButton.Text = "Load"
+        loadButton.TextSize = 12
+        loadButton.Font = Enum.Font.Code
+        loadButton.AutoButtonColor = false
+        UI:_track(loadButton, "Control")
+        UI:_track(loadButton, "Border", "BorderColor3")
+        UI:_track(loadButton, "Text", "TextColor3")
+        loadButton.Parent = row
+
+        saveButton.MouseButton1Click:Connect(function()
+            local character = getCharacter()
+            local rootPart = getRootPart(character)
+            if not character or not rootPart then
+                logWarn("Could not save slot " .. tostring(index) .. "; character not ready.")
+                return
+            end
+
+            teleportSlots[index] = rootPart.CFrame
+            logInfo("Saved teleport slot " .. tostring(index) .. ".")
+        end)
+
+        loadButton.MouseButton1Click:Connect(function()
+            local character = getCharacter()
+            if not character or not teleportSlots[index] then
+                logWarn("Teleport slot " .. tostring(index) .. " is empty.")
+                return
+            end
+
+            character:PivotTo(teleportSlots[index])
+            logInfo("Teleported to slot " .. tostring(index) .. ".")
+        end)
+    end
 
     for index = 1, 5 do
-        teleportSection:CreateButton({
-            Text = "Save Slot " .. tostring(index),
-            Callback = function()
-                local character = getCharacter()
-                local rootPart = getRootPart(character)
-                if not character or not rootPart then
-                    logWarn("Could not save slot " .. tostring(index) .. "; character not ready.")
-                    return
-                end
-
-                teleportSlots[index] = rootPart.CFrame
-                logInfo("Saved teleport slot " .. tostring(index) .. ".")
-            end,
-        })
-
-        teleportSection:CreateButton({
-            Text = "Teleport Slot " .. tostring(index),
-            Callback = function()
-                local character = getCharacter()
-                if not character or not teleportSlots[index] then
-                    logWarn("Teleport slot " .. tostring(index) .. " is empty.")
-                    return
-                end
-
-                character:PivotTo(teleportSlots[index])
-                logInfo("Teleported to slot " .. tostring(index) .. ".")
-            end,
-        })
+        createTeleportRow(index)
     end
 
     refreshFolderWatchers()
@@ -795,6 +881,6 @@ return function(context)
     end
 
     UI:OnKill(cleanup)
-    UI:SelectTab("Superstore")
+    UI:SelectTab("Item ESP")
     logInfo("MeerlyON2 loaded.")
 end
