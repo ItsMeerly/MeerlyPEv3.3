@@ -1,18 +1,17 @@
 --[[
     Meerly Launcher (MLauncher)
-    Full-screen-first keygate and Roblox PlaceId/GameId router for loading authorized game scripts.
+    Keygate and Roblox PlaceId/GameId router for loading authorized game scripts.
 
     Entry:
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/ItsMeerly/Meerly-Peak-Evolution/main/MLauncher.lua"))()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/main/MLauncher.lua"))()
 ]]
 
 local Launcher = {}
-Launcher.Version = "0.1.0"
-Launcher.RepositoryRoot = "https://raw.githubusercontent.com/ItsMeerly/Meerly-Peak-Evolution/main"
+Launcher.Version = "0.1.1"
+Launcher.RepositoryRoot = "https://raw.githubusercontent.com/ItsMeerly/MeerlyPEv3.3/main"
 Launcher.LibraryUrl = Launcher.RepositoryRoot .. "/MUILib.lua"
 
 Launcher.ValidKeys = {
-    -- Replace these with your own local/testing keys, or swap ValidateKey for a remote API check.
     ["MEERLY-DEV"] = true,
 }
 
@@ -33,13 +32,66 @@ Launcher.Games = {
     },
 }
 
+local function getGlobal(name)
+    local ok, env = pcall(function()
+        if type(getgenv) == "function" then
+            return getgenv()
+        end
+        if type(getfenv) == "function" then
+            return getfenv()
+        end
+        return _G
+    end)
+
+    if ok and type(env) == "table" then
+        return env[name]
+    end
+
+    return nil
+end
+
 local function safeHttpGet(url)
+    if type(url) ~= "string" or url == "" then
+        error("Missing URL for HttpGet.", 2)
+    end
+
     return game:HttpGet(url)
 end
 
+local function compileSource(source, label)
+    if type(loadstring) ~= "function" then
+        error("loadstring is not available in this executor.", 2)
+    end
+
+    local chunk, err = loadstring(source)
+    if type(chunk) ~= "function" then
+        error((label or "Script") .. " failed to compile: " .. tostring(err), 2)
+    end
+
+    return chunk
+end
+
 function Launcher:LoadLibrary()
-    local source = safeHttpGet(self.LibraryUrl)
-    return loadstring(source)()
+    local injected = getGlobal("MUILib")
+    if type(injected) == "table" and type(injected.new) == "function" then
+        return injected
+    end
+
+    local ok, source = pcall(safeHttpGet, self.LibraryUrl)
+    if not ok then
+        error("Could not fetch MUILib from " .. tostring(self.LibraryUrl) .. ": " .. tostring(source), 2)
+    end
+
+    if type(source) ~= "string" or source == "" or source:match("^%s*404") then
+        error("MUILib fetch returned empty or missing content from " .. tostring(self.LibraryUrl), 2)
+    end
+
+    local loaded = compileSource(source, "MUILib")()
+    if type(loaded) ~= "table" or type(loaded.new) ~= "function" then
+        error("MUILib did not return a usable library table.", 2)
+    end
+
+    return loaded
 end
 
 function Launcher:ValidateKey(key)
@@ -47,9 +99,11 @@ function Launcher:ValidateKey(key)
     if key == "" then
         return false, "Enter a key first."
     end
+
     if self.ValidKeys[key] then
         return true, "Key accepted."
     end
+
     return false, "Invalid key."
 end
 
@@ -57,13 +111,16 @@ function Launcher:GetGameConfig()
     local placeId = game.PlaceId
     local gameId = game.GameId
     local placeConfig = self.Games.Places[placeId]
+
     if placeConfig then
         return placeConfig, "PlaceId", placeId
     end
+
     local universeConfig = self.Games.Universes[gameId]
     if universeConfig then
         return universeConfig, "GameId", gameId
     end
+
     return nil, "Unsupported", placeId
 end
 
@@ -72,20 +129,22 @@ function Launcher:LoadGameScript(gameConfig, context)
         context.Logger:Error("No game config was provided.", "Launcher")
         return false
     end
+
     if gameConfig.Enabled == false then
         context.Logger:Warn("This game script is disabled in the launcher registry.", "Launcher")
         return false
     end
+
     if not gameConfig.Url or gameConfig.Url == "" then
         context.Logger:Warn("No script URL configured for " .. tostring(gameConfig.Name or "this game") .. ".", "Launcher")
         return false
     end
 
     context.Logger:Info("Fetching script for " .. tostring(gameConfig.Name or "configured game") .. ".", "Loader")
+
     local ok, result = pcall(function()
         local source = safeHttpGet(gameConfig.Url)
-        local loaded = loadstring(source)
-        return loaded()
+        return compileSource(source, tostring(gameConfig.Name or "Game script"))()
     end)
 
     if not ok then
@@ -97,6 +156,7 @@ function Launcher:LoadGameScript(gameConfig, context)
         local ran, err = pcall(function()
             result(context)
         end)
+
         if not ran then
             context.Logger:Error(err, "GameScript")
             return false
@@ -105,6 +165,7 @@ function Launcher:LoadGameScript(gameConfig, context)
         local ran, err = pcall(function()
             result:Start(context)
         end)
+
         if not ran then
             context.Logger:Error(err, "GameScript")
             return false
@@ -123,9 +184,8 @@ function Launcher:BuildKeygate(UI)
     access:CreateLabel("Enter your Meerly key to unlock game-specific loading.")
     access:CreateLabel("Press ; to minimize/restore. Use X to kill and run cleanup callbacks.")
 
-    local storedKey = ""
     UI.Config["Last Launcher Key Input"] = UI.Config["Last Launcher Key Input"] or { Key = "" }
-    storedKey = UI.Config["Last Launcher Key Input"].Key or ""
+    local storedKey = UI.Config["Last Launcher Key Input"].Key or ""
 
     local keyBox = access:CreateTextbox({
         Text = "Key",
