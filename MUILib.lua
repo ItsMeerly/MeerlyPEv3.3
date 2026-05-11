@@ -9,7 +9,7 @@
 ]]
 
 local MUILib = {}
-MUILib.Version = "0.1.2"
+MUILib.Version = "0.1.3"
 MUILib.ConfigFile = "MeerlyUniversalConfig.json"
 
 local Players = game:GetService("Players")
@@ -17,6 +17,7 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -1437,6 +1438,624 @@ function UIClass:PopOutConsole()
     end)
 end
 
+function UIClass:CreateCommandsTab()
+    if self.Tabs.Commands then
+        return self.Tabs.Commands
+    end
+
+    local tab = self:CreateTab("Commands")
+    local movement = tab:CreateSection("Movement")
+    local visuals = tab:CreateSection("Visuals")
+    local external = tab:CreateSection("External")
+    local commandsConfig = self.Config["Commands Config"] or {}
+    self.Config["Commands Config"] = commandsConfig
+
+    commandsConfig.FlySpeed = commandsConfig.FlySpeed or 50
+    commandsConfig.WalkSpeed = commandsConfig.WalkSpeed or 16
+    commandsConfig.ESPTeamColors = commandsConfig.ESPTeamColors ~= false
+    commandsConfig.ESPNames = commandsConfig.ESPNames ~= false
+
+    local cleanupCallbacks = {}
+    local function saveCommandsConfig()
+        self.Config["Commands Config"] = commandsConfig
+        MUILib.SaveUniversalConfig(self.Config)
+    end
+
+    local function trackConnection(connection)
+        if connection then
+            table.insert(cleanupCallbacks, function()
+                connection:Disconnect()
+            end)
+        end
+        return connection
+    end
+
+    local function getCharacter()
+        return LocalPlayer and LocalPlayer.Character
+    end
+
+    local function getHumanoid(character)
+        character = character or getCharacter()
+        return character and character:FindFirstChildOfClass("Humanoid")
+    end
+
+    local function getRootPart(character)
+        character = character or getCharacter()
+        if not character then
+            return nil
+        end
+
+        return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+    end
+
+    local flyEnabled = false
+    local flySpeed = commandsConfig.FlySpeed
+    local flyControls = { Forward = 0, Back = 0, Left = 0, Right = 0, Up = 0, Down = 0 }
+    local flyGyro = nil
+    local flyVelocity = nil
+    local flyRoot = nil
+    local flyStep = nil
+
+    local function destroyFlyMovers()
+        if flyGyro then
+            flyGyro:Destroy()
+            flyGyro = nil
+        end
+
+        if flyVelocity then
+            flyVelocity:Destroy()
+            flyVelocity = nil
+        end
+
+        flyRoot = nil
+    end
+
+    local function ensureFlyMovers(root)
+        if flyRoot == root and flyGyro and flyVelocity then
+            return
+        end
+
+        destroyFlyMovers()
+        flyRoot = root
+
+        flyGyro = Instance.new("BodyGyro")
+        flyGyro.Name = "MeerlyFlyGyro"
+        flyGyro.P = 90000
+        flyGyro.MaxTorque = Vector3.new(9000000000, 9000000000, 9000000000)
+        flyGyro.CFrame = root.CFrame
+        flyGyro.Parent = root
+
+        flyVelocity = Instance.new("BodyVelocity")
+        flyVelocity.Name = "MeerlyFlyVelocity"
+        flyVelocity.MaxForce = Vector3.new(9000000000, 9000000000, 9000000000)
+        flyVelocity.Velocity = Vector3.new(0, 0, 0)
+        flyVelocity.Parent = root
+    end
+
+    local function stopFly()
+        flyEnabled = false
+        if flyStep then
+            flyStep:Disconnect()
+            flyStep = nil
+        end
+
+        destroyFlyMovers()
+
+        local humanoid = getHumanoid()
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+
+        flyControls.Forward = 0
+        flyControls.Back = 0
+        flyControls.Left = 0
+        flyControls.Right = 0
+        flyControls.Up = 0
+        flyControls.Down = 0
+    end
+
+    local function setFlyControl(input, value)
+        if input.KeyCode == Enum.KeyCode.W then
+            flyControls.Forward = value
+        elseif input.KeyCode == Enum.KeyCode.S then
+            flyControls.Back = -value
+        elseif input.KeyCode == Enum.KeyCode.A then
+            flyControls.Left = -value
+        elseif input.KeyCode == Enum.KeyCode.D then
+            flyControls.Right = value
+        elseif input.KeyCode == Enum.KeyCode.Space then
+            flyControls.Up = value
+        elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+            flyControls.Down = -value
+        end
+    end
+
+    local function startFly()
+        if flyEnabled then
+            return
+        end
+
+        flyEnabled = true
+        flyStep = RunService.RenderStepped:Connect(function()
+            if not flyEnabled then
+                return
+            end
+
+            local character = getCharacter()
+            local humanoid = getHumanoid(character)
+            local root = getRootPart(character)
+            local camera = workspace.CurrentCamera
+
+            if not humanoid or not root or not camera then
+                return
+            end
+
+            ensureFlyMovers(root)
+            humanoid.PlatformStand = true
+
+            local move = (camera.CFrame.LookVector * (flyControls.Forward + flyControls.Back))
+                + (camera.CFrame.RightVector * (flyControls.Right + flyControls.Left))
+                + (Vector3.new(0, 1, 0) * (flyControls.Up + flyControls.Down))
+
+            if move.Magnitude > 0 then
+                flyVelocity.Velocity = move.Unit * flySpeed
+            else
+                flyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+
+            flyGyro.CFrame = camera.CFrame
+        end)
+    end
+
+    trackConnection(UserInputService.InputBegan:Connect(function(input, processed)
+        if processed or not flyEnabled then
+            return
+        end
+
+        setFlyControl(input, 1)
+    end))
+
+    trackConnection(UserInputService.InputEnded:Connect(function(input)
+        setFlyControl(input, 0)
+    end))
+
+    local walkSpeedEnabled = false
+    local walkSpeedValue = commandsConfig.WalkSpeed
+    local originalWalkSpeeds = setmetatable({}, { __mode = "k" })
+
+    local function applyWalkSpeed()
+        local humanoid = getHumanoid()
+        if not humanoid then
+            return
+        end
+
+        if originalWalkSpeeds[humanoid] == nil then
+            originalWalkSpeeds[humanoid] = humanoid.WalkSpeed
+        end
+
+        humanoid.WalkSpeed = walkSpeedValue
+    end
+
+    local function restoreWalkSpeed()
+        for humanoid, value in pairs(originalWalkSpeeds) do
+            if humanoid and humanoid.Parent then
+                humanoid.WalkSpeed = value
+            end
+        end
+
+        originalWalkSpeeds = setmetatable({}, { __mode = "k" })
+    end
+
+    local function setWalkSpeedEnabled(value)
+        walkSpeedEnabled = value and true or false
+        if walkSpeedEnabled then
+            applyWalkSpeed()
+        else
+            restoreWalkSpeed()
+        end
+    end
+
+    if LocalPlayer then
+        trackConnection(LocalPlayer.CharacterAdded:Connect(function()
+            task.defer(function()
+                if walkSpeedEnabled then
+                    applyWalkSpeed()
+                end
+            end)
+        end))
+    end
+
+    local noclipEnabled = false
+    local noclipOriginal = setmetatable({}, { __mode = "k" })
+    local noclipStep = nil
+
+    local function restoreNoclip()
+        for part, canCollide in pairs(noclipOriginal) do
+            if part and part.Parent then
+                part.CanCollide = canCollide
+            end
+        end
+
+        noclipOriginal = setmetatable({}, { __mode = "k" })
+    end
+
+    local function setNoclipEnabled(value)
+        noclipEnabled = value and true or false
+
+        if noclipEnabled then
+            if noclipStep then
+                return
+            end
+
+            noclipStep = RunService.Stepped:Connect(function()
+                local character = getCharacter()
+                if not character then
+                    return
+                end
+
+                for _, child in ipairs(character:GetDescendants()) do
+                    if child:IsA("BasePart") then
+                        if noclipOriginal[child] == nil then
+                            noclipOriginal[child] = child.CanCollide
+                        end
+                        child.CanCollide = false
+                    end
+                end
+            end)
+        else
+            if noclipStep then
+                noclipStep:Disconnect()
+                noclipStep = nil
+            end
+            restoreNoclip()
+        end
+    end
+
+    local infiniteJumpEnabled = false
+    trackConnection(UserInputService.JumpRequest:Connect(function()
+        if not infiniteJumpEnabled then
+            return
+        end
+
+        local humanoid = getHumanoid()
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end))
+
+    local espEnabled = false
+    local espObjects = {}
+    local espPlayerConnections = {}
+    local espFolder = nil
+
+    local function getESPFolder()
+        if espFolder and espFolder.Parent then
+            return espFolder
+        end
+
+        espFolder = Instance.new("Folder")
+        espFolder.Name = "MeerlyCommandESP"
+        espFolder.Parent = CoreGui
+        return espFolder
+    end
+
+    local function getESPColor(player)
+        if commandsConfig.ESPTeamColors and player.Team then
+            return player.Team.TeamColor.Color
+        end
+
+        return self.Theme.Accent or Color3.fromRGB(255, 170, 0)
+    end
+
+    local function removeESP(player)
+        local item = espObjects[player]
+        if not item then
+            return
+        end
+
+        if item.Highlight then
+            item.Highlight:Destroy()
+        end
+
+        if item.Billboard then
+            item.Billboard:Destroy()
+        end
+
+        espObjects[player] = nil
+    end
+
+    local function addESP(player)
+        if player == LocalPlayer then
+            return
+        end
+
+        local character = player.Character
+        local root = getRootPart(character)
+        local head = character and (character:FindFirstChild("Head") or root)
+        if not character or not root then
+            return
+        end
+
+        local existing = espObjects[player]
+        if existing and existing.Character == character then
+            existing.Highlight.FillColor = getESPColor(player)
+            existing.Highlight.OutlineColor = getESPColor(player)
+            existing.Billboard.Enabled = espEnabled and commandsConfig.ESPNames
+            if existing.Label then
+                existing.Label.Text = player.Name
+                existing.Label.TextColor3 = getESPColor(player)
+            end
+            return
+        end
+
+        removeESP(player)
+
+        local folder = getESPFolder()
+        local color = getESPColor(player)
+
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "MeerlyESPHighlight"
+        highlight.Adornee = character
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.FillColor = color
+        highlight.FillTransparency = 0.75
+        highlight.OutlineColor = color
+        highlight.OutlineTransparency = 0
+        highlight.Enabled = espEnabled
+        highlight.Parent = folder
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "MeerlyESPName"
+        billboard.Adornee = head
+        billboard.AlwaysOnTop = true
+        billboard.Enabled = espEnabled and commandsConfig.ESPNames
+        billboard.Size = UDim2.fromOffset(140, 34)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.Parent = folder
+
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.fromScale(1, 1)
+        label.Text = player.Name
+        label.TextColor3 = color
+        label.TextSize = 13
+        label.Font = Enum.Font.Code
+        label.TextStrokeTransparency = 0.35
+        label.Parent = billboard
+
+        espObjects[player] = {
+            Character = character,
+            Highlight = highlight,
+            Billboard = billboard,
+            Label = label,
+        }
+    end
+
+    local function refreshESP()
+        if not espEnabled then
+            for player in pairs(espObjects) do
+                removeESP(player)
+            end
+            return
+        end
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            addESP(player)
+        end
+    end
+
+    local function watchESPPlayer(player)
+        if espPlayerConnections[player] then
+            return
+        end
+
+        espPlayerConnections[player] = player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            if espEnabled then
+                addESP(player)
+            end
+        end)
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        watchESPPlayer(player)
+    end
+
+    trackConnection(Players.PlayerAdded:Connect(function(player)
+        watchESPPlayer(player)
+        if espEnabled then
+            task.defer(function()
+                addESP(player)
+            end)
+        end
+    end))
+
+    trackConnection(Players.PlayerRemoving:Connect(function(player)
+        removeESP(player)
+        if espPlayerConnections[player] then
+            espPlayerConnections[player]:Disconnect()
+            espPlayerConnections[player] = nil
+        end
+    end))
+
+    local function setESPEnabled(value)
+        espEnabled = value and true or false
+        refreshESP()
+    end
+
+    movement:CreateToggle({
+        Text = "Fly",
+        Default = false,
+        Callback = function(value)
+            if value then
+                startFly()
+                self.Logger:Info("Fly enabled.", "Commands")
+            else
+                stopFly()
+                self.Logger:Info("Fly disabled.", "Commands")
+            end
+        end,
+    })
+
+    movement:CreateSlider({
+        Text = "Fly Speed",
+        Min = 10,
+        Max = 250,
+        Default = flySpeed,
+        Increment = 5,
+        Callback = function(value)
+            flySpeed = value
+            commandsConfig.FlySpeed = value
+            saveCommandsConfig()
+        end,
+    })
+
+    local walkToggle = movement:CreateToggle({
+        Text = "Walkspeed Changer",
+        Default = false,
+        Callback = function(value)
+            setWalkSpeedEnabled(value)
+            self.Logger:Info(value and "Walkspeed override enabled." or "Walkspeed override disabled.", "Commands")
+        end,
+    })
+
+    local walkSlider = movement:CreateSlider({
+        Text = "WalkSpeed",
+        Min = 16,
+        Max = 250,
+        Default = walkSpeedValue,
+        Increment = 1,
+        Callback = function(value)
+            walkSpeedValue = value
+            commandsConfig.WalkSpeed = value
+            saveCommandsConfig()
+            if walkSpeedEnabled then
+                applyWalkSpeed()
+            end
+        end,
+    })
+
+    movement:CreateButton({
+        Text = "Reset WalkSpeed",
+        Callback = function()
+            walkToggle.Set(false, true)
+            setWalkSpeedEnabled(false)
+            walkSpeedValue = 16
+            commandsConfig.WalkSpeed = 16
+            walkSlider.Set(16, true)
+            saveCommandsConfig()
+            self.Logger:Info("WalkSpeed reset.", "Commands")
+        end,
+    })
+
+    movement:CreateToggle({
+        Text = "Noclip",
+        Default = false,
+        Callback = function(value)
+            setNoclipEnabled(value)
+            self.Logger:Info(value and "Noclip enabled." or "Noclip disabled.", "Commands")
+        end,
+    })
+
+    movement:CreateToggle({
+        Text = "Infinite Jump",
+        Default = false,
+        Callback = function(value)
+            infiniteJumpEnabled = value and true or false
+            self.Logger:Info(infiniteJumpEnabled and "Infinite jump enabled." or "Infinite jump disabled.", "Commands")
+        end,
+    })
+
+    visuals:CreateToggle({
+        Text = "ESP",
+        Default = false,
+        Callback = function(value)
+            setESPEnabled(value)
+            self.Logger:Info(value and "ESP enabled." or "ESP disabled.", "Commands")
+        end,
+    })
+
+    visuals:CreateToggle({
+        Text = "ESP Team Colors",
+        Default = commandsConfig.ESPTeamColors,
+        Callback = function(value)
+            commandsConfig.ESPTeamColors = value and true or false
+            saveCommandsConfig()
+            refreshESP()
+        end,
+    })
+
+    visuals:CreateToggle({
+        Text = "ESP Names",
+        Default = commandsConfig.ESPNames,
+        Callback = function(value)
+            commandsConfig.ESPNames = value and true or false
+            saveCommandsConfig()
+            refreshESP()
+        end,
+    })
+
+    external:CreateButton({
+        Text = "Open Infinite Yield",
+        Callback = function()
+            if type(loadstring) ~= "function" then
+                self.Logger:Error("loadstring is not available in this executor.", "Commands")
+                return
+            end
+
+            self.Logger:Info("Loading Infinite Yield.", "Commands")
+            local ok, source = pcall(function()
+                return game:HttpGet("https://obj.wearedevs.net/2/scripts/Infinite%20Yield.lua")
+            end)
+
+            if not ok or type(source) ~= "string" then
+                self.Logger:Error("Could not fetch Infinite Yield: " .. tostring(source), "Commands")
+                return
+            end
+
+            local chunk, err = loadstring(source)
+            if type(chunk) ~= "function" then
+                self.Logger:Error("Infinite Yield failed to compile: " .. tostring(err), "Commands")
+                return
+            end
+
+            local ran, result = pcall(chunk)
+            if not ran then
+                self.Logger:Error("Infinite Yield failed: " .. tostring(result), "Commands")
+                return
+            end
+
+            self.Logger:Info("Infinite Yield loaded.", "Commands")
+        end,
+    })
+
+    self:OnKill(function()
+        stopFly()
+        setWalkSpeedEnabled(false)
+        setNoclipEnabled(false)
+        infiniteJumpEnabled = false
+        setESPEnabled(false)
+
+        for player, connection in pairs(espPlayerConnections) do
+            if connection then
+                connection:Disconnect()
+            end
+            espPlayerConnections[player] = nil
+        end
+
+        if espFolder then
+            espFolder:Destroy()
+            espFolder = nil
+        end
+
+        for _, callback in ipairs(cleanupCallbacks) do
+            callback()
+        end
+    end)
+
+    return tab
+end
+
 function UIClass:CreateThemeTab()
     if self.Tabs.Theme then
         return self.Tabs.Theme
@@ -1587,6 +2206,10 @@ function MUILib.new(config)
 
     self.Logger = LoggerClass.new(self)
     self:_createBase(config)
+
+    if config.CommandsTab ~= false then
+        self:CreateCommandsTab()
+    end
 
     if config.ThemeTab ~= false then
         self:CreateThemeTab()
