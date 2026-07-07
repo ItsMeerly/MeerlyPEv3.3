@@ -27,11 +27,11 @@ Launcher.Games = {
             Url = Launcher.RepositoryRoot .. "/MeerlyON2.lua",
             Enabled = true,
         },
-        -- [1234567890] = {
-        --     Name = "Example Place",
-        --     Url = Launcher.RepositoryRoot .. "/Games/Example.lua",
-        --     Enabled = true,
-        -- },
+        [3678761576] = {
+        Name = "Entrenched WW1",
+        Url = Launcher.RepositoryRoot .. "/MEWW1.lua",
+        Enabled = true,
+        },
     },
     Universes = {
         [127380660530951] = {
@@ -43,6 +43,12 @@ Launcher.Games = {
             Name = "Superstore Sleep-Over",
             Url = Launcher.RepositoryRoot .. "/MeerlyON2.lua",
             Enabled = true,
+        },
+                },
+        [3678761576] = {
+        Name = "Entrenched WW1",
+        Url = Launcher.RepositoryRoot .. "/MEWW1.lua",
+        Enabled = true,
         },
         -- [1234567890] = {
         --     Name = "Example Universe",
