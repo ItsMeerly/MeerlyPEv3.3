@@ -34,7 +34,7 @@ Launcher.Games = {
         },
         [132154372694491] = {
             Name = "Clean The School!",
-            url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
+            Url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
             Enabled = true,
         },
     },
@@ -56,7 +56,7 @@ Launcher.Games = {
         },
         [10456038371] = {
             Name = "Clean The School!",
-            url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
+            Url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
             Enabled = true,
         },
     },
