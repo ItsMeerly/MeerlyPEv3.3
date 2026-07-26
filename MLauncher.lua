@@ -32,6 +32,11 @@ Launcher.Games = {
             Url = Launcher.RepositoryRoot .. "/MEWW1.lua",
             Enabled = true,
         },
+        [132154372694491] = {
+            Name = "Clean The School!",
+            url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
+            Enabled = true,
+        },
     },
     Universes = {
         [127380660530951] = {
@@ -47,6 +52,11 @@ Launcher.Games = {
         [1281592938] = {
             Name = "Entrenched WW1",
             Url = Launcher.RepositoryRoot .. "/MEWW1.lua",
+            Enabled = true,
+        },
+        [10456038371] = {
+            Name = "Clean The School!",
+            url = Launcher.RepositoryRoot .. "/MeerlyCAS.lua",
             Enabled = true,
         },
     },
